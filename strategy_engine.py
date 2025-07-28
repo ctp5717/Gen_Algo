@@ -21,7 +21,6 @@ Design Philosophy:
 """
 
 import pandas as pd
-import numpy as np
 import indicator_library as ind_lib # Import our toolbox of indicators
 
 # A mapping dictionary to dynamically call indicator functions.

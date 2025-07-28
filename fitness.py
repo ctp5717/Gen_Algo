@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 import vectorbt as vbt
 import strategy_engine as engine
-import traceback
 import config
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
@@ -94,5 +93,5 @@ class FitnessEvaluator:
             return fitness_score if not np.isnan(fitness_score) else -1.0
 
         except Exception as e:
-            print(e)
+            print(f"Error in fitness evaluation: {e}")
             return -999.0

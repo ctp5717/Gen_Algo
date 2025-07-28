@@ -5,7 +5,6 @@ Analysis & Reporting Module
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 
-import pandas as pd
 import vectorbt as vbt
 import config
 import data_loader
