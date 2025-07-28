@@ -8,18 +8,20 @@ Configuration File for the GA Trading Framework
 # Import necessary libraries for date calculation
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+import os
 
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"
 
-# Add your Binance API Keys here.
-# KEEP THESE SECRET AND DO NOT SHARE THEM.
+# Binance API credentials are now loaded from environment variables so the
+# repository never contains sensitive information.  Provide empty-string
+# placeholders if the variables are not set.
 API_KEYS = {
     "binance": {
-        "tld": "us", # Use 'us' for Binance.US or 'com' for global
-        "api_key": "CrjkXtK4fAf2xbCtnUNICmH8PD6WtJupKQu6qApc5HNlPyz0xb0GuOpab7LvteIQ",
-        "api_secret": "6j5IWq4kb06lXTqWS6IowwwGLtKuoZZRbti8jEFdGGIy1RRN2Fj65Y4JvAuSqgGd"
+        "tld": os.environ.get("BINANCE_TLD", "us"),
+        "api_key": os.environ.get("BINANCE_API_KEY", ""),
+        "api_secret": os.environ.get("BINANCE_API_SECRET", "")
     }
 }
 
