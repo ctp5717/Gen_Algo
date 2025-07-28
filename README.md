@@ -83,7 +83,7 @@ This is the main entry point of the application. It controls the entire end-to-e
 
 * **Key Responsibilities:**
     * **Initialization:** Imports all other modules and reads all settings from `config.py`.
-    * **Gene Parsing:** Runs the critical `parse_genes_from_config` function, which scans the `STRATEGY_RULES`, finds all active genes, and builds the necessary `gene_space` and `gene_map` data structures required by `PyGAD`.
+    * **Gene Parsing:** Uses the `parse_genes_from_config` utility from `gene_parser.py` to scan the `STRATEGY_RULES`, find all active genes, and build the necessary `gene_space` and `gene_map` data structures required by `PyGAD`.
     * **Data Loading:** Calls the `data_loader` to fetch the **training data**.
     * **GA Execution:** Configures and launches the `pygad.GA` instance, enabling parallel processing and hooking in our custom `fitness` function and `on_generation` progress bar.
     * **Results Display:** Prints a summary of the best solution found by the GA.

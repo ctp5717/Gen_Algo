@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
-import main
+from gene_parser import parse_genes_from_config
 
 
 def test_parse_genes_respects_is_active():
@@ -53,7 +53,7 @@ def test_parse_genes_respects_is_active():
         }
     }
 
-    gene_space, gene_map, gene_types = main.parse_genes_from_config(sample_rules)
+    gene_space, gene_map, gene_types = parse_genes_from_config(sample_rules)
 
     gene_names = [info['name'] for info in gene_map.values()]
 
