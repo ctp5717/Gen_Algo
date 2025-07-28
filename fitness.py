@@ -94,4 +94,5 @@ class FitnessEvaluator:
             return fitness_score if not np.isnan(fitness_score) else -1.0
 
         except Exception as e:
+            print(e)
             return -999.0
