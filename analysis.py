@@ -11,6 +11,7 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
+import traceback
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """
