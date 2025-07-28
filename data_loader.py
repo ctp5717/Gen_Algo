@@ -13,7 +13,6 @@ import os
 import pandas as pd
 import yfinance as yf
 from binance.client import Client
-import pytz
 import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
