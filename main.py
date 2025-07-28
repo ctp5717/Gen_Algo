@@ -16,7 +16,7 @@ import data_loader
 import fitness
 import analysis
 
-# The parse_genes_from_config function remains the same.
+# parse_genes_from_config now honors each rule's 'is_active' flag.
 def parse_genes_from_config(rules: dict):
     """
     This version is corrected to respect the 'is_active' flag for all rules.
