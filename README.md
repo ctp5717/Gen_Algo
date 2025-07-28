@@ -28,7 +28,7 @@ Of course. Here is a comprehensive breakdown of each file in our project and its
 This is the single most important file for the user. It is the central "control panel" for the entire application, designed so that you can run vastly different experiments without ever touching the core logic files.
 
 * **Key Responsibilities:**
-    * **Data Source Selection:** Sets the `DATA_SOURCE` (`binance` or `yfinance`) and holds the necessary `API_KEYS`.
+    * **Data Source Selection:** Sets the `DATA_SOURCE` (`binance` or `yfinance`) and reads API credentials from environment variables.
     * **Asset & Timeframe:** Defines which asset to test (`SELECTED_ASSET_NAME`) and at what resolution (`TIMEFRAME`).
     * **Dynamic Date Calculation:** Intelligently calculates the rolling `TRAINING_PERIOD` and `VALIDATION_PERIOD` based on the current date and the selected timeframe, automatically respecting the data history limits of the chosen API.
     * **Strategy Definition:** Contains the `STRATEGY_RULES` dictionary, the heart of the system. This is where you build your trading strategy by combining indicator rules, setting their parameters, defining which parameters should be optimized as "genes," and using `is_active` flags to turn rules on or off.
@@ -141,9 +141,14 @@ This module's purpose is to provide a final, unbiased report on the performance 
 
 4.  **Add API Keys:**
 
-      * Open the `config.py` file.
-      * Find the `API_KEYS` dictionary.
-      * Enter your **Binance.US** API key and secret.
+      * Set the following environment variables before running the framework:
+
+        - `BINANCE_API_KEY`
+        - `BINANCE_API_SECRET`
+        - `BINANCE_TLD` (optional, defaults to `us`)
+
+      The `config.py` file automatically reads these values so no manual editing
+      of the source code is required.
 
 ### How to Use
 
