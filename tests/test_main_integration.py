@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
-import main
+import main  # noqa: E402
 
 
 def test_main_runs(monkeypatch):
@@ -34,7 +34,11 @@ def test_main_runs(monkeypatch):
     gene_space = [{'low': 0, 'high': 1}]
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
     gene_types = [float]
-    monkeypatch.setattr(main, 'parse_genes_from_config', lambda *a, **k: (gene_space, gene_map, gene_types))
+
+    def parser_stub(*_args, **_kwargs):
+        return gene_space, gene_map, gene_types
+
+    monkeypatch.setattr(main, 'parse_genes_from_config', parser_stub)
 
     # Dummy GA class to bypass heavy optimisation
     class DummyGA:
@@ -73,8 +77,10 @@ def test_main_runs(monkeypatch):
     monkeypatch.setattr(main.config, 'GA_POPULATION_SIZE', 1, raising=False)
     monkeypatch.setattr(main.config, 'GA_PARENTS_MATING', 1, raising=False)
     monkeypatch.setattr(main.config, 'GA_MUTATION_NUM_GENES', 1, raising=False)
-    monkeypatch.setattr(main.config, 'TRAINING_PERIOD', {'start': '2020-01-01', 'end': '2020-01-02'}, raising=False)
-    monkeypatch.setattr(main.config, 'VALIDATION_PERIOD', {'start': '2020-01-02', 'end': '2020-01-03'}, raising=False)
+    train_period = {'start': '2020-01-01', 'end': '2020-01-02'}
+    valid_period = {'start': '2020-01-02', 'end': '2020-01-03'}
+    monkeypatch.setattr(main.config, 'TRAINING_PERIOD', train_period, raising=False)
+    monkeypatch.setattr(main.config, 'VALIDATION_PERIOD', valid_period, raising=False)
     monkeypatch.setattr(main.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
