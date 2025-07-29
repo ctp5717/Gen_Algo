@@ -102,5 +102,13 @@ def main():
         print(f"\nAn error occurred during the analysis phase: {e}")
         traceback.print_exc()
 
+    if getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False):
+        try:
+            import walk_forward
+            walk_forward.run_walk_forward_validation()
+        except Exception as e:
+            print(f"An error occurred during walk-forward validation: {e}")
+            traceback.print_exc()
+
 if __name__ == "__main__":
     main()
