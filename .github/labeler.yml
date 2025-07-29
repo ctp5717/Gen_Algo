@@ -1,0 +1,11 @@
+python:
+  - '**/*.py'
+
+documentation:
+  - '**/*.md'
+
+tests:
+  - 'tests/**'
+
+ci:
+  - '.github/workflows/**'
