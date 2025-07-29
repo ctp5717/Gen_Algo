@@ -72,7 +72,7 @@ def run_walk_forward_validation():
             gene_space=gene_space,
             gene_type=gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
-            fitness_func=evaluator,
+            fitness_func=evaluator.__call__,
             parallel_processing=['process', 1],
         )
         ga_instance.run()
