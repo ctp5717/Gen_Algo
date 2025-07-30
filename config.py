@@ -101,7 +101,7 @@ VALIDATION_PERIOD = {"start": training_end_date.strftime('%Y-%m-%d'),"end": toda
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
 GA_POPULATION_SIZE = 50
-GA_NUM_GENERATIONS = 25
+GA_NUM_GENERATIONS = 10
 GA_PARENTS_MATING = 13
 GA_MUTATION_NUM_GENES = 1
 
