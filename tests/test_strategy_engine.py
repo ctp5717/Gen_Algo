@@ -11,8 +11,8 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
-import indicator_library
-import strategy_engine
+import indicator_library  # noqa: E402
+import strategy_engine  # noqa: E402
 
 
 def test_process_strategy_rules_simple(monkeypatch):
@@ -25,8 +25,11 @@ def test_process_strategy_rules_simple(monkeypatch):
     }, index=pd.date_range('2020-01-01', periods=5, freq='D'))
 
     # Patch indicator calculations with simple deterministic series
-    ema_func = lambda ohlc, period: ohlc['Close'] - 1
-    rsi_func = lambda ohlc, period: pd.Series(60, index=ohlc.index)
+    def ema_func(ohlc, period):
+        return ohlc['Close'] - 1
+
+    def rsi_func(ohlc, period):
+        return pd.Series(60, index=ohlc.index)
     monkeypatch.setattr(indicator_library, 'calculate_ema', ema_func)
     monkeypatch.setattr(indicator_library, 'calculate_rsi', rsi_func)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, 'ema', ema_func)

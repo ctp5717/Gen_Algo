@@ -32,7 +32,10 @@ def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str
     klines = client.get_historical_klines(ticker.replace('-',''), interval, start_str=start_date, end_str=end_date)
     
     if not klines:
-        print(f"No data returned from Binance for {ticker}. It may not be listed on Binance.US or have history in this range.")
+        print(
+            "No data returned from Binance for "
+            f"{ticker}. It may not be listed on Binance.US or have history in this range."
+        )
         return pd.DataFrame()
 
     # Create a pandas DataFrame

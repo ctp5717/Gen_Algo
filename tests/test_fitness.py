@@ -10,8 +10,8 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
-import pandas as pd
-import fitness
+import pandas as pd  # noqa: E402
+import fitness  # noqa: E402
 
 
 def test_exception_logging(capsys, monkeypatch):

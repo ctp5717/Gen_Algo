@@ -33,7 +33,11 @@ def on_generation(ga_instance):
     est_time_remaining = (elapsed_time / generation) * (total_generations - generation) if generation > 0 else 0
     
     # Use carriage return `\r` and `end=''` to keep the output on a single, updating line.
-    print(f"Generation {generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s", end='\r')
+    print(
+        "Generation "
+        f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s",
+        end="\r",
+    )
 
 def main():
     """ The main execution function. """
@@ -43,7 +47,10 @@ def main():
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
 
-    print(f"Loading TRAINING data from {config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}...")
+    print(
+        "Loading TRAINING data from "
+        f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
+    )
     ohlc_data = data_loader.get_data(
         ticker=config.TICKER,
         start_date=config.TRAINING_PERIOD['start'],
