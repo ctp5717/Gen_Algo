@@ -93,15 +93,29 @@ if DATA_SOURCE == 'binance':
     # Convert "BTCUSD" -> "BTCUSDT" to ensure sufficient historical data.
     if TICKER.endswith('USD') and not TICKER.endswith('USDT'):
         TICKER = TICKER[:-3] + 'USDT'
-TRAINING_PERIOD = {"start": training_start_date.strftime('%Y-%m-%d'),"end": training_end_date.strftime('%Y-%m-%d')}
-VALIDATION_PERIOD = {"start": training_end_date.strftime('%Y-%m-%d'),"end": today.strftime('%Y-%m-%d')}
+TRAINING_PERIOD = {
+    "start": training_start_date.strftime("%Y-%m-%d"),
+    "end": training_end_date.strftime("%Y-%m-%d"),
+}
+VALIDATION_PERIOD = {
+    "start": training_end_date.strftime("%Y-%m-%d"),
+    "end": today.strftime("%Y-%m-%d"),
+}
+
+# Walk-forward validation will leverage a longer history than the main
+# optimisation phase.  Start three years back from today regardless of the
+# optimisation window above.
+walk_forward_start_date = (today - relativedelta(years=3)).strftime("%Y-%m-%d")
 
 WALK_FORWARD_SETTINGS = {
     "enabled": ENABLE_WALK_FORWARD_VALIDATION,
     "total_data_range": {
-        "start": TRAINING_PERIOD["start"],
+        # Use the extended three year lookback for walk-forward windows
+        "start": walk_forward_start_date,
         "end": VALIDATION_PERIOD["end"],
     },
+    # Each window trains on one year of data and tests on the following three
+    # months.
     "training_period_length": 12,  # months
     "validation_period_length": 3,
 }

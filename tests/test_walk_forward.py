@@ -45,6 +45,18 @@ def test_generate_periods_window_consistency():
             assert p['train_start'] == expected_start
 
 
+def test_three_year_history_yields_more_windows():
+    start = datetime(2020, 1, 1)
+    end = datetime(2023, 1, 1)
+    periods = walk_forward._generate_periods(start, end, train_months=12, test_months=3)
+    assert len(periods) == 8
+
+
+def test_config_walk_forward_start_date():
+    expected_start = (walk_forward.config.today - relativedelta(years=3)).strftime("%Y-%m-%d")
+    assert walk_forward.config.WALK_FORWARD_SETTINGS["total_data_range"]["start"] == expected_start
+
+
 def test_walk_forward_uses_all_cores(monkeypatch):
     """GA in walk-forward should leverage all available CPU cores"""
     import os
