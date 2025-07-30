@@ -68,6 +68,8 @@ def run_walk_forward_validation():
         print("Insufficient data for the requested walk-forward windows.")
         return
 
+    results = []
+
     for idx, p in enumerate(periods, start=1):
         print(f"\n--- Window {idx} ---")
         print(f"Train: {p['train_start'].date()} -> {p['train_end'].date()}")
@@ -93,6 +95,10 @@ def run_walk_forward_validation():
         ga_instance.run()
         best_solution, best_fitness, _ = ga_instance.best_solution()
         print(f"Best training fitness: {best_fitness:.4f}")
+
+        winning_params = {
+            gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
+        }
 
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(test_data, rules)
@@ -134,6 +140,52 @@ def run_walk_forward_validation():
             freq=config.TIMEFRAME,
         )
         stats = portfolio.stats()
-        tr = stats['Total Return [%]']
-        dd = stats['Max Drawdown [%]']
+        tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')
+        dd = stats['Max Drawdown [%]'] if isinstance(stats, dict) else stats.get('Max Drawdown [%]')
+        sharpe = stats.get('Sharpe Ratio') if isinstance(stats, dict) else stats.get('Sharpe Ratio')
+        sortino = stats.get('Sortino Ratio') if isinstance(stats, dict) else stats.get('Sortino Ratio')
+        win_rate = stats.get('Win Rate [%]') if isinstance(stats, dict) else stats.get('Win Rate [%]')
         print(f"Test Return: {tr:.2f}% | Max DD: {dd:.2f}%")
+        print("Winning Parameters:")
+        for param_name, param_value in winning_params.items():
+            print(f"  {param_name}: {param_value}")
+
+        results.append({
+            'Total Return [%]': tr,
+            'Max Drawdown [%]': dd,
+            'Sharpe Ratio': sharpe,
+            'Sortino Ratio': sortino,
+            'Win Rate [%]': win_rate,
+            'Params': winning_params,
+        })
+
+    if not results:
+        print("\nNo walk-forward runs produced trades.")
+        return None
+
+    results_df = pd.DataFrame(results)
+    avg_return = results_df['Total Return [%]'].mean()
+    std_return = results_df['Total Return [%]'].std()
+    avg_sharpe = results_df['Sharpe Ratio'].mean()
+    avg_sortino = results_df['Sortino Ratio'].mean()
+    avg_win = results_df['Win Rate [%]'].mean()
+    total_compounded_return = (results_df['Total Return [%]'] / 100 + 1).prod() - 1
+
+    print("\n=== Walk-Forward Summary ===")
+    print(results_df)
+    print("\nAggregate Metrics:")
+    print(f"Average Return: {avg_return:.2f}% (+/- {std_return:.2f}%)")
+    print(f"Average Sharpe: {avg_sharpe:.2f}")
+    print(f"Average Sortino: {avg_sortino:.2f}")
+    print(f"Average Win Rate: {avg_win:.2f}%")
+    print(f"Total Compounded Return: {total_compounded_return * 100:.2f}%")
+
+    return {
+        'folds': results_df,
+        'average_return': avg_return,
+        'std_return': std_return,
+        'average_sharpe': avg_sharpe,
+        'average_sortino': avg_sortino,
+        'average_win_rate': avg_win,
+        'total_compounded_return': total_compounded_return,
+    }
