@@ -32,9 +32,12 @@ import numpy as np
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
 # numpy releases expose only ``numpy.nan``. Importing pandas_ta without this
 # attribute raises ``ImportError: cannot import name 'NaN'``. To keep the
-# library working across numpy versions, ensure ``np.NaN`` exists.
+# library working across numpy versions, ensure ``np.NaN`` exists before
+# importing pandas_ta.
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
+
+import pandas_ta as ta
 
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
