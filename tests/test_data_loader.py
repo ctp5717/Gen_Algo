@@ -19,7 +19,7 @@ binance_mod.client = client_mod
 sys.modules.setdefault('binance', binance_mod)
 sys.modules.setdefault('binance.client', client_mod)
 
-import data_loader
+import data_loader  # noqa: E402
 
 
 def test_get_data_uses_cache(monkeypatch):

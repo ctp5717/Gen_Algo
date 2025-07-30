@@ -72,8 +72,10 @@ def run_walk_forward_validation():
         print(f"\n--- Window {idx} ---")
         print(f"Train: {p['train_start'].date()} -> {p['train_end'].date()}")
         print(f"Test : {p['test_start'].date()} -> {p['test_end'].date()}")
+        # fmt: off
         train_data = all_data.loc[p['train_start']:p['train_end']]
         test_data = all_data.loc[p['test_start']:p['test_end']]
+        # fmt: on
 
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
         evaluator = fitness.FitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map)
@@ -102,9 +104,21 @@ def run_walk_forward_validation():
         tsl_rule = exit_rules.get('trailing_stop', {})
         tp_rule = exit_rules.get('take_profit', {})
 
-        sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
-        sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
-        tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
+        sl_stop = (
+            sl_rule.get("params", {}).get("value")
+            if sl_rule.get("is_active", False)
+            else None
+        )
+        sl_trail = (
+            tsl_rule.get("params", {}).get("value")
+            if tsl_rule.get("is_active", False)
+            else None
+        )
+        tp_stop = (
+            tp_rule.get("params", {}).get("value")
+            if tp_rule.get("is_active", False)
+            else None
+        )
 
         time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_exit = time_exit.reindex(entries.index, fill_value=False)
@@ -123,4 +137,3 @@ def run_walk_forward_validation():
         tr = stats['Total Return [%]']
         dd = stats['Max Drawdown [%]']
         print(f"Test Return: {tr:.2f}% | Max DD: {dd:.2f}%")
-

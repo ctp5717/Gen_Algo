@@ -14,6 +14,7 @@ sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 import walk_forward  # noqa: E402
 
 
+
 def test_generate_periods_produces_windows():
     start = datetime(2020, 1, 1)
     end = datetime(2021, 6, 1)
