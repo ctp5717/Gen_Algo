@@ -61,7 +61,7 @@ CRYPTO_UNIVERSE = {
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
 
-SELECTED_ASSET_NAME = "Bitcoin"
+SELECTED_ASSET_NAME = "Solana"
 
 # Set your desired timeframe here. This now controls everything.
 TIMEFRAME = "15m"
@@ -101,16 +101,16 @@ VALIDATION_PERIOD = {"start": training_end_date.strftime('%Y-%m-%d'),"end": toda
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
 GA_POPULATION_SIZE = 50
-GA_NUM_GENERATIONS = 10
+GA_NUM_GENERATIONS = 25
 GA_PARENTS_MATING = 13
-GA_MUTATION_NUM_GENES = 1
+GA_MUTATION_NUM_GENES = 2
 
 # For serious, overnight "Discovery" runs, comment out the block above
 # and uncomment the block below.
 # GA_POPULATION_SIZE = 200
 # GA_NUM_GENERATIONS = 100
 # GA_PARENTS_MATING = 50
-# GA_MUTATION_NUM_GENES = 2 # Mutate more genes with a more complex strategy
+# GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
