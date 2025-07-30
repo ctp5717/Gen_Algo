@@ -117,7 +117,7 @@ def main():
     if wf_enabled:
         try:
             import walk_forward
-            walk_forward.run_walk_forward_validation()
+            walk_forward.run_walk_forward_validation(initial_champions=[best_solution])
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")
             traceback.print_exc()

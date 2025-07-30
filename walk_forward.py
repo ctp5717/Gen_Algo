@@ -4,6 +4,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 import os
+import numpy as np
 import pygad
 import vectorbt as vbt
 
@@ -41,8 +42,15 @@ def _generate_periods(start: datetime, end: datetime, train_months: int, test_mo
     return periods
 
 
-def run_walk_forward_validation():
-    """Execute walk-forward validation across the available data."""
+def run_walk_forward_validation(initial_champions=None):
+    """Execute walk-forward validation across the available data.
+
+    Parameters
+    ----------
+    initial_champions : list[list[float]] or None
+        Optional list of solutions to seed the first population. Each solution
+        should be an iterable of gene values matching the strategy's genes.
+    """
     print("\n=== Running Walk-Forward Validation ===")
     num_cores = os.cpu_count()
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
@@ -78,6 +86,7 @@ def run_walk_forward_validation():
         return
 
     results = []
+    champion_solutions = list(initial_champions or [])
 
     for idx, p in enumerate(periods, start=1):
         print(f"\n--- Window {idx} ---")
@@ -101,8 +110,19 @@ def run_walk_forward_validation():
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
         )
+        if champion_solutions and hasattr(ga_instance, "population"):
+            champs = np.array(champion_solutions, dtype=float)
+            if champs.ndim == 1:
+                champs = champs.reshape(1, -1)
+            if champs.shape[1] == ga_instance.population.shape[1]:
+                champs = champs[-config.GA_POPULATION_SIZE :]
+                num_champs = min(len(champs), ga_instance.population.shape[0])
+                ga_instance.population[:num_champs] = champs[:num_champs]
+                if hasattr(ga_instance, "initial_population"):
+                    ga_instance.initial_population[:num_champs] = champs[:num_champs]
         ga_instance.run()
         best_solution, best_fitness, _ = ga_instance.best_solution()
+        champion_solutions.append(best_solution)
         print(f"Best training fitness: {best_fitness:.4f}")
 
         winning_params = {
