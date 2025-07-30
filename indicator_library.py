@@ -27,6 +27,7 @@ To Add a New Indicator:
 
 import pandas as pd
 import numpy as np
+import pandas_ta as ta
 
 # -- Compatibility shim -------------------------------------------------------
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
