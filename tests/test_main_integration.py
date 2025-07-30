@@ -72,6 +72,7 @@ def test_main_runs(monkeypatch):
 
     # Simplify config to avoid walk forward validation and reduce parameters
     monkeypatch.setattr(main.config, 'ENABLE_WALK_FORWARD_VALIDATION', False, raising=False)
+    monkeypatch.setattr(main.config, 'WALK_FORWARD_SETTINGS', {'enabled': False}, raising=False)
     monkeypatch.setattr(main.config, 'FITNESS_WEIGHTS', {'min_trades': 0}, raising=False)
     monkeypatch.setattr(main.config, 'GA_NUM_GENERATIONS', 1, raising=False)
     monkeypatch.setattr(main.config, 'GA_POPULATION_SIZE', 1, raising=False)
