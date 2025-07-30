@@ -125,3 +125,89 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     walk_forward.run_walk_forward_validation()
 
     assert captured["parallel_processing"][1] == os.cpu_count()
+
+
+def test_walk_forward_returns_summary(monkeypatch):
+    """run_walk_forward_validation should return aggregate metrics"""
+    import pandas as pd
+    import types
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+
+    # Simplify gene parsing and fitness evaluation
+    monkeypatch.setattr(walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, []))
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, *a, **k):
+            return 1.0
+
+    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    monkeypatch.setattr(
+        walk_forward.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.Series([True, False], index=df.index),
+    )
+
+    class DummyPortfolio:
+        def stats(self):
+            return {
+                "Total Return [%]": 1.0,
+                "Max Drawdown [%]": 0.0,
+                "Sharpe Ratio": 1.0,
+                "Sortino Ratio": 1.0,
+                "Win Rate [%]": 50.0,
+            }
+
+    monkeypatch.setattr(
+        walk_forward.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+
+    summary = walk_forward.run_walk_forward_validation()
+
+    assert isinstance(summary, dict)
+    for key in ["average_return", "total_compounded_return", "folds"]:
+        assert key in summary
