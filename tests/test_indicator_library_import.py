@@ -14,3 +14,8 @@ def test_indicator_library_imports_pandas_ta(monkeypatch):
     import indicator_library
     importlib.reload(indicator_library)
     assert hasattr(indicator_library, 'ta'), "indicator_library should import pandas_ta as 'ta'"
+
+    # The module should ensure numpy.NaN exists for pandas_ta compatibility
+    import numpy as np
+    assert hasattr(np, "NaN"), "indicator_library should define numpy.NaN"
+    assert np.NaN is np.nan
