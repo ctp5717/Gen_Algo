@@ -46,10 +46,15 @@ def run_walk_forward_validation():
     print("\n=== Running Walk-Forward Validation ===")
     num_cores = os.cpu_count()
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
+    wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
+    date_range = wf_settings.get("total_data_range", {})
+    start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
+    end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
+
     all_data = data_loader.get_data(
         ticker=config.TICKER,
-        start_date=config.TRAINING_PERIOD['start'],
-        end_date=config.VALIDATION_PERIOD['end'],
+        start_date=start_date,
+        end_date=end_date,
         interval=config.TIMEFRAME,
     )
     if all_data.empty:
@@ -58,12 +63,16 @@ def run_walk_forward_validation():
 
     start = all_data.index[0]
     end = all_data.index[-1]
-    periods = _generate_periods(
-        start,
-        end,
-        config.WALK_FORWARD_TRAINING_MONTHS,
-        config.WALK_FORWARD_TEST_MONTHS,
+    train_months = wf_settings.get(
+        "training_period_length",
+        getattr(config, "WALK_FORWARD_TRAINING_MONTHS", 12),
     )
+    test_months = wf_settings.get(
+        "validation_period_length",
+        getattr(config, "WALK_FORWARD_TEST_MONTHS", 3),
+    )
+
+    periods = _generate_periods(start, end, train_months, test_months)
     if not periods:
         print("Insufficient data for the requested walk-forward windows.")
         return

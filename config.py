@@ -72,8 +72,6 @@ MAX_HOLD_DAYS = 7
 VALIDATION_MONTHS = 3
 DEFAULT_MAX_PERIOD = 200
 ENABLE_WALK_FORWARD_VALIDATION = True
-WALK_FORWARD_TRAINING_MONTHS = 12
-WALK_FORWARD_TEST_MONTHS = 3
 today = datetime.now()
 if 'h' in TIMEFRAME.lower() or 'm' in TIMEFRAME.lower():
     VALIDATION_BARS = 91 * (24 if 'h' in TIMEFRAME.lower() else 24 * (60 / int(TIMEFRAME.replace('m',''))))
@@ -97,6 +95,16 @@ if DATA_SOURCE == 'binance':
         TICKER = TICKER[:-3] + 'USDT'
 TRAINING_PERIOD = {"start": training_start_date.strftime('%Y-%m-%d'),"end": training_end_date.strftime('%Y-%m-%d')}
 VALIDATION_PERIOD = {"start": training_end_date.strftime('%Y-%m-%d'),"end": today.strftime('%Y-%m-%d')}
+
+WALK_FORWARD_SETTINGS = {
+    "enabled": ENABLE_WALK_FORWARD_VALIDATION,
+    "total_data_range": {
+        "start": TRAINING_PERIOD["start"],
+        "end": VALIDATION_PERIOD["end"],
+    },
+    "training_period_length": 12,  # months
+    "validation_period_length": 3,
+}
 
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
