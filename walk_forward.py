@@ -3,6 +3,7 @@
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import pandas as pd
+import os
 import pygad
 import vectorbt as vbt
 
@@ -43,6 +44,8 @@ def _generate_periods(start: datetime, end: datetime, train_months: int, test_mo
 def run_walk_forward_validation():
     """Execute walk-forward validation across the available data."""
     print("\n=== Running Walk-Forward Validation ===")
+    num_cores = os.cpu_count()
+    print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
     all_data = data_loader.get_data(
         ticker=config.TICKER,
         start_date=config.TRAINING_PERIOD['start'],
@@ -85,7 +88,7 @@ def run_walk_forward_validation():
             gene_type=gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
-            parallel_processing=['process', 1],
+            parallel_processing=['process', num_cores],
         )
         ga_instance.run()
         best_solution, best_fitness, _ = ga_instance.best_solution()
