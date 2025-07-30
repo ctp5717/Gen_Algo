@@ -109,7 +109,12 @@ def main():
         print(f"\nAn error occurred during the analysis phase: {e}")
         traceback.print_exc()
 
-    if getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False):
+    wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
+    wf_enabled = wf_settings.get(
+        "enabled",
+        getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False),
+    )
+    if wf_enabled:
         try:
             import walk_forward
             walk_forward.run_walk_forward_validation()
