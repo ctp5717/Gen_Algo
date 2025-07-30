@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+import pandas as pd
 import pygad
 import vectorbt as vbt
 
@@ -13,6 +14,15 @@ import fitness
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
+    """Generate rolling training and testing windows."""
+    # Ensure plain Python datetimes for relativedelta calculations
+    start = pd.to_datetime(start).to_pydatetime()
+    end = pd.to_datetime(end).to_pydatetime()
+
+    # Quick check to avoid an infinite loop when the dataset is too short
+    if start + relativedelta(months=train_months + test_months) > end:
+        return []
+
     periods = []
     current_start = start
     while True:
