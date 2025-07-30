@@ -195,14 +195,14 @@ STRATEGY_RULES = {
     },
     'exit_rules': {
         'stop_loss': {
-            'is_active': False, # Turn off regular stop to use trailing stop
+            'is_active': True, # Turn off regular stop to use trailing stop
             'type': 'percentage',
             'params': { # Correctly nested
                 'value': {'gene': 'stop_loss_pct', 'low': 0.01, 'high': 0.10, 'step': 0.005}
             }
         },
         'trailing_stop': {
-            'is_active': True, # Turn on trailing stop
+            'is_active': False, # Turn on trailing stop
             'type': 'percentage',
             'params': { # Correctly nested
                 'value': {'gene': 'tsl_pct', 'low': 0.01, 'high': 0.10, 'step': 0.005}
