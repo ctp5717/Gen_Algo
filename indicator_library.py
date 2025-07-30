@@ -4,7 +4,8 @@
 Indicator Library
 =================
 
-This script serves as the central "toolbox" for all technical indicators used in the trading framework.
+This script serves as the central "toolbox" for all technical indicators
+used in the trading framework.
 Each function in this file is responsible for calculating a specific indicator and returning its
 values as a pandas Series or DataFrame.
 
@@ -34,8 +35,6 @@ import numpy as np
 # library working across numpy versions, ensure ``np.NaN`` exists.
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
-
-import pandas_ta as ta
 
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """

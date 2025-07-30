@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
-from gene_parser import parse_genes_from_config
+from gene_parser import parse_genes_from_config  # noqa: E402
 
 
 def test_parse_genes_respects_is_active():
