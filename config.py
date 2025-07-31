@@ -77,8 +77,12 @@ if 'h' in TIMEFRAME.lower() or 'm' in TIMEFRAME.lower():
     VALIDATION_BARS = 91 * (24 if 'h' in TIMEFRAME.lower() else 24 * (60 / int(TIMEFRAME.replace('m',''))))
 else: VALIDATION_BARS = 91
 max_lookback_period = max(20, min(DEFAULT_MAX_PERIOD, int(VALIDATION_BARS - 2)))
-if TIMEFRAME == "1h": MAX_HOLD_PERIOD = MAX_HOLD_DAYS * 24
-else: MAX_HOLD_PERIOD = MAX_HOLD_DAYS
+if 'm' in TIMEFRAME.lower() or 'h' in TIMEFRAME.lower():
+    minutes = 60 if TIMEFRAME.endswith('h') else int(TIMEFRAME[:-1])
+    bars_per_day = int(24 * 60 / minutes)
+    MAX_HOLD_PERIOD = MAX_HOLD_DAYS * bars_per_day
+else:
+    MAX_HOLD_PERIOD = MAX_HOLD_DAYS
 training_years_daily, training_months_intraday = 3, 20
 training_end_date = today - relativedelta(months=VALIDATION_MONTHS)
 if TIMEFRAME in ['1d', '1wk', '1mo']:
