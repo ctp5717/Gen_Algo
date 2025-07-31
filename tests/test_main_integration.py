@@ -159,7 +159,16 @@ def test_main_uses_tuner(monkeypatch):
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
 
-    monkeypatch.setattr(main.tuner, 'find_best_hyperparameters', lambda *a, **k: {'sol_per_pop': 3, 'num_parents_mating': 2, 'mutation_num_genes': 1})
+    tuned_params = {
+        'sol_per_pop': 3,
+        'num_parents_mating': 2,
+        'mutation_num_genes': 1,
+    }
+    monkeypatch.setattr(
+        main.tuner,
+        'find_best_hyperparameters',
+        lambda *a, **k: tuned_params,
+    )
 
     main.main()
 

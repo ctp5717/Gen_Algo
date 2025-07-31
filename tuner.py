@@ -7,7 +7,6 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
-from gene_parser import parse_genes_from_config
 
 
 def _evaluate_on_validation(solution, gene_map):
