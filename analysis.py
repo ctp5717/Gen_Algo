@@ -11,6 +11,7 @@ import data_loader
 import fitness
 import strategy_engine as engine
 import traceback
+import matplotlib.pyplot as plt  # To display plots without blocking
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """
@@ -77,5 +78,9 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     print(stats[metrics_to_show].to_string())
 
     print("\nDisplaying equity curve plot for the validation period...")
-    fig = portfolio.plot(title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)")
+    # Enable interactive mode so the plot window does not block execution.
+    plt.ion()
+    fig = portfolio.plot(
+        title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
+    )
     fig.show()
