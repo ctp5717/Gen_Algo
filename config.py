@@ -124,8 +124,8 @@ WALK_FORWARD_SETTINGS = {
 # Use these settings for quick tests
 GA_POPULATION_SIZE = 50
 GA_NUM_GENERATIONS = 25
-GA_PARENTS_MATING = 13
-GA_MUTATION_NUM_GENES = 2
+GA_PARENTS_MATING = 20
+GA_MUTATION_NUM_GENES = 1
 
 # For serious, overnight "Discovery" runs, comment out the block above
 # and uncomment the block below.
@@ -138,9 +138,10 @@ GA_MUTATION_NUM_GENES = 2
 AUTO_TUNE_ENABLED = True
 GENERATIONS_PER_TUNE = 10
 HYPERPARAMETER_SEARCH_SPACE = [
-    {"sol_per_pop": 50, "num_parents_mating": 10, "mutation_num_genes": 1},
-    {"sol_per_pop": 100, "num_parents_mating": 20, "mutation_num_genes": 1},
+    {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1},
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
+    {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3},
+    {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4},
 ]
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
