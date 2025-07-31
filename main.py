@@ -10,6 +10,7 @@ import pprint
 import tuner
 import traceback
 import time  # <-- NEW: Import the time module
+import threading  # For running plots without blocking execution
 
 # Import our custom modules
 import config
@@ -112,7 +113,9 @@ def main():
         if gene_type == int: print(f"  - {gene_name}: {int(gene_value)}")
         else: print(f"  - {gene_name}: {gene_value:.4f}")
     print("\nDisplaying GA fitness evolution plot...")
-    ga_instance.plot_fitness()
+    # Plot in a separate thread so the script doesn't pause waiting for the
+    # matplotlib window to close.
+    threading.Thread(target=ga_instance.plot_fitness, daemon=True).start()
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)
