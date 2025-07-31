@@ -10,6 +10,7 @@ import pprint
 import tuner
 import traceback
 import time  # <-- NEW: Import the time module
+import matplotlib.pyplot as plt  # For non-blocking plot display
 
 # Import our custom modules
 import config
@@ -112,6 +113,8 @@ def main():
         if gene_type == int: print(f"  - {gene_name}: {int(gene_value)}")
         else: print(f"  - {gene_name}: {gene_value:.4f}")
     print("\nDisplaying GA fitness evolution plot...")
+    # Enable interactive mode so the plot window does not block execution.
+    plt.ion()
     ga_instance.plot_fitness()
 
     try:
