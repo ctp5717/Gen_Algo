@@ -76,7 +76,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             sol_per_pop=params["sol_per_pop"],
             num_genes=len(gene_space),
             gene_space=gene_space,
-            gene_type=gene_types,
+            gene_type=list(gene_types),
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
