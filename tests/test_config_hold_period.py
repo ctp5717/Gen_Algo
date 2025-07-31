@@ -11,10 +11,10 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
+
 def test_hold_period_converts_days_to_bars(monkeypatch):
     sys.modules.pop('config', None)
     import config
     monkeypatch.setattr(config, 'TIMEFRAME', '15m', raising=False)
     importlib.reload(config)
     assert config.MAX_HOLD_PERIOD == 14 * 96
-
