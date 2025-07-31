@@ -223,3 +223,30 @@ def test_walk_forward_returns_summary(monkeypatch):
     assert isinstance(summary, dict)
     for key in ["average_return", "total_compounded_return", "folds"]:
         assert key in summary
+
+
+def test_update_champion_pool_logic(monkeypatch, capsys):
+    settings = {
+        "survival_threshold": 0.5,
+        "cloning_threshold": 1.0,
+        "num_clones": 2,
+        "clone_mutation_rate": 0.0,
+    }
+    gene_space = [{"low": 0, "high": 1, "step": 1}]
+
+    pool = []
+    # Discard case
+    pool = walk_forward._update_champion_pool(pool, [0], 0.1, gene_space, settings)
+    assert pool == []
+    assert "discarded" in capsys.readouterr().out.lower()
+
+    # Keep case
+    pool = walk_forward._update_champion_pool(pool, [0], 0.7, gene_space, settings)
+    assert len(pool) == 1
+    assert "kept" in capsys.readouterr().out.lower()
+
+    # Clone case
+    pool = walk_forward._update_champion_pool(pool, [1], 1.2, gene_space, settings)
+    assert len(pool) == 1 + 1 + settings["num_clones"]
+    out = capsys.readouterr().out.lower()
+    assert "cloning" in out
