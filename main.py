@@ -7,8 +7,9 @@ Main Application Orchestrator for the GA Trading Framework
 import os
 import pygad
 import pprint
+import tuner
 import traceback
-import time # <-- NEW: Import the time module
+import time  # <-- NEW: Import the time module
 
 # Import our custom modules
 import config
@@ -69,17 +70,27 @@ def main():
     )
     fitness_function = fitness_evaluator.__call__
 
+    if getattr(config, "AUTO_TUNE_ENABLED", False):
+        tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)
+        sol_per_pop = tuned.get("sol_per_pop", config.GA_POPULATION_SIZE) if tuned else config.GA_POPULATION_SIZE
+        num_parents_mating = tuned.get("num_parents_mating", config.GA_PARENTS_MATING) if tuned else config.GA_PARENTS_MATING
+        mutation_num_genes = tuned.get("mutation_num_genes", config.GA_MUTATION_NUM_GENES) if tuned else config.GA_MUTATION_NUM_GENES
+    else:
+        sol_per_pop = config.GA_POPULATION_SIZE
+        num_parents_mating = config.GA_PARENTS_MATING
+        mutation_num_genes = config.GA_MUTATION_NUM_GENES
+
     print("Initializing and running the Genetic Algorithm in parallel...")
     global start_time; start_time = time.time() # Start the timer right before the GA run
-    
+
     ga_instance = pygad.GA(
         num_generations=config.GA_NUM_GENERATIONS,
-        num_parents_mating=config.GA_PARENTS_MATING,
-        sol_per_pop=config.GA_POPULATION_SIZE,
+        num_parents_mating=num_parents_mating,
+        sol_per_pop=sol_per_pop,
         num_genes=len(gene_space),
         gene_space=gene_space,
         gene_type=gene_types,
-        mutation_num_genes=config.GA_MUTATION_NUM_GENES,
+        mutation_num_genes=mutation_num_genes,
         fitness_func=fitness_function,
         parallel_processing=['process', num_cores],
         # --- NEW: Pass the callback function to the GA instance ---
