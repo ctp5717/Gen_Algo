@@ -61,14 +61,14 @@ CRYPTO_UNIVERSE = {
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
 
-SELECTED_ASSET_NAME = "Solana"
+SELECTED_ASSET_NAME = "Dogecoin"
 
 # Set your desired timeframe here. This now controls everything.
 TIMEFRAME = "15m"
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
-MAX_HOLD_DAYS = 7
+MAX_HOLD_DAYS = 14
 VALIDATION_MONTHS = 3
 DEFAULT_MAX_PERIOD = 200
 ENABLE_WALK_FORWARD_VALIDATION = True
@@ -131,17 +131,17 @@ GA_MUTATION_NUM_GENES = 2
 # and uncomment the block below.
 # GA_POPULATION_SIZE = 200
 # GA_NUM_GENERATIONS = 100
+# GA_PARENTS_MATING = 50
+# GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
+
 # --- AUTO-TUNER SETTINGS ---
-AUTO_TUNE_ENABLED = False
+AUTO_TUNE_ENABLED = True
 GENERATIONS_PER_TUNE = 10
 HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 50, "num_parents_mating": 10, "mutation_num_genes": 1},
     {"sol_per_pop": 100, "num_parents_mating": 20, "mutation_num_genes": 1},
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
 ]
-
-# GA_PARENTS_MATING = 50
-# GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
