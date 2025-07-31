@@ -177,7 +177,7 @@ def test_main_uses_tuner(monkeypatch):
     assert captured['mutation_num_genes'] == 1
 
 
-def test_fitness_plot_runs_in_thread(monkeypatch):
+def test_fitness_plot_non_blocking(monkeypatch):
     df = pd.DataFrame(
         {
             'Open': [1, 2],
@@ -243,21 +243,17 @@ def test_fitness_plot_runs_in_thread(monkeypatch):
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
 
-    started = {}
+    ion_called = {}
 
-    class DummyThread:
-        def __init__(self, target=None, args=None, kwargs=None, **_):
-            started['target'] = target
-
-        def start(self):
-            started['started'] = True
-            if started['target']:
-                started['target']()
-
-    monkeypatch.setattr(main, 'threading', types.SimpleNamespace(Thread=DummyThread))
+    monkeypatch.setattr(
+        main,
+        'plt',
+        types.SimpleNamespace(
+            ion=lambda: ion_called.setdefault('ion', True)
+        ),
+    )
 
     main.main()
 
-    assert started['started']
-    assert started['target'].__name__ == 'plot_fitness'
+    assert ion_called['ion']
     assert events['plot_called']

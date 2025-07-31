@@ -12,7 +12,7 @@ sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 import analysis  # noqa: E402
 
 
-def test_run_champion_analysis_uses_thread(monkeypatch):
+def test_run_champion_analysis_non_blocking(monkeypatch):
     df = pd.DataFrame({
         'Open': [1, 2],
         'High': [1, 2],
@@ -71,21 +71,14 @@ def test_run_champion_analysis_uses_thread(monkeypatch):
     )
 
     calls = []
-    started = {}
-
-    class DummyThread:
-        def __init__(self, target=None, args=None, kwargs=None, **_):
-            started['target'] = target
-
-        def start(self):
-            started['started'] = True
-            if started['target']:
-                started['target']()
+    ion_called = {}
 
     monkeypatch.setattr(
         analysis,
-        'threading',
-        types.SimpleNamespace(Thread=DummyThread),
+        'plt',
+        types.SimpleNamespace(
+            ion=lambda: ion_called.setdefault('ion', True),
+        ),
     )
 
     analysis.run_champion_analysis(
@@ -93,6 +86,5 @@ def test_run_champion_analysis_uses_thread(monkeypatch):
         {0: {'name': 'x', 'path': [], 'type': float}},
     )
 
-    assert started['started']
-    assert started['target'].__name__ == 'show'
+    assert ion_called['ion']
     assert calls == ['show']
