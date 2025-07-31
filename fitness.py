@@ -18,16 +18,22 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
     injected_rules = copy.deepcopy(base_rules)
     for i, gene_value in enumerate(solution):
         gene_info = gene_map.get(i)
-        if not gene_info: continue
+        if not gene_info:
+            continue
 
-        path = gene_info['path']
+        path = gene_info.get("path", [])
+        if not path:
+            # When path is empty, there's nowhere to inject the gene.
+            # This can occur in tests that mock gene parsing; skip.
+            continue
+
         current_level = injected_rules
-        
+
         for key in path[:-1]:
             current_level = current_level[key]
-        
+
         param_key = path[-1]
-        
+
         current_level[param_key] = gene_value
 
     return injected_rules

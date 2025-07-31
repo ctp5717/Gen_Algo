@@ -131,6 +131,15 @@ GA_MUTATION_NUM_GENES = 2
 # and uncomment the block below.
 # GA_POPULATION_SIZE = 200
 # GA_NUM_GENERATIONS = 100
+# --- AUTO-TUNER SETTINGS ---
+AUTO_TUNE_ENABLED = False
+GENERATIONS_PER_TUNE = 10
+HYPERPARAMETER_SEARCH_SPACE = [
+    {"sol_per_pop": 50, "num_parents_mating": 10, "mutation_num_genes": 1},
+    {"sol_per_pop": 100, "num_parents_mating": 20, "mutation_num_genes": 1},
+    {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
+]
+
 # GA_PARENTS_MATING = 50
 # GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
 
