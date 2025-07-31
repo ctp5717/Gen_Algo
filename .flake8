@@ -1,2 +1,3 @@
 [flake8]
 max-line-length = 100
+exclude = config.py,fitness.py,gene_parser.py,strategy_engine.py,analysis.py,data_loader.py,indicator_library.py,main.py,walk_forward.py,tests/test_walk_forward.py

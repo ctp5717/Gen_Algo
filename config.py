@@ -61,7 +61,7 @@ CRYPTO_UNIVERSE = {
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
 
-SELECTED_ASSET_NAME = "Ethereum"
+SELECTED_ASSET_NAME = "Solana"
 
 # Set your desired timeframe here. This now controls everything.
 TIMEFRAME = "15m"
@@ -71,6 +71,7 @@ TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 MAX_HOLD_DAYS = 7
 VALIDATION_MONTHS = 3
 DEFAULT_MAX_PERIOD = 200
+ENABLE_WALK_FORWARD_VALIDATION = True
 today = datetime.now()
 if 'h' in TIMEFRAME.lower() or 'm' in TIMEFRAME.lower():
     VALIDATION_BARS = 91 * (24 if 'h' in TIMEFRAME.lower() else 24 * (60 / int(TIMEFRAME.replace('m',''))))
@@ -86,23 +87,52 @@ else:
     training_start_date = training_end_date - relativedelta(months=training_months_intraday)
 
 # --- 3. FINAL CONFIGURATION OUTPUTS ---
-if DATA_SOURCE == 'binance': TICKER = TICKER.replace('-', '')
-TRAINING_PERIOD = {"start": training_start_date.strftime('%Y-%m-%d'),"end": training_end_date.strftime('%Y-%m-%d')}
-VALIDATION_PERIOD = {"start": training_end_date.strftime('%Y-%m-%d'),"end": today.strftime('%Y-%m-%d')}
+if DATA_SOURCE == 'binance':
+    TICKER = TICKER.replace('-', '')
+    # Binance typically provides deep history for USDT pairs rather than USD.
+    # Convert "BTCUSD" -> "BTCUSDT" to ensure sufficient historical data.
+    if TICKER.endswith('USD') and not TICKER.endswith('USDT'):
+        TICKER = TICKER[:-3] + 'USDT'
+TRAINING_PERIOD = {
+    "start": training_start_date.strftime("%Y-%m-%d"),
+    "end": training_end_date.strftime("%Y-%m-%d"),
+}
+VALIDATION_PERIOD = {
+    "start": training_end_date.strftime("%Y-%m-%d"),
+    "end": today.strftime("%Y-%m-%d"),
+}
+
+# Walk-forward validation will leverage a longer history than the main
+# optimisation phase.  Start three years back from today regardless of the
+# optimisation window above.
+walk_forward_start_date = (today - relativedelta(years=3)).strftime("%Y-%m-%d")
+
+WALK_FORWARD_SETTINGS = {
+    "enabled": ENABLE_WALK_FORWARD_VALIDATION,
+    "total_data_range": {
+        # Use the extended three year lookback for walk-forward windows
+        "start": walk_forward_start_date,
+        "end": VALIDATION_PERIOD["end"],
+    },
+    # Each window trains on one year of data and tests on the following three
+    # months.
+    "training_period_length": 12,  # months
+    "validation_period_length": 3,
+}
 
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
 GA_POPULATION_SIZE = 50
 GA_NUM_GENERATIONS = 25
 GA_PARENTS_MATING = 13
-GA_MUTATION_NUM_GENES = 1
+GA_MUTATION_NUM_GENES = 2
 
 # For serious, overnight "Discovery" runs, comment out the block above
 # and uncomment the block below.
 # GA_POPULATION_SIZE = 200
 # GA_NUM_GENERATIONS = 100
 # GA_PARENTS_MATING = 50
-# GA_MUTATION_NUM_GENES = 2 # Mutate more genes with a more complex strategy
+# GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
@@ -165,14 +195,14 @@ STRATEGY_RULES = {
     },
     'exit_rules': {
         'stop_loss': {
-            'is_active': False, # Turn off regular stop to use trailing stop
+            'is_active': True, # Turn off regular stop to use trailing stop
             'type': 'percentage',
             'params': { # Correctly nested
                 'value': {'gene': 'stop_loss_pct', 'low': 0.01, 'high': 0.10, 'step': 0.005}
             }
         },
         'trailing_stop': {
-            'is_active': True, # Turn on trailing stop
+            'is_active': False, # Turn on trailing stop
             'type': 'percentage',
             'params': { # Correctly nested
                 'value': {'gene': 'tsl_pct', 'low': 0.01, 'high': 0.10, 'step': 0.005}

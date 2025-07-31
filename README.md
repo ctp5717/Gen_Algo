@@ -189,8 +189,8 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
 * **Features:**
     * **Expanded Indicator Library:** ✅ Complete.
     * **Advanced Exit Logic (Trailing Stops):** ✅ Complete.
-    * **Walk-Forward Validation:** (Planned)
-        * *This is a more rigorous backtesting method than our current train/validate split. It involves dividing the entire historical dataset into multiple, sequential chunks. The system would optimize on the first chunk (e.g., Year 1) and test on the next (e.g., Q1 of Year 2). It would then "walk forward" by sliding the window (train on Year 1 + Q1 of Year 2, test on Q2 of Year 2), repeating this process across the entire dataset. This simulates how a strategy would be re-optimized in the real world and provides a much more realistic estimate of its long-term performance.*
+    * **Walk-Forward Validation:** ✅ Complete.
+        * *A new module now performs sequential re-optimizations across sliding windows of historical data. Set ``ENABLE_WALK_FORWARD_VALIDATION`` in ``config.py`` to ``True`` to execute this rigorous backtesting method. Window lengths and date ranges are configured via the ``WALK_FORWARD_SETTINGS`` dictionary.*
     * **Tune GA Hyperparameters:** (Planned)
         * *This involves a more scientific approach to setting the Genetic Algorithm's own parameters (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, mutation rate, etc.). A more complex strategy with more genes requires a larger population and more generations to effectively explore the vast search space. This feature involves finding the best balance between optimization performance and computation time.*
 

@@ -18,7 +18,10 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     """
     print("\n\n--- Champion Strategy Analysis on Unseen Data ---")
     
-    print(f"Loading validation data from {config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}...")
+    print(
+        "Loading validation data from "
+        f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
+    )
     validation_data = data_loader.get_data(
         ticker=config.TICKER,
         start_date=config.VALIDATION_PERIOD['start'],
