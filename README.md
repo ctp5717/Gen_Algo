@@ -32,7 +32,8 @@ This is the single most important file for the user. It is the central "control 
     * **Asset & Timeframe:** Defines which asset to test (`SELECTED_ASSET_NAME`) and at what resolution (`TIMEFRAME`).
     * **Dynamic Date Calculation:** Intelligently calculates the rolling `TRAINING_PERIOD` and `VALIDATION_PERIOD` based on the current date and the selected timeframe, automatically respecting the data history limits of the chosen API.
     * **Strategy Definition:** Contains the `STRATEGY_RULES` dictionary, the heart of the system. This is where you build your trading strategy by combining indicator rules, setting their parameters, defining which parameters should be optimized as "genes," and using `is_active` flags to turn rules on or off.
-    * **Risk Management:** Sets the `MAX_HOLD_PERIOD` for trades.
+    * **Risk Management:** Sets the `MAX_HOLD_PERIOD` for trades, now expressed
+      as days converted into bars based on the selected `TIMEFRAME`.
     * **GA Tuning:** Holds all parameters for the Genetic Algorithm (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, etc.).
     * **Fitness Criteria:** Defines the `FITNESS_WEIGHTS` for the composite score, telling the AI what characteristics of a "good" strategy to prioritize.
 
@@ -180,7 +181,9 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
 * **Progress Tracking:** Real-time console updates during GA optimization.
 * **Centralized Timeframe Configuration:** A single `TIMEFRAME` setting in `config.py` controls all modules.
 * **Automated Rolling Dates:** The config file intelligently calculates training/validation periods, respecting API data limits.
-* **Maximum Trade Hold Duration:** A key risk parameter (`MAX_HOLD_PERIOD`) is integrated into the exit logic.
+  * **Maximum Trade Hold Duration:** A key risk parameter (`MAX_HOLD_PERIOD`) is
+    now calculated as days converted into bars, ensuring consistency across
+    different intraday timeframes.
 * **Composite Fitness Function:** The AI optimizes for a blended score of multiple performance metrics (Sortino, Profit Factor, etc.).
 
 ---
