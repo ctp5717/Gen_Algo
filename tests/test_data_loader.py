@@ -22,7 +22,7 @@ sys.modules.setdefault('binance.client', client_mod)
 import data_loader  # noqa: E402
 
 
-def test_get_data_uses_cache(monkeypatch):
+def test_get_data_uses_cache(monkeypatch, capsys):
     df = pd.DataFrame({'Close': [1, 2]}, index=pd.date_range('2020-01-01', periods=2))
 
     # Force cache path to exist and return our dataframe
@@ -33,11 +33,13 @@ def test_get_data_uses_cache(monkeypatch):
     monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance')
 
     result = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
+    out = capsys.readouterr().out
+    assert "[1/1] TEST from cache" in out
 
     pd.testing.assert_frame_equal(result, df)
 
 
-def test_get_data_handles_asset_list(monkeypatch):
+def test_get_data_handles_asset_list(monkeypatch, capsys):
     df_a = pd.DataFrame(
         {
             "Open": [1, 2],
@@ -58,6 +60,10 @@ def test_get_data_handles_asset_list(monkeypatch):
     monkeypatch.setattr(data_loader.config, "DATA_SOURCE", "binance", raising=False)
 
     result = data_loader.get_data(["A", "B"], "2020-01-01", "2020-01-02")
+    out = capsys.readouterr().out
+    assert "Assets: A, B" in out
+    assert "[1/2] A from Binance" in out
+    assert "[2/2] B from Binance" in out
 
     assert isinstance(result.columns, pd.MultiIndex)
     assert ("A", "Close") in result.columns
