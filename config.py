@@ -153,6 +153,18 @@ FITNESS_WEIGHTS = {
     "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 10
 }
 
+# Settings controlling how walk-forward champions are kept or discarded
+CHAMPION_SELECTION_SETTINGS = {
+    # Minimum validation fitness required for a champion to survive
+    "survival_threshold": 0.5,
+    # Threshold at which a champion is considered elite and cloned
+    "cloning_threshold": 1.5,
+    # Number of clones to make for elite champions
+    "num_clones": 5,
+    # Probability of mutating each gene on a clone
+    "clone_mutation_rate": 0.20,
+}
+
 # --- 6. STRATEGY RULES DEFINITION ---
 # Here you can define a "master list" of all potential conditions.
 # Use the `is_active` flag to control which ones are used in a given run.
