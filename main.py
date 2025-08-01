@@ -44,7 +44,17 @@ def on_generation(ga_instance):
 def main():
     """ The main execution function. """
     print("--- GA Trading Strategy Framework ---")
-    print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
+    if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False):
+        print(
+            "Starting portfolio optimization for basket: "
+            f"{config.ASSET_BASKET} (tuning asset: {config.TUNING_ASSET})"
+        )
+        tickers = config.ASSET_BASKET
+    else:
+        print(
+            f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})"
+        )
+        tickers = config.TICKER
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
@@ -54,7 +64,7 @@ def main():
         f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
     )
     ohlc_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=tickers,
         start_date=config.TRAINING_PERIOD['start'],
         end_date=config.TRAINING_PERIOD['end'],
         interval=config.TIMEFRAME
