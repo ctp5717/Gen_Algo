@@ -94,8 +94,14 @@ def run_walk_forward_validation(initial_champions=None):
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
     end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
 
+    tickers = (
+        config.ASSET_BASKET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
+
     all_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=tickers,
         start_date=start_date,
         end_date=end_date,
         interval=config.TIMEFRAME,
@@ -127,10 +133,24 @@ def run_walk_forward_validation(initial_champions=None):
         print(f"\n--- Window {idx} ---")
         print(f"Train: {p['train_start'].date()} -> {p['train_end'].date()}")
         print(f"Test : {p['test_start'].date()} -> {p['test_end'].date()}")
-        # fmt: off
-        train_data = all_data.loc[p['train_start']:p['train_end']]
-        test_data = all_data.loc[p['test_start']:p['test_end']]
-        # fmt: on
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False):
+            train_data = data_loader.get_data(
+                tickers,
+                p['train_start'].strftime("%Y-%m-%d"),
+                p['train_end'].strftime("%Y-%m-%d"),
+                interval=config.TIMEFRAME,
+            )
+            test_data = data_loader.get_data(
+                tickers,
+                p['test_start'].strftime("%Y-%m-%d"),
+                p['test_end'].strftime("%Y-%m-%d"),
+                interval=config.TIMEFRAME,
+            )
+        else:
+            # fmt: off
+            train_data = all_data.loc[p['train_start']:p['train_end']]
+            test_data = all_data.loc[p['test_start']:p['test_end']]
+            # fmt: on
 
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
         evaluator = fitness.FitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map)
@@ -165,7 +185,8 @@ def run_walk_forward_validation(initial_champions=None):
 
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(test_data, rules)
-        if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+        trade_count = entries.sum().sum() if isinstance(entries, pd.DataFrame) else entries.sum()
+        if trade_count < config.FITNESS_WEIGHTS['min_trades']:
             print("No trades in test period.")
             results.append({
                 'Window': idx,
@@ -201,8 +222,14 @@ def run_walk_forward_validation(initial_champions=None):
         time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_exit = time_exit.reindex(entries.index, fill_value=False)
 
+        close_prices = (
+            test_data['Close']
+            if 'Close' in test_data
+            else test_data.xs('Close', level=-1, axis=1)
+        )
+
         portfolio = vbt.Portfolio.from_signals(
-            close=test_data['Close'],
+            close=close_prices,
             entries=entries,
             exits=time_exit,
             sl_stop=sl_stop,

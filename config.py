@@ -67,6 +67,14 @@ SELECTED_ASSET_NAME = "Dogecoin"
 TIMEFRAME = "15m"
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
+# --- Portfolio Optimisation Settings ---
+# When enabled, the Genetic Algorithm will optimise a single strategy across
+# a basket of assets simultaneously.  The tuning asset is used for the quick
+# hyperparameter search prior to the full portfolio run.
+PORTFOLIO_OPTIMIZATION_ENABLED = False
+ASSET_BASKET = [TICKER]
+TUNING_ASSET = TICKER
+
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
 MAX_HOLD_DAYS = 14
 VALIDATION_MONTHS = 3

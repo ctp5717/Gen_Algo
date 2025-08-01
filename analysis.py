@@ -6,6 +6,7 @@ Analysis & Reporting Module
 """
 
 import vectorbt as vbt
+import pandas as pd
 import config
 import data_loader
 import fitness
@@ -23,8 +24,14 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         "Loading validation data from "
         f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
     )
+    tickers = (
+        config.ASSET_BASKET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
+
     validation_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=tickers,
         start_date=config.VALIDATION_PERIOD['start'],
         end_date=config.VALIDATION_PERIOD['end'],
         interval=config.TIMEFRAME
@@ -35,7 +42,8 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(validation_data, rules)
         
-        if entries.sum() < 1:
+        trade_count = entries.sum().sum() if isinstance(entries, pd.DataFrame) else entries.sum()
+        if trade_count < 1:
             print("\nChampion strategy produced no trades in the validation period.")
             return
 
@@ -52,8 +60,14 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
+        close_prices = (
+            validation_data['Close']
+            if 'Close' in validation_data
+            else validation_data.xs('Close', level=-1, axis=1)
+        )
+
         portfolio = vbt.Portfolio.from_signals(
-            close=validation_data['Close'],
+            close=close_prices,
             entries=entries,
             exits=time_based_exit,
             sl_stop=sl_stop,
@@ -71,11 +85,28 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     print("\n--- Validation Period Performance Stats ---")
     stats = portfolio.stats()
     metrics_to_show = [
-        'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
-        'Max Drawdown [%]', 'Sortino Ratio', 'Sharpe Ratio', 'Profit Factor',
-        'Win Rate [%]', 'Total Trades', 'Avg Winning Trade [%]', 'Avg Losing Trade [%]'
+        'Start',
+        'End',
+        'Period',
+        'Total Return [%]',
+        'Benchmark Return [%]',
+        'Max Drawdown [%]',
+        'Sortino Ratio',
+        'Sharpe Ratio',
+        'Profit Factor',
+        'Win Rate [%]',
+        'Total Trades',
+        'Avg Winning Trade [%]',
+        'Avg Losing Trade [%]'
     ]
     print(stats[metrics_to_show].to_string())
+
+    if isinstance(entries, pd.DataFrame) and len(entries.columns) > 1:
+        print("\n--- Per-Asset Performance Breakdown ---")
+        for asset in entries.columns:
+            asset_stats = portfolio[asset].stats()
+            print(f"\nAsset: {asset}")
+            print(asset_stats[metrics_to_show].to_string())
 
     print("\nDisplaying equity curve plot for the validation period...")
     # Enable interactive mode so the plot window does not block execution.

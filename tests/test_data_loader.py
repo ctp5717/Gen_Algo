@@ -35,3 +35,30 @@ def test_get_data_uses_cache(monkeypatch):
     result = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
 
     pd.testing.assert_frame_equal(result, df)
+
+
+def test_get_data_handles_asset_list(monkeypatch):
+    df_a = pd.DataFrame(
+        {
+            "Open": [1, 2],
+            "High": [1, 2],
+            "Low": [1, 2],
+            "Close": [1, 2],
+            "Volume": [1, 2],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+    df_b = df_a * 2
+
+    def fake_dl(ticker, *a, **k):
+        return df_a if ticker == "A" else df_b
+
+    monkeypatch.setattr(data_loader.os.path, "exists", lambda *a, **k: False)
+    monkeypatch.setattr(data_loader, "_get_binance_data", fake_dl)
+    monkeypatch.setattr(data_loader.config, "DATA_SOURCE", "binance", raising=False)
+
+    result = data_loader.get_data(["A", "B"], "2020-01-01", "2020-01-02")
+
+    assert isinstance(result.columns, pd.MultiIndex)
+    assert ("A", "Close") in result.columns
+    assert ("B", "Close") in result.columns

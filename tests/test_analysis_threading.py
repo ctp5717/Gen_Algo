@@ -88,3 +88,89 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
 
     assert ion_called['ion']
     assert calls == ['show']
+
+
+def test_run_champion_analysis_asset_breakdown(monkeypatch, capsys):
+    df = pd.DataFrame(
+        {
+            "Open": [1, 2],
+            "High": [1, 2],
+            "Low": [1, 2],
+            "Close": [1, 2],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    multi = pd.concat({"A": df, "B": df}, axis=1)
+
+    monkeypatch.setattr(analysis.data_loader, "get_data", lambda *a, **k: multi)
+    monkeypatch.setattr(analysis.config, "MAX_HOLD_PERIOD", 1, raising=False)
+    monkeypatch.setattr(analysis.config, "TIMEFRAME", "1d", raising=False)
+    monkeypatch.setattr(
+        analysis.config,
+        "VALIDATION_PERIOD",
+        {"start": "2020-01-01", "end": "2020-01-02"},
+        raising=False,
+    )
+    monkeypatch.setattr(analysis.config, "PORTFOLIO_OPTIMIZATION_ENABLED", True, raising=False)
+    monkeypatch.setattr(analysis.config, "ASSET_BASKET", ["A", "B"], raising=False)
+    monkeypatch.setattr(analysis.config, "STRATEGY_RULES", {}, raising=False)
+
+    monkeypatch.setattr(
+        analysis.fitness,
+        "_inject_genes_into_rules",
+        lambda *a, **k: {"exit_rules": {}},
+    )
+    monkeypatch.setattr(
+        analysis.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.DataFrame({"A": [True, False], "B": [True, False]}, index=df.index),
+    )
+
+    metrics = [
+        "Start",
+        "End",
+        "Period",
+        "Total Return [%]",
+        "Benchmark Return [%]",
+        "Max Drawdown [%]",
+        "Sortino Ratio",
+        "Sharpe Ratio",
+        "Profit Factor",
+        "Win Rate [%]",
+        "Total Trades",
+        "Avg Winning Trade [%]",
+        "Avg Losing Trade [%]",
+    ]
+
+    class DummyPortfolio:
+        def __init__(self, name="agg"):
+            self.name = name
+
+        def stats(self):
+            return pd.DataFrame({m: [0] for m in metrics})
+
+        def plot(self, *a, **k):
+            class DummyFig:
+                def show(self):
+                    pass
+
+            return DummyFig()
+
+        def __getitem__(self, key):
+            return DummyPortfolio(key)
+
+    monkeypatch.setattr(
+        analysis.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    analysis.run_champion_analysis([0], {0: {"name": "x", "path": [], "type": float}})
+
+    out = capsys.readouterr().out
+    assert "Per-Asset Performance Breakdown" in out
+    assert "Asset: A" in out
+    assert "Asset: B" in out

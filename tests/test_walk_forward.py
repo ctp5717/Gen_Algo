@@ -250,3 +250,91 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert len(pool) == 1 + 1 + settings["num_clones"]
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
+
+
+def test_walk_forward_uses_asset_basket(monkeypatch):
+    import pandas as pd
+    import types
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    def fake_get_data(ticker, *a, **k):
+        if isinstance(ticker, list):
+            frames = {tk: df for tk in ticker}
+            return pd.concat(frames, axis=1)
+        return df
+
+    monkeypatch.setattr(walk_forward.data_loader, "get_data", fake_get_data)
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, []))
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, *a, **k):
+            return 1.0
+
+    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+    monkeypatch.setattr(
+        walk_forward.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.DataFrame(
+            [[True, True], [False, False]], index=df.index, columns=["A", "B"]
+        ),
+    )
+
+    class DummyPortfolio:
+        def __init__(self, *a, **k):
+            pass
+
+        def stats(self):
+            return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
+
+    monkeypatch.setattr(
+        walk_forward.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setattr(walk_forward.config, "PORTFOLIO_OPTIMIZATION_ENABLED", True, raising=False)
+    monkeypatch.setattr(walk_forward.config, "ASSET_BASKET", ["A", "B"], raising=False)
+
+    summary = walk_forward.run_walk_forward_validation()
+
+    assert isinstance(summary, dict)

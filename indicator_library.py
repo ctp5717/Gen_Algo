@@ -54,7 +54,11 @@ def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
         raise ValueError("EMA 'period' parameter cannot be None.")
     
     # pandas-ta automatically finds the 'Close' column to perform the calculation
-    ema_series = ohlc_data.ta.ema(length=period)
+    if hasattr(ohlc_data, "ta"):
+        ema_series = ohlc_data.ta.ema(length=period)
+    else:
+        close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
+        ema_series = close.ewm(span=period, adjust=False).mean()
     
     if ema_series is None:
         raise ConnectionError("Failed to calculate EMA. Check input data and parameters.")
@@ -75,8 +79,17 @@ def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     if period is None:
         raise ValueError("ATR 'period' parameter cannot be None.")
     
-    # pandas-ta uses the high, low, and close columns for the ATR calculation
-    atr_series = ohlc_data.ta.atr(length=period)
+    if hasattr(ohlc_data, "ta"):
+        atr_series = ohlc_data.ta.atr(length=period)
+    else:
+        high = ohlc_data['High'] if 'High' in ohlc_data else ohlc_data.xs('High', level=-1, axis=1)
+        low = ohlc_data['Low'] if 'Low' in ohlc_data else ohlc_data.xs('Low', level=-1, axis=1)
+        close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
+        tr1 = high - low
+        tr2 = (high - close.shift()).abs()
+        tr3 = (low - close.shift()).abs()
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr_series = true_range.rolling(window=period).mean()
     
     if atr_series is None:
         raise ConnectionError("Failed to calculate ATR. Check input data and parameters.")
@@ -90,7 +103,17 @@ def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     if period is None:
         raise ValueError("RSI 'period' parameter cannot be None.")
     
-    rsi_series = ohlc_data.ta.rsi(length=period)
+    if hasattr(ohlc_data, "ta"):
+        rsi_series = ohlc_data.ta.rsi(length=period)
+    else:
+        close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
+        delta = close.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.rolling(window=period).mean()
+        avg_loss = loss.rolling(window=period).mean()
+        rs = avg_gain / avg_loss
+        rsi_series = 100 - (100 / (1 + rs))
     
     if rsi_series is None:
         raise ConnectionError("Failed to calculate RSI. Check input data and parameters.")
@@ -107,8 +130,20 @@ def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -
     if not all([fast, slow, signal]):
         raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
     
-    # The .ta.macd() function returns a DataFrame with multiple columns
-    macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
+    if hasattr(ohlc_data, "ta"):
+        # The .ta.macd() function returns a DataFrame with multiple columns
+        macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
+    else:
+        close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
+        exp1 = close.ewm(span=fast, adjust=False).mean()
+        exp2 = close.ewm(span=slow, adjust=False).mean()
+        macd_line = exp1 - exp2
+        signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+        macd_df = pd.DataFrame({
+            'MACD': macd_line,
+            'MACDh': macd_line - signal_line,
+            'MACDs': signal_line,
+        })
 
     if macd_df is None:
         raise ConnectionError("Failed to calculate MACD. Check input data and parameters.")
@@ -125,7 +160,15 @@ def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
     
-    bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
+    if hasattr(ohlc_data, "ta"):
+        bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
+    else:
+        close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
+        ma = close.rolling(window=period).mean()
+        std = close.rolling(window=period).std()
+        upper = ma + std * std_dev
+        lower = ma - std * std_dev
+        bbands_df = pd.concat([lower.rename('BBL'), ma.rename('BBM'), upper.rename('BBU')], axis=1)
 
     if bbands_df is None:
         raise ConnectionError("Failed to calculate BBands. Check input data and parameters.")
