@@ -73,8 +73,25 @@ TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 # a basket of assets simultaneously.  The tuning asset is used for the quick
 # hyperparameter search prior to the full portfolio run.
 PORTFOLIO_OPTIMIZATION_ENABLED = False
-ASSET_BASKET = [TICKER]
-TUNING_ASSET = TICKER
+# Initial asset basket for portfolio optimisation.  These tickers
+# serve as a template and can be adjusted as needed.
+ASSET_BASKET = [
+    "BTC-USD",  # Bitcoin - Foundational Store of Value
+    "ETH-USD",  # Ethereum - Dominant Smart Contract Platform
+    "SOL-USD",  # Solana - High-Throughput L1 Competitor
+    "ADA-USD",  # Cardano - Established L1 Competitor
+    "AVAX-USD",  # Avalanche - High-Speed L1 Competitor
+    "DOT-USD",  # Polkadot - Interoperability L1 Protocol
+    "MATIC-USD",  # Polygon - Key Ethereum L2 Scaling Solution
+    "LINK-USD",  # Chainlink - Core DeFi Oracle Infrastructure
+    "UNI-USD",  # Uniswap - Leading Decentralized Exchange (DEX)
+    "AAVE-USD",  # Aave - Leading DeFi Lending Protocol
+    "DOGE-USD",  # Dogecoin - Legacy / High Cap Meme Coin
+    "FIL-USD",  # Filecoin - Decentralized Storage Infrastructure
+]
+
+# Use Bitcoin as the tuning asset for the initial hyperparameter search
+TUNING_ASSET = "BTC-USD"
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
 MAX_HOLD_DAYS = 14
