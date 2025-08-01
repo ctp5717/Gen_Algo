@@ -42,6 +42,41 @@ def _generate_periods(start: datetime, end: datetime, train_months: int, test_mo
     return periods
 
 
+def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
+    """Update champion pool based on validation fitness."""
+    survival = settings.get("survival_threshold", 0.0)
+    cloning = settings.get("cloning_threshold", float("inf"))
+    num_clones = settings.get("num_clones", 0)
+    mutation_rate = settings.get("clone_mutation_rate", 0.0)
+
+    if validation_score < survival:
+        print("Champion discarded due to poor performance.")
+        return pool
+
+    if validation_score >= cloning:
+        print("Elite Champion found. Cloning champion.")
+        pool.append(list(best_solution))
+        for _ in range(num_clones):
+            clone = list(best_solution)
+            for idx in range(len(clone)):
+                if np.random.rand() < mutation_rate:
+                    gs = gene_space[idx]
+                    low, high = gs["low"], gs["high"]
+                    step = gs.get("step")
+                    if step is not None:
+                        steps = int(round((high - low) / step))
+                        val = low + step * np.random.randint(0, steps + 1)
+                    else:
+                        val = np.random.uniform(low, high)
+                    clone[idx] = type(clone[idx])(val)
+            pool.append(clone)
+    else:
+        print("Viable Champion found and kept for next fold.")
+        pool.append(list(best_solution))
+
+    return pool
+
+
 def run_walk_forward_validation(initial_champions=None):
     """Execute walk-forward validation across the available data.
 
@@ -86,7 +121,7 @@ def run_walk_forward_validation(initial_champions=None):
         return
 
     results = []
-    champion_solutions = list(initial_champions or [])
+    champion_pool = list(initial_champions or [])
 
     for idx, p in enumerate(periods, start=1):
         print(f"\n--- Window {idx} ---")
@@ -110,8 +145,8 @@ def run_walk_forward_validation(initial_champions=None):
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
         )
-        if champion_solutions and hasattr(ga_instance, "population"):
-            champs = np.array(champion_solutions, dtype=float)
+        if champion_pool and hasattr(ga_instance, "population"):
+            champs = np.array(champion_pool, dtype=float)
             if champs.ndim == 1:
                 champs = champs.reshape(1, -1)
             if champs.shape[1] == ga_instance.population.shape[1]:
@@ -122,7 +157,6 @@ def run_walk_forward_validation(initial_champions=None):
                     ga_instance.initial_population[:num_champs] = champs[:num_champs]
         ga_instance.run()
         best_solution, best_fitness, _ = ga_instance.best_solution()
-        champion_solutions.append(best_solution)
         print(f"Best training fitness: {best_fitness:.4f}")
 
         winning_params = {
@@ -178,6 +212,14 @@ def run_walk_forward_validation(initial_champions=None):
         print("Winning Parameters:")
         for param_name, param_value in winning_params.items():
             print(f"  {param_name}: {param_value}")
+
+        # Evaluate champion on validation data using composite fitness
+        val_evaluator = fitness.FitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map)
+        validation_score = val_evaluator(None, best_solution, 0)
+        champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
+        champion_pool = _update_champion_pool(
+            champion_pool, best_solution, validation_score, gene_space, champion_settings
+        )
 
         results.append({
             'Total Return [%]': tr,
