@@ -167,6 +167,15 @@ def run_walk_forward_validation(initial_champions=None):
         entries = engine.process_strategy_rules(test_data, rules)
         if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
             print("No trades in test period.")
+            results.append({
+                'Window': idx,
+                'Total Return [%]': np.nan,
+                'Max Drawdown [%]': np.nan,
+                'Sharpe Ratio': np.nan,
+                'Sortino Ratio': np.nan,
+                'Win Rate [%]': np.nan,
+                'Params': None,
+            })
             continue
         exit_rules = rules.get('exit_rules', {})
         sl_rule = exit_rules.get('stop_loss', {})
@@ -222,6 +231,7 @@ def run_walk_forward_validation(initial_champions=None):
         )
 
         results.append({
+            'Window': idx,
             'Total Return [%]': tr,
             'Max Drawdown [%]': dd,
             'Sharpe Ratio': sharpe,
@@ -243,7 +253,8 @@ def run_walk_forward_validation(initial_champions=None):
     total_compounded_return = (results_df['Total Return [%]'] / 100 + 1).prod() - 1
 
     print("\n=== Walk-Forward Summary ===")
-    print(results_df)
+    with pd.option_context('display.max_colwidth', None, 'display.width', None):
+        print(results_df.to_string(index=False))
     print("\nAggregate Metrics:")
     print(f"Average Return: {avg_return:.2f}% (+/- {std_return:.2f}%)")
     print(f"Average Sharpe: {avg_sharpe:.2f}")
