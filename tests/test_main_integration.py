@@ -177,6 +177,86 @@ def test_main_uses_tuner(monkeypatch):
     assert captured['mutation_num_genes'] == 1
 
 
+def test_main_uses_asset_basket_when_portfolio_enabled(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'Open': [1, 2],
+            'High': [1, 2],
+            'Low': [1, 2],
+            'Close': [1, 2],
+            'Volume': [100, 100],
+        },
+        index=pd.date_range('2020-01-01', periods=2)
+    )
+
+    captured = {}
+
+    def get_data_stub(*args, **kwargs):
+        captured['ticker'] = kwargs.get('ticker', args[0] if args else None)
+        return df
+
+    monkeypatch.setattr(main.data_loader, 'get_data', get_data_stub)
+
+    gene_space = [{'low': 0, 'high': 1}]
+    gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
+    gene_types = [float]
+
+    def parser(*_a, **_k):
+        return gene_space, gene_map, gene_types
+
+    monkeypatch.setattr(main, 'parse_genes_from_config', parser)
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            self.num_generations = 1
+            self.generations_completed = 1
+            self.last_generation_fitness = [1.0]
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [0], 1.0, None
+
+        def plot_fitness(self):
+            return None
+
+    monkeypatch.setattr(main.pygad, 'GA', DummyGA)
+    monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, *a, **k):
+            return 1.0
+
+    monkeypatch.setattr(main.fitness, 'FitnessEvaluator', DummyEvaluator)
+
+    monkeypatch.setattr(main.config, 'ENABLE_WALK_FORWARD_VALIDATION', False, raising=False)
+    monkeypatch.setattr(main.config, 'WALK_FORWARD_SETTINGS', {'enabled': False}, raising=False)
+    monkeypatch.setattr(main.config, 'FITNESS_WEIGHTS', {'min_trades': 0}, raising=False)
+    monkeypatch.setattr(main.config, 'GA_NUM_GENERATIONS', 1, raising=False)
+    monkeypatch.setattr(main.config, 'GA_POPULATION_SIZE', 1, raising=False)
+    monkeypatch.setattr(main.config, 'GA_PARENTS_MATING', 1, raising=False)
+    monkeypatch.setattr(main.config, 'GA_MUTATION_NUM_GENES', 1, raising=False)
+    monkeypatch.setattr(main.config, 'AUTO_TUNE_ENABLED', False, raising=False)
+    monkeypatch.setattr(main.config, 'PORTFOLIO_OPTIMIZATION_ENABLED', True, raising=False)
+    monkeypatch.setattr(main.config, 'ASSET_BASKET', ['A', 'B'], raising=False)
+    monkeypatch.setattr(main.config, 'TUNING_ASSET', 'A', raising=False)
+    train_period = {'start': '2020-01-01', 'end': '2020-01-02'}
+    valid_period = {'start': '2020-01-02', 'end': '2020-01-03'}
+    monkeypatch.setattr(main.config, 'TRAINING_PERIOD', train_period, raising=False)
+    monkeypatch.setattr(main.config, 'VALIDATION_PERIOD', valid_period, raising=False)
+    monkeypatch.setattr(main.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
+    monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
+    monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
+
+    main.main()
+
+    assert captured['ticker'] == ['A', 'B']
+
+
 def test_fitness_plot_non_blocking(monkeypatch):
     df = pd.DataFrame(
         {
