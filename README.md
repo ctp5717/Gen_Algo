@@ -193,9 +193,7 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
     * **Expanded Indicator Library:** ✅ Complete.
     * **Advanced Exit Logic (Trailing Stops):** ✅ Complete.
     * **Walk-Forward Validation:** ✅ Complete.
-        * *A new module now performs sequential re-optimizations across sliding windows of historical data. Set ``ENABLE_WALK_FORWARD_VALIDATION`` in ``config.py`` to ``True`` to execute this rigorous backtesting method. Window lengths and date ranges are configured via the ``WALK_FORWARD_SETTINGS`` dictionary.*
-    * **Tune GA Hyperparameters:** (Planned)
-        * *This involves a more scientific approach to setting the Genetic Algorithm's own parameters (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, mutation rate, etc.). A more complex strategy with more genes requires a larger population and more generations to effectively explore the vast search space. This feature involves finding the best balance between optimization performance and computation time.*
+    * **Tune GA Hyperparameters:** ✅ Complete.
 
 ---
 #### **V2.0: Major Architectural Upgrade**
