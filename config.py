@@ -72,7 +72,7 @@ TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 # When enabled, the Genetic Algorithm will optimise a single strategy across
 # a basket of assets simultaneously.  The tuning asset is used for the quick
 # hyperparameter search prior to the full portfolio run.
-PORTFOLIO_OPTIMIZATION_ENABLED = False
+PORTFOLIO_OPTIMIZATION_ENABLED = True
 # Initial asset basket for portfolio optimisation.  These tickers
 # serve as a template and can be adjusted as needed.
 ASSET_BASKET = [
