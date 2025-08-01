@@ -40,7 +40,10 @@ def _generate_signal(ohlc_data: pd.DataFrame, indicator_series: pd.Series, condi
     (This version is updated to handle Bollinger Band conditions).
     """
     condition_type = condition.get('type')
-    close_price = ohlc_data['Close']
+    if 'Close' in ohlc_data:
+        close_price = ohlc_data['Close']
+    else:
+        close_price = ohlc_data.xs('Close', level=-1, axis=1)
 
     if condition_type == 'price_is_above_indicator':
         return close_price > indicator_series
@@ -91,10 +94,20 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
     conditions = entry_rules.get('conditions', [])
     combination_logic = entry_rules.get('combination_logic', 'AND').upper()
 
+    if 'Close' in ohlc_data:
+        base_close = ohlc_data['Close']
+    else:
+        base_close = ohlc_data.xs('Close', level=-1, axis=1)
+
     if not conditions:
+        if isinstance(base_close, pd.DataFrame):
+            return pd.DataFrame(False, index=ohlc_data.index, columns=base_close.columns)
         return pd.Series(False, index=ohlc_data.index)
 
-    final_entry_signal = pd.Series(True, index=ohlc_data.index)
+    if isinstance(base_close, pd.DataFrame):
+        final_entry_signal = pd.DataFrame(True, index=ohlc_data.index, columns=base_close.columns)
+    else:
+        final_entry_signal = pd.Series(True, index=ohlc_data.index)
 
     for rule in conditions:
         if not rule.get('is_active', True):
@@ -126,7 +139,10 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
                 # Fallback for other multi-column indicators if not specified
                 target_series = indicator_output.iloc[:, 0]
 
-        individual_signal = pd.Series(False, index=ohlc_data.index)
+        if isinstance(base_close, pd.DataFrame):
+            individual_signal = pd.DataFrame(False, index=ohlc_data.index, columns=base_close.columns)
+        else:
+            individual_signal = pd.Series(False, index=ohlc_data.index)
         if 'price' in condition_type:
             individual_signal = _generate_signal(ohlc_data, target_series, condition_logic)
         elif 'indicator' in condition_type:

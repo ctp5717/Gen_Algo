@@ -50,7 +50,8 @@ class FitnessEvaluator:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
             
-            if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+            trade_count = entries.sum().sum() if isinstance(entries, pd.DataFrame) else entries.sum()
+            if trade_count < config.FITNESS_WEIGHTS['min_trades']:
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---
@@ -66,8 +67,14 @@ class FitnessEvaluator:
             time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
             time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
+            close_prices = (
+                self.ohlc_data['Close']
+                if 'Close' in self.ohlc_data
+                else self.ohlc_data.xs('Close', level=-1, axis=1)
+            )
+
             portfolio = vbt.Portfolio.from_signals(
-                close=self.ohlc_data['Close'],
+                close=close_prices,
                 entries=entries,
                 exits=time_based_exit,
                 sl_stop=sl_stop,

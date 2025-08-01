@@ -29,7 +29,8 @@ def _evaluate_on_validation(solution, gene_map):
 
     rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
     entries = engine.process_strategy_rules(val_data, rules)
-    if entries.sum() < 1:
+    trade_count = entries.sum().sum() if isinstance(entries, pd.DataFrame) else entries.sum()
+    if trade_count < 1:
         return -np.inf
 
     exit_rules = rules.get("exit_rules", {})
@@ -62,7 +63,17 @@ def _evaluate_on_validation(solution, gene_map):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
-    fitness_evaluator = fitness.FitnessEvaluator(ohlc_data, config.STRATEGY_RULES, gene_map)
+
+    tuning_data = data_loader.get_data(
+        ticker=config.TUNING_ASSET,
+        start_date=config.TRAINING_PERIOD["start"],
+        end_date=config.TRAINING_PERIOD["end"],
+        interval=config.TIMEFRAME,
+    )
+    if tuning_data.empty:
+        tuning_data = ohlc_data
+
+    fitness_evaluator = fitness.FitnessEvaluator(tuning_data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()
 

@@ -15,6 +15,7 @@ import yfinance as yf
 from binance.client import Client
 import config
 
+
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
 def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
@@ -54,10 +55,19 @@ def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str
     print("Binance data loaded and formatted successfully.")
     return data
 
-def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
-    """
-    Acts as a router to fetch data from the selected source (yfinance or binance).
-    """
+def get_data(ticker, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
+    """Download historical data for a single ticker or a list of tickers."""
+
+    if isinstance(ticker, (list, tuple)):
+        frames = []
+        for tk in ticker:
+            df = get_data(tk, start_date, end_date, interval)
+            if df.empty:
+                continue
+            df.columns = pd.MultiIndex.from_product([[tk], df.columns])
+            frames.append(df)
+        return pd.concat(frames, axis=1) if frames else pd.DataFrame()
+
     source = config.DATA_SOURCE.lower()
     
     # Include the source in the cache filename to prevent conflicts
