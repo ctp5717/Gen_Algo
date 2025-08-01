@@ -118,11 +118,15 @@ else:
 
 # --- 3. FINAL CONFIGURATION OUTPUTS ---
 if DATA_SOURCE == 'binance':
-    TICKER = TICKER.replace('-', '')
-    # Binance typically provides deep history for USDT pairs rather than USD.
-    # Convert "BTCUSD" -> "BTCUSDT" to ensure sufficient historical data.
-    if TICKER.endswith('USD') and not TICKER.endswith('USDT'):
-        TICKER = TICKER[:-3] + 'USDT'
+    def _to_binance(ticker: str) -> str:
+        ticker = ticker.replace('-', '')
+        if ticker.endswith('USD') and not ticker.endswith('USDT'):
+            ticker = ticker[:-3] + 'USDT'
+        return ticker
+
+    TICKER = _to_binance(TICKER)
+    ASSET_BASKET = [_to_binance(t) for t in ASSET_BASKET]
+    TUNING_ASSET = _to_binance(TUNING_ASSET)
 TRAINING_PERIOD = {
     "start": training_start_date.strftime("%Y-%m-%d"),
     "end": training_end_date.strftime("%Y-%m-%d"),
