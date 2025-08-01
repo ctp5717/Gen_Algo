@@ -52,9 +52,15 @@ def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("EMA 'period' parameter cannot be None.")
-    
-    # pandas-ta automatically finds the 'Close' column to perform the calculation
-    if hasattr(ohlc_data, "ta"):
+
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = []
+        for tk in ohlc_data.columns.get_level_values(0).unique():
+            close = ohlc_data[tk]['Close']
+            ema = close.ewm(span=period, adjust=False).mean()
+            frames.append(pd.DataFrame({(tk, 'EMA'): ema}))
+        ema_series = pd.concat(frames, axis=1)
+    elif hasattr(ohlc_data, "ta"):
         ema_series = ohlc_data.ta.ema(length=period)
     else:
         close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
@@ -78,8 +84,21 @@ def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("ATR 'period' parameter cannot be None.")
-    
-    if hasattr(ohlc_data, "ta"):
+
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = []
+        for tk in ohlc_data.columns.get_level_values(0).unique():
+            high = ohlc_data[tk]['High']
+            low = ohlc_data[tk]['Low']
+            close = ohlc_data[tk]['Close']
+            tr1 = high - low
+            tr2 = (high - close.shift()).abs()
+            tr3 = (low - close.shift()).abs()
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = true_range.rolling(window=period).mean()
+            frames.append(pd.DataFrame({(tk, 'ATR'): atr}))
+        atr_series = pd.concat(frames, axis=1)
+    elif hasattr(ohlc_data, "ta"):
         atr_series = ohlc_data.ta.atr(length=period)
     else:
         high = ohlc_data['High'] if 'High' in ohlc_data else ohlc_data.xs('High', level=-1, axis=1)
@@ -102,8 +121,21 @@ def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("RSI 'period' parameter cannot be None.")
-    
-    if hasattr(ohlc_data, "ta"):
+
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = []
+        for tk in ohlc_data.columns.get_level_values(0).unique():
+            close = ohlc_data[tk]['Close']
+            delta = close.diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            avg_gain = gain.rolling(window=period).mean()
+            avg_loss = loss.rolling(window=period).mean()
+            rs = avg_gain / avg_loss
+            rsi = 100 - (100 / (1 + rs))
+            frames.append(pd.DataFrame({(tk, 'RSI'): rsi}))
+        rsi_series = pd.concat(frames, axis=1)
+    elif hasattr(ohlc_data, "ta"):
         rsi_series = ohlc_data.ta.rsi(length=period)
     else:
         close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
@@ -129,9 +161,23 @@ def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -
     """
     if not all([fast, slow, signal]):
         raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
-    
-    if hasattr(ohlc_data, "ta"):
-        # The .ta.macd() function returns a DataFrame with multiple columns
+
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = []
+        for tk in ohlc_data.columns.get_level_values(0).unique():
+            close = ohlc_data[tk]['Close']
+            exp1 = close.ewm(span=fast, adjust=False).mean()
+            exp2 = close.ewm(span=slow, adjust=False).mean()
+            macd_line = exp1 - exp2
+            signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+            data = {
+                (tk, 'MACD'): macd_line,
+                (tk, 'MACDh'): macd_line - signal_line,
+                (tk, 'MACDs'): signal_line,
+            }
+            frames.append(pd.DataFrame(data))
+        macd_df = pd.concat(frames, axis=1)
+    elif hasattr(ohlc_data, "ta"):
         macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
     else:
         close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
@@ -159,8 +205,23 @@ def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd
     """
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
-    
-    if hasattr(ohlc_data, "ta"):
+
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = []
+        for tk in ohlc_data.columns.get_level_values(0).unique():
+            close = ohlc_data[tk]['Close']
+            ma = close.rolling(window=period).mean()
+            std = close.rolling(window=period).std()
+            upper = ma + std * std_dev
+            lower = ma - std * std_dev
+            data = {
+                (tk, 'BBL'): lower,
+                (tk, 'BBM'): ma,
+                (tk, 'BBU'): upper,
+            }
+            frames.append(pd.DataFrame(data))
+        bbands_df = pd.concat(frames, axis=1)
+    elif hasattr(ohlc_data, "ta"):
         bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
     else:
         close = ohlc_data['Close'] if 'Close' in ohlc_data else ohlc_data.xs('Close', level=-1, axis=1)
