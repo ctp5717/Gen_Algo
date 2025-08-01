@@ -47,6 +47,7 @@ CRYPTO_UNIVERSE = {
 
     # Other Prominent L1s / L2s / DeFi
     "Uniswap": "UNI-USD",
+    "Aave": "AAVE-USD",
     "TRON": "TRX-USD",
     "Dai": "DAI-USD",
     "Stellar": "XLM-USD",
