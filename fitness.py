@@ -79,20 +79,34 @@ class FitnessEvaluator:
                 exits=time_based_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
+                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
                 fees=0.001,
-                freq=config.TIMEFRAME
+                freq=config.TIMEFRAME,
             )
-            
+
             stats = portfolio.stats()
-            sortino = stats['Sortino Ratio']
-            profit_factor = stats['Profit Factor']
-            max_drawdown = stats['Max Drawdown [%]']
-            
-            if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
-            if np.isnan(sortino): sortino = 0
-            if np.isnan(profit_factor): profit_factor = 0
-            if np.isnan(max_drawdown): max_drawdown = 100.0
+
+            # ``portfolio.stats`` returns a Series for single-column inputs and a
+            # DataFrame for multi-column inputs.  The latter caused the fitness
+            # function to work with DataFrames, eventually raising an exception
+            # when applying scalar operations (e.g. ``profit_factor > 5``) and
+            # terminating the worker process.  Reduce multi-column stats by
+            # averaging across columns so we always operate on scalars.
+            if isinstance(stats, pd.DataFrame):
+                stats = stats.mean(axis=1)
+
+            sortino = stats.get('Sortino Ratio', np.nan)
+            profit_factor = stats.get('Profit Factor', np.nan)
+            max_drawdown = stats.get('Max Drawdown [%]', np.nan)
+
+            if np.isinf(profit_factor) or profit_factor > 5:
+                profit_factor = 5
+            if np.isnan(sortino):
+                sortino = 0
+            if np.isnan(profit_factor):
+                profit_factor = 0
+            if np.isnan(max_drawdown):
+                max_drawdown = 100.0
 
             drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
