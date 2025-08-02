@@ -61,7 +61,7 @@ def test_multi_column_stats_are_reduced(monkeypatch):
     })
 
     class DummyPortfolio:
-        def stats(self):
+        def stats(self, *args, **kwargs):
             return stats_df
 
     portfolio_ns = types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio())
@@ -80,3 +80,42 @@ def test_multi_column_stats_are_reduced(monkeypatch):
 
     expected = (1.5 + 2.5 + (1 - 15 / 100))
     assert score == pytest.approx(expected)
+
+
+def test_inject_genes_casts_int():
+    base = {'rule': {'period': 0}}
+    gene_map = {0: {'path': ['rule', 'period'], 'type': int}}
+    injected = fitness._inject_genes_into_rules(base, gene_map, [5.7])
+    assert injected['rule']['period'] == 5
+    assert isinstance(injected['rule']['period'], int)
+
+
+def test_portfolio_stats_called_without_agg(monkeypatch):
+    ohlc = pd.DataFrame({'Close': [1, 2, 3]})
+    evaluator = fitness.FitnessEvaluator(ohlc, {'exit_rules': {}}, {})
+
+    entries = pd.Series([True, False, False])
+    monkeypatch.setattr(fitness.engine, 'process_strategy_rules', lambda *a, **k: entries)
+
+    called = {}
+
+    class DummyPortfolio:
+        def stats(self, *args, **kwargs):
+            called.update(kwargs)
+            return pd.Series({'Sortino Ratio': 1.0, 'Profit Factor': 1.0, 'Max Drawdown [%]': 10.0})
+
+    portfolio_ns = types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio())
+    monkeypatch.setattr(fitness.vbt, 'Portfolio', portfolio_ns, raising=False)
+
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1.0, 'profit_factor': 1.0, 'max_drawdown': 1.0, 'min_trades': 0},
+        raising=False,
+    )
+    monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
+
+    evaluator(None, [], 0)
+
+    assert 'agg_func' in called and called['agg_func'] is None
