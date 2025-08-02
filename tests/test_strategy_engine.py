@@ -59,3 +59,50 @@ def test_process_strategy_rules_simple(monkeypatch):
     signal = strategy_engine.process_strategy_rules(data, rules)
 
     assert signal.all()
+
+
+def _multi_ohlc():
+    base = pd.DataFrame(
+        {
+            "Open": [1, 2, 3],
+            "High": [1, 2, 3],
+            "Low": [1, 2, 3],
+            "Close": [10, 11, 12],
+            "Volume": [100, 100, 100],
+        },
+        index=pd.date_range("2020-01-01", periods=3),
+    )
+    return pd.concat({"AAA": base, "BBB": base}, axis=1)
+
+
+def test_process_strategy_rules_multiindex_alignment(monkeypatch):
+    df = _multi_ohlc()
+
+    def ema_func(ohlc, period):
+        frames = []
+        for tk in ohlc.columns.get_level_values(0).unique():
+            ema = ohlc[tk]["Close"] - 1
+            frames.append(pd.DataFrame({(tk, "EMA"): ema}))
+        return pd.concat(frames, axis=1)
+
+    monkeypatch.setattr(indicator_library, "calculate_ema", ema_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ema_func)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": "AND",
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {"period": 2},
+                    "condition": {"type": "price_is_above_indicator"},
+                }
+            ],
+        }
+    }
+
+    signal = strategy_engine.process_strategy_rules(df, rules)
+
+    assert isinstance(signal, pd.DataFrame)
+    assert list(signal.columns) == ["AAA", "BBB"]
+    assert signal.all().all()

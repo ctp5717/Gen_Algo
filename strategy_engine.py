@@ -125,19 +125,38 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
         indicator_output = indicator_func(ohlc_data, **params)
         condition_type = condition_logic.get('type')
         
-        # --- NEW: Intelligent Column Selection ---
+        # --- NEW: Intelligent Column Selection preserving per-ticker columns ---
         target_series = indicator_output
         if isinstance(indicator_output, pd.DataFrame):
-            # If the output is a DataFrame, find the correct column to use.
-            if 'bbands' in indicator_name:
-                if 'upper' in condition_type: target_series = indicator_output.filter(like='BBU').iloc[:, 0]
-                elif 'lower' in condition_type: target_series = indicator_output.filter(like='BBL').iloc[:, 0]
-                else: target_series = indicator_output.filter(like='BBM').iloc[:, 0] # Default to middle band
-            elif 'macd' in indicator_name:
-                target_series = indicator_output.filter(like='MACDh').iloc[:, 0] # Default to histogram
+            if isinstance(indicator_output.columns, pd.MultiIndex):
+                if indicator_name == 'bbands':
+                    if 'upper' in condition_type:
+                        sub_col = 'BBU'
+                    elif 'lower' in condition_type:
+                        sub_col = 'BBL'
+                    else:
+                        sub_col = 'BBM'
+                elif indicator_name == 'macd':
+                    sub_col = 'MACDh'
+                else:
+                    sub_col = indicator_name.upper()
+                try:
+                    target_series = indicator_output.xs(sub_col, level=-1, axis=1)
+                except KeyError:
+                    first_level = indicator_output.columns.get_level_values(-1)[0]
+                    target_series = indicator_output.xs(first_level, level=-1, axis=1)
+                if isinstance(base_close, pd.DataFrame) and isinstance(target_series, pd.Series):
+                    target_series = target_series.to_frame(base_close.columns[0])
+                if isinstance(base_close, pd.DataFrame):
+                    target_series = target_series.reindex(columns=base_close.columns)
+                else:
+                    if isinstance(target_series, pd.DataFrame):
+                        target_series = target_series.iloc[:, 0]
             else:
-                # Fallback for other multi-column indicators if not specified
-                target_series = indicator_output.iloc[:, 0]
+                if isinstance(base_close, pd.DataFrame):
+                    target_series = indicator_output.reindex(columns=base_close.columns)
+                else:
+                    target_series = indicator_output.iloc[:, 0]
 
         if isinstance(base_close, pd.DataFrame):
             individual_signal = pd.DataFrame(False, index=ohlc_data.index, columns=base_close.columns)
