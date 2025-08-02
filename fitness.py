@@ -93,7 +93,7 @@ class FitnessEvaluator:
             # terminating the worker process.  Reduce multi-column stats by
             # averaging across columns so we always operate on scalars.
             if isinstance(stats, pd.DataFrame):
-                stats = stats.mean(axis=1)
+                stats = stats.mean(axis=1, numeric_only=True)
 
             sortino = stats.get('Sortino Ratio', np.nan)
             profit_factor = stats.get('Profit Factor', np.nan)

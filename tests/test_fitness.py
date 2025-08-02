@@ -41,7 +41,7 @@ def test_multi_column_stats_are_reduced(monkeypatch):
     entries = pd.DataFrame({0: [True, False, False]})
     monkeypatch.setattr(fitness.engine, 'process_strategy_rules', lambda *a, **k: entries)
 
-    # vectorbt stub returning stats for two columns
+    # vectorbt stub returning stats for two numeric columns and one non-numeric column
     stats_df = pd.DataFrame({
         'A': {
             'Sortino Ratio': 1.0,
@@ -53,6 +53,11 @@ def test_multi_column_stats_are_reduced(monkeypatch):
             'Profit Factor': 3.0,
             'Max Drawdown [%]': 20.0,
         },
+        'C': {
+            'Sortino Ratio': 'x',
+            'Profit Factor': 'y',
+            'Max Drawdown [%]': 'z',
+        },
     })
 
     class DummyPortfolio:
@@ -60,7 +65,7 @@ def test_multi_column_stats_are_reduced(monkeypatch):
             return stats_df
 
     portfolio_ns = types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio())
-    monkeypatch.setattr(fitness.vbt, 'Portfolio', portfolio_ns)
+    monkeypatch.setattr(fitness.vbt, 'Portfolio', portfolio_ns, raising=False)
 
     monkeypatch.setattr(
         fitness.config,

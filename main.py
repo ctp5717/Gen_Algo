@@ -5,6 +5,7 @@ Main Application Orchestrator for the GA Trading Framework
 (This version includes a progress indicator for the GA run)
 """
 import os
+import multiprocessing as mp
 import pygad
 import pprint
 import tuner
@@ -43,6 +44,11 @@ def on_generation(ga_instance):
 
 def main():
     """ The main execution function. """
+    # Vectorbt and other numeric libraries can misbehave when forked; ensure
+    # the safer "spawn" start method is used for multiprocessing to avoid
+    # silent worker crashes that manifest as BrokenProcessPool errors.
+    mp.set_start_method("spawn", force=True)
+
     print("--- GA Trading Strategy Framework ---")
     if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False):
         print(
