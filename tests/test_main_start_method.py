@@ -94,4 +94,3 @@ def test_main_sets_spawn_start_method(monkeypatch):
 
     assert called['method'] == 'spawn'
     assert called['force'] is True
-
