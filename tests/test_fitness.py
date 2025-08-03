@@ -32,7 +32,7 @@ def test_exception_logging(capsys, monkeypatch):
 
 
 def test_aggregates_multi_asset_portfolio(monkeypatch):
-    """Uses total().stats() to avoid pandas multi-column warnings."""
+    """Aggregates value and computes metrics without using stats()."""
     # Minimal OHLC data
     ohlc = pd.DataFrame({'Close': [1, 2, 3]})
     evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
@@ -53,32 +53,36 @@ def test_aggregates_multi_asset_portfolio(monkeypatch):
     monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
     monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
 
-    # Dummy vectorbt Portfolio that requires calling total().stats()
-    class DummyTotal:
-        def stats(self):
-            return pd.Series(
-                {
-                    'Sortino Ratio': 1.0,
-                    'Profit Factor': 1.0,
-                    'Max Drawdown [%]': 10.0,
-                }
-            )
+    class DummyTrades:
+        pnl = pd.DataFrame({'a': [1.0, -0.5], 'b': [0.5, -1.0]})
 
     class DummyPortfolio:
-        def stats(self):
-            raise ValueError("stats should not be called directly")
+        def __init__(self):
+            self.value_called = False
 
-        def total(self):
-            return DummyTotal()
+        def value(self):
+            self.value_called = True
+            return pd.DataFrame({'a': [100, 105, 110], 'b': [200, 198, 202]})
+
+        def stats(self):  # Should never be called
+            raise AssertionError("stats should not be called")
+
+        @property
+        def trades(self):
+            return DummyTrades()
+
+    holder = {}
 
     class DummyPortfolioClass:
         @staticmethod
         def from_signals(**kwargs):
-            return DummyPortfolio()
+            holder['p'] = DummyPortfolio()
+            return holder['p']
 
     monkeypatch.setattr(fitness.vbt, 'Portfolio', DummyPortfolioClass, raising=False)
 
     score = evaluator(None, [], 0)
 
-    # With proper aggregation the evaluator returns a finite score
+    # With proper aggregation the evaluator returns a finite score and uses value()
     assert score > 0
+    assert holder['p'].value_called

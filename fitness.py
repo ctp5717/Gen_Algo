@@ -78,22 +78,32 @@ class FitnessEvaluator:
                 exits=time_based_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
+                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
                 fees=0.001,
                 freq=config.TIMEFRAME
             )
-            # Vectorbt returns a multi-column Portfolio when `close` contains
-            # several assets. Calling ``stats`` on such an object triggers a
-            # pandas warning because the metrics are computed per column and
-            # implicitly aggregated using ``mean``.  This warning was surfacing
-            # during the GA optimisation, eventually leading to worker process
-            # termination.  By first collapsing the portfolio to its total
-            # equity curve, ``stats`` receives a single column and returns a
-            # Series, avoiding the warning and ensuring deterministic results.
-            stats = portfolio.total().stats()
-            sortino = stats['Sortino Ratio']
-            profit_factor = stats['Profit Factor']
-            max_drawdown = stats['Max Drawdown [%]']
+            # Vectorbt returns one column per asset.  Calling ``stats`` on a multi-
+            # column Portfolio leads to a pandas warning and unpredictable
+            # aggregation.  To avoid this, manually aggregate the equity curve and
+            # compute the required metrics below.
+            total_value = portfolio.value().sum(axis=1)
+            returns = total_value.pct_change().dropna()
+
+            if returns.empty:
+                return -1.0
+
+            downside = returns[returns < 0]
+            downside_std = downside.std(ddof=0)
+            sortino = returns.mean() / downside_std if downside_std != 0 else 0.0
+
+            pnl = portfolio.trades.pnl
+            total_profit = pnl[pnl > 0].sum().sum()
+            total_loss = -pnl[pnl < 0].sum().sum()
+            profit_factor = total_profit / total_loss if total_loss != 0 else np.inf
+
+            peak = total_value.cummax()
+            drawdown = (total_value / peak - 1.0).min()
+            max_drawdown = abs(drawdown) * 100
             
             if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
             if np.isnan(sortino): sortino = 0
