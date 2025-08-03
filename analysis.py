@@ -23,8 +23,13 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         "Loading validation data from "
         f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
     )
+    ticker = (
+        config.ASSET_BASKET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
     validation_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=ticker,
         start_date=config.VALIDATION_PERIOD['start'],
         end_date=config.VALIDATION_PERIOD['end'],
         interval=config.TIMEFRAME

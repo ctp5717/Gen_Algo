@@ -35,3 +35,17 @@ def test_get_data_uses_cache(monkeypatch):
     result = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
 
     pd.testing.assert_frame_equal(result, df)
+
+
+def test_get_data_handles_asset_list(monkeypatch):
+    df_single = pd.DataFrame({'Close': [1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    def loader_stub(ticker, *a, **k):
+        return df_single.add_suffix(f'_{ticker}')
+
+    monkeypatch.setattr(data_loader, '_load_single_asset_data', loader_stub)
+
+    result = data_loader.get_data(['A', 'B'], '2020-01-01', '2020-01-02')
+
+    assert isinstance(result.columns, pd.MultiIndex)
+    assert set(result.columns.get_level_values(0)) == {'A', 'B'}

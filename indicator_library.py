@@ -50,15 +50,18 @@ def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     Returns:
         pd.Series: A pandas Series containing the EMA values.
     """
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = {asset: calculate_ema(ohlc_data[asset], period) for asset in ohlc_data.columns.levels[0]}
+        return pd.concat(frames, axis=1)
+
     if period is None:
         raise ValueError("EMA 'period' parameter cannot be None.")
-    
-    # pandas-ta automatically finds the 'Close' column to perform the calculation
+
     ema_series = ohlc_data.ta.ema(length=period)
-    
+
     if ema_series is None:
         raise ConnectionError("Failed to calculate EMA. Check input data and parameters.")
-        
+
     return ema_series
 
 def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
@@ -72,29 +75,36 @@ def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     Returns:
         pd.Series: A pandas Series containing the ATR values.
     """
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = {asset: calculate_atr(ohlc_data[asset], period) for asset in ohlc_data.columns.levels[0]}
+        return pd.concat(frames, axis=1)
+
     if period is None:
         raise ValueError("ATR 'period' parameter cannot be None.")
-    
-    # pandas-ta uses the high, low, and close columns for the ATR calculation
+
     atr_series = ohlc_data.ta.atr(length=period)
-    
+
     if atr_series is None:
         raise ConnectionError("Failed to calculate ATR. Check input data and parameters.")
-        
+
     return atr_series
 
 def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     Calculates the Relative Strength Index (RSI).
     """
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = {asset: calculate_rsi(ohlc_data[asset], period) for asset in ohlc_data.columns.levels[0]}
+        return pd.concat(frames, axis=1)
+
     if period is None:
         raise ValueError("RSI 'period' parameter cannot be None.")
-    
+
     rsi_series = ohlc_data.ta.rsi(length=period)
-    
+
     if rsi_series is None:
         raise ConnectionError("Failed to calculate RSI. Check input data and parameters.")
-        
+
     return rsi_series
 
 def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -> pd.DataFrame:
@@ -104,15 +114,21 @@ def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -
     Returns:
         pd.DataFrame: A DataFrame containing MACD line, histogram, and signal line.
     """
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = {
+            asset: calculate_macd(ohlc_data[asset], fast, slow, signal)
+            for asset in ohlc_data.columns.levels[0]
+        }
+        return pd.concat(frames, axis=1)
+
     if not all([fast, slow, signal]):
         raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
-    
-    # The .ta.macd() function returns a DataFrame with multiple columns
+
     macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
 
     if macd_df is None:
         raise ConnectionError("Failed to calculate MACD. Check input data and parameters.")
-    
+
     return macd_df
 
 def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd.DataFrame:
@@ -122,9 +138,16 @@ def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd
     Returns:
         pd.DataFrame: A DataFrame containing the upper, middle, and lower bands.
     """
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        frames = {
+            asset: calculate_bbands(ohlc_data[asset], period, std_dev)
+            for asset in ohlc_data.columns.levels[0]
+        }
+        return pd.concat(frames, axis=1)
+
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
-    
+
     bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
 
     if bbands_df is None:

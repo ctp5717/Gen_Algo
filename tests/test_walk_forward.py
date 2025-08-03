@@ -225,6 +225,27 @@ def test_walk_forward_returns_summary(monkeypatch):
         assert key in summary
 
 
+def test_walk_forward_portfolio_basket(monkeypatch):
+    import pandas as pd
+
+    df = pd.DataFrame({'Close': [1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    captured = {}
+
+    def loader_stub(ticker, *a, **k):
+        captured.setdefault('ticker', ticker)
+        return df
+
+    monkeypatch.setattr(walk_forward.data_loader, 'get_data', loader_stub)
+    monkeypatch.setattr(walk_forward, '_generate_periods', lambda *a, **k: [])
+    monkeypatch.setattr(walk_forward.config, 'PORTFOLIO_OPTIMIZATION_ENABLED', True, raising=False)
+    monkeypatch.setattr(walk_forward.config, 'ASSET_BASKET', ['A', 'B'], raising=False)
+    monkeypatch.setattr(walk_forward.config, 'TICKER', 'A', raising=False)
+
+    walk_forward.run_walk_forward_validation()
+    assert captured['ticker'] == ['A', 'B']
+
+
 def test_update_champion_pool_logic(monkeypatch, capsys):
     settings = {
         "survival_threshold": 0.5,

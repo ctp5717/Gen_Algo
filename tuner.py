@@ -62,6 +62,20 @@ def _evaluate_on_validation(solution, gene_map):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
+
+    # When portfolio optimisation is enabled the tuning phase should use a
+    # single representative asset to keep the search quick.  Fetch the data on
+    # demand so that the caller does not need to provide it.
+    if getattr(config, "TUNING_ASSET", None):
+        tuning_data = data_loader.get_data(
+            ticker=config.TUNING_ASSET,
+            start_date=config.TRAINING_PERIOD["start"],
+            end_date=config.TRAINING_PERIOD["end"],
+            interval=config.TIMEFRAME,
+        )
+        if not tuning_data.empty:
+            ohlc_data = tuning_data
+
     fitness_evaluator = fitness.FitnessEvaluator(ohlc_data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()
