@@ -17,9 +17,16 @@ import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
-def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
-    """ Fetches historical kline data from Binance and formats it. """
-    print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
+def _get_binance_data(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    interval: str,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """Fetches historical kline data from Binance and formats it."""
+    if verbose:
+        print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
     
     # --- MODIFIED: Added the tld parameter to correctly connect to Binance.US ---
     client = Client(
@@ -51,10 +58,17 @@ def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str
     data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
     data = data.apply(pd.to_numeric, errors='coerce')
     
-    print("Binance data loaded and formatted successfully.")
+    if verbose:
+        print("Binance data loaded and formatted successfully.")
     return data
 
-def _load_single_asset_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
+def _load_single_asset_data(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    interval: str,
+    verbose: bool = False,
+) -> pd.DataFrame:
     """Load data for a single ticker handling caching and routing."""
     source = config.DATA_SOURCE.lower()
 
@@ -62,21 +76,24 @@ def _load_single_asset_data(ticker: str, start_date: str, end_date: str, interva
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
 
     if os.path.exists(cache_filepath):
-        print(f"Loading '{ticker}' data from local cache: {cache_filename}")
+        if verbose:
+            print(f"Loading '{ticker}' data from local cache: {cache_filename}")
         try:
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
-            print("Cache loaded successfully.")
+            if verbose:
+                print("Cache loaded successfully.")
             return data
         except Exception as e:
             print(f"Error loading from cache file {cache_filepath}: {e}. Re-downloading.")
 
     try:
         if source == 'binance':
-            data = _get_binance_data(ticker, start_date, end_date, interval)
+            data = _get_binance_data(ticker, start_date, end_date, interval, verbose=verbose)
         elif source == 'yfinance':
-            print(f"Cache not found. Downloading '{ticker}' data from Yahoo Finance...")
+            if verbose:
+                print(f"Cache not found. Downloading '{ticker}' data from Yahoo Finance...")
             data = yf.download(ticker, start=start_date, end=end_date, interval=interval, progress=False)
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
@@ -95,7 +112,8 @@ def _load_single_asset_data(ticker: str, start_date: str, end_date: str, interva
 
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
-        print(f"Saved data to cache: {cache_filename}")
+        if verbose:
+            print(f"Saved data to cache: {cache_filename}")
 
         return data
     except Exception as e:
@@ -103,16 +121,25 @@ def _load_single_asset_data(ticker: str, start_date: str, end_date: str, interva
         return pd.DataFrame()
 
 
-def get_data(ticker, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
+def get_data(
+    ticker,
+    start_date: str,
+    end_date: str,
+    interval: str = '1d',
+    verbose: bool = False,
+) -> pd.DataFrame:
     """Fetch data for a single ticker or a list of tickers."""
     if isinstance(ticker, (list, tuple)):
+        tickers = list(ticker)
+        total = len(tickers)
+        print(f"Loading {total} assets...")
         frames = []
-        for t in ticker:
-            df = _load_single_asset_data(t, start_date, end_date, interval)
-            if df.empty:
-                continue
-            df.columns = pd.MultiIndex.from_product([[t], df.columns])
-            frames.append(df)
+        for i, t in enumerate(tickers, start=1):
+            df = _load_single_asset_data(t, start_date, end_date, interval, verbose=verbose)
+            if not df.empty:
+                df.columns = pd.MultiIndex.from_product([[t], df.columns])
+                frames.append(df)
+            print(f"Loaded {i}/{total}: {t}")
         return pd.concat(frames, axis=1) if frames else pd.DataFrame()
 
-    return _load_single_asset_data(ticker, start_date, end_date, interval)
+    return _load_single_asset_data(ticker, start_date, end_date, interval, verbose=verbose)
