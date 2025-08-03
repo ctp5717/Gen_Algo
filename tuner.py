@@ -44,9 +44,14 @@ def _evaluate_on_validation(solution, gene_map):
 
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)
+    close_prices = (
+        val_data.xs("Close", level=1, axis=1)
+        if isinstance(val_data.columns, pd.MultiIndex)
+        else val_data["Close"]
+    )
 
     portfolio = vbt.Portfolio.from_signals(
-        close=val_data["Close"],
+        close=close_prices,
         entries=entries,
         exits=time_exit,
         sl_stop=sl_stop,
