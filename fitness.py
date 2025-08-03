@@ -49,8 +49,9 @@ class FitnessEvaluator:
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
-            
-            if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+            entries_sum = entries.to_numpy().sum()
+
+            if entries_sum < config.FITNESS_WEIGHTS['min_trades']:
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---

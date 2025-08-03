@@ -39,8 +39,9 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     try:
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(validation_data, rules)
-        
-        if entries.sum() < 1:
+        entries_sum = entries.to_numpy().sum()
+
+        if entries_sum < 1:
             print("\nChampion strategy produced no trades in the validation period.")
             return
 
