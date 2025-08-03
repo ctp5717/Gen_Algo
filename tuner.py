@@ -19,7 +19,7 @@ def _evaluate_on_validation(solution, gene_map):
         return -np.inf
 
     val_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=getattr(config, "TUNING_ASSET", config.TICKER),
         start_date=config.VALIDATION_PERIOD["start"],
         end_date=config.VALIDATION_PERIOD["end"],
         interval=config.TIMEFRAME,
