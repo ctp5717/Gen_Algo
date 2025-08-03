@@ -114,7 +114,16 @@ def test_find_best_hyperparameters_uses_tuning_asset(monkeypatch):
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
     gene_types = [float]
 
-    monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', [{'sol_per_pop': 1, 'num_parents_mating': 1, 'mutation_num_genes': 1}], raising=False)
+    monkeypatch.setattr(
+        tuner.config,
+        'HYPERPARAMETER_SEARCH_SPACE',
+        [{
+            'sol_per_pop': 1,
+            'num_parents_mating': 1,
+            'mutation_num_genes': 1,
+        }],
+        raising=False,
+    )
     monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
 
     captured = {}
@@ -122,8 +131,10 @@ def test_find_best_hyperparameters_uses_tuning_asset(monkeypatch):
     class DummyGA:
         def __init__(self, *a, **k):
             pass
+
         def run(self):
             pass
+
         def best_solution(self, **kwargs):
             return [0], 0, None
 
