@@ -207,9 +207,14 @@ def run_walk_forward_validation(initial_champions=None):
 
         time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_exit = time_exit.reindex(entries.index, fill_value=False)
+        close_prices = (
+            test_data.xs("Close", level=1, axis=1)
+            if isinstance(test_data.columns, pd.MultiIndex)
+            else test_data["Close"]
+        )
 
         portfolio = vbt.Portfolio.from_signals(
-            close=test_data['Close'],
+            close=close_prices,
             entries=entries,
             exits=time_exit,
             sl_stop=sl_stop,

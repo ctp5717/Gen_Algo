@@ -6,6 +6,7 @@ Analysis & Reporting Module
 """
 
 import vectorbt as vbt
+import pandas as pd
 import config
 import data_loader
 import fitness
@@ -54,12 +55,18 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
         sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
         tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
-            
+
         time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
+        close_prices = (
+            validation_data.xs("Close", level=1, axis=1)
+            if isinstance(validation_data.columns, pd.MultiIndex)
+            else validation_data["Close"]
+        )
+
         portfolio = vbt.Portfolio.from_signals(
-            close=validation_data['Close'],
+            close=close_prices,
             entries=entries,
             exits=time_based_exit,
             sl_stop=sl_stop,
