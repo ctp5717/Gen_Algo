@@ -49,6 +49,8 @@ def test_find_best_hyperparameters_selects_best(monkeypatch):
 
     monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
     monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm: sol[0])
+    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(tuner.config, 'TUNING_ASSET', 'TEST', raising=False)
 
     best = tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
     assert best == search[1]
@@ -95,7 +97,45 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
 
     monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
     monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm: 0)
+    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(tuner.config, 'TUNING_ASSET', 'TEST', raising=False)
 
     original = list(gene_types)
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
     assert gene_types == original
+
+
+def test_find_best_hyperparameters_uses_tuning_asset(monkeypatch):
+    df = pd.DataFrame({
+        'Open': [1], 'High': [1], 'Low': [1], 'Close': [1], 'Volume': [1]
+    }, index=pd.date_range('2020-01-01', periods=1))
+
+    gene_space = [{'low': 0, 'high': 1}]
+    gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
+    gene_types = [float]
+
+    monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', [{'sol_per_pop': 1, 'num_parents_mating': 1, 'mutation_num_genes': 1}], raising=False)
+    monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+
+    captured = {}
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            pass
+        def run(self):
+            pass
+        def best_solution(self, **kwargs):
+            return [0], 0, None
+
+    monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
+    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm: 0)
+
+    def loader_stub(ticker, *a, **k):
+        captured.setdefault('ticker', ticker)
+        return df
+
+    monkeypatch.setattr(tuner.data_loader, 'get_data', loader_stub)
+    monkeypatch.setattr(tuner.config, 'TUNING_ASSET', 'TUNE', raising=False)
+
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
+    assert captured['ticker'] == 'TUNE'

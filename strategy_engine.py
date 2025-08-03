@@ -87,6 +87,15 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
     Processes the full strategy rules dictionary to generate final entry signals.
     (This version can intelligently select columns from multi-output indicators).
     """
+    # If the data contains multiple assets stacked in a MultiIndex, process each
+    # asset individually and concatenate the resulting signals.  This keeps the
+    # existing single-asset logic intact while enabling portfolio mode.
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        signals = {}
+        for asset in ohlc_data.columns.get_level_values(0).unique():
+            signals[asset] = process_strategy_rules(ohlc_data[asset], rules)
+        return pd.concat(signals, axis=1)
+
     entry_rules = rules.get('entry_rules', {})
     conditions = entry_rules.get('conditions', [])
     combination_logic = entry_rules.get('combination_logic', 'AND').upper()

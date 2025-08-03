@@ -94,8 +94,14 @@ def run_walk_forward_validation(initial_champions=None):
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
     end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
 
+    ticker = (
+        config.ASSET_BASKET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
+
     all_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=ticker,
         start_date=start_date,
         end_date=end_date,
         interval=config.TIMEFRAME,
