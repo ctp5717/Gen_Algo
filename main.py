@@ -131,7 +131,11 @@ def main():
     print("\nDisplaying GA fitness evolution plot...")
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
-    ga_instance.plot_fitness()
+    plt.plot(ga_instance.best_solutions_fitness, label="Best Fitness")
+    plt.xlabel("Generation")
+    plt.ylabel("Fitness")
+    plt.legend()
+    plt.show()
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)

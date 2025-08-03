@@ -46,15 +46,13 @@ def test_main_runs(monkeypatch):
             self.num_generations = 1
             self.generations_completed = 1
             self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
 
         def run(self):
             return None
 
         def best_solution(self, **kwargs):
             return [0], 1.0, None
-
-        def plot_fitness(self):
-            return None
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
 
@@ -121,15 +119,13 @@ def test_main_uses_tuner(monkeypatch):
             self.num_generations = 1
             self.generations_completed = 1
             self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
 
         def run(self):
             return None
 
         def best_solution(self, **kwargs):
             return [0], 1.0, None
-
-        def plot_fitness(self):
-            return None
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
     monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
@@ -199,22 +195,18 @@ def test_fitness_plot_non_blocking(monkeypatch):
         main, 'parse_genes_from_config', lambda *a, **k: (gene_space, gene_map, gene_types)
     )
 
-    events = {}
-
     class DummyGA:
         def __init__(self, *args, **kwargs):
             self.num_generations = 1
             self.generations_completed = 1
             self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
 
         def run(self):
             return None
 
         def best_solution(self, **kwargs):
             return [0], 1.0, None
-
-        def plot_fitness(self):
-            events['plot_called'] = True
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
     monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
@@ -244,16 +236,24 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
 
     ion_called = {}
+    plot_called = {}
+    show_called = {}
 
     monkeypatch.setattr(
         main,
         'plt',
         types.SimpleNamespace(
-            ion=lambda: ion_called.setdefault('ion', True)
+            ion=lambda: ion_called.setdefault('ion', True),
+            plot=lambda *a, **k: plot_called.setdefault('plot', True),
+            xlabel=lambda *a, **k: None,
+            ylabel=lambda *a, **k: None,
+            legend=lambda *a, **k: None,
+            show=lambda *a, **k: show_called.setdefault('show', True),
         ),
     )
 
     main.main()
 
     assert ion_called['ion']
-    assert events['plot_called']
+    assert plot_called['plot']
+    assert show_called['show']
