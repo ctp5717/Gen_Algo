@@ -82,8 +82,15 @@ class FitnessEvaluator:
                 fees=0.001,
                 freq=config.TIMEFRAME
             )
-            
-            stats = portfolio.stats()
+            # Vectorbt returns a multi-column Portfolio when `close` contains
+            # several assets. Calling ``stats`` on such an object triggers a
+            # pandas warning because the metrics are computed per column and
+            # implicitly aggregated using ``mean``.  This warning was surfacing
+            # during the GA optimisation, eventually leading to worker process
+            # termination.  By first collapsing the portfolio to its total
+            # equity curve, ``stats`` receives a single column and returns a
+            # Series, avoiding the warning and ensuring deterministic results.
+            stats = portfolio.total().stats()
             sortino = stats['Sortino Ratio']
             profit_factor = stats['Profit Factor']
             max_drawdown = stats['Max Drawdown [%]']

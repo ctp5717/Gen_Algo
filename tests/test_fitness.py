@@ -29,3 +29,56 @@ def test_exception_logging(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "boom" in captured.out
     assert score == -999.0
+
+
+def test_aggregates_multi_asset_portfolio(monkeypatch):
+    """Uses total().stats() to avoid pandas multi-column warnings."""
+    # Minimal OHLC data
+    ohlc = pd.DataFrame({'Close': [1, 2, 3]})
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+
+    # Provide entries with enough trades
+    entries = pd.Series([True, True, True])
+    monkeypatch.setattr(
+        fitness.engine, 'process_strategy_rules', lambda *a, **k: entries
+    )
+
+    # Simplify config weights
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'min_trades': 0, 'sortino_ratio': 1, 'profit_factor': 1, 'max_drawdown': 1},
+        raising=False,
+    )
+    monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
+
+    # Dummy vectorbt Portfolio that requires calling total().stats()
+    class DummyTotal:
+        def stats(self):
+            return pd.Series(
+                {
+                    'Sortino Ratio': 1.0,
+                    'Profit Factor': 1.0,
+                    'Max Drawdown [%]': 10.0,
+                }
+            )
+
+    class DummyPortfolio:
+        def stats(self):
+            raise ValueError("stats should not be called directly")
+
+        def total(self):
+            return DummyTotal()
+
+    class DummyPortfolioClass:
+        @staticmethod
+        def from_signals(**kwargs):
+            return DummyPortfolio()
+
+    monkeypatch.setattr(fitness.vbt, 'Portfolio', DummyPortfolioClass, raising=False)
+
+    score = evaluator(None, [], 0)
+
+    # With proper aggregation the evaluator returns a finite score
+    assert score > 0
