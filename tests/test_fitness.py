@@ -86,3 +86,44 @@ def test_aggregates_multi_asset_portfolio(monkeypatch):
     # With proper aggregation the evaluator returns a finite score and uses value()
     assert score > 0
     assert holder['p'].value_called
+
+
+def test_handles_single_asset_portfolio(monkeypatch):
+    """Handles portfolios whose value and PnL are Series."""
+    ohlc = pd.DataFrame({'Close': [1, 2, 3]})
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+
+    entries = pd.Series([True, True, True])
+    monkeypatch.setattr(
+        fitness.engine, 'process_strategy_rules', lambda *a, **k: entries
+    )
+
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'min_trades': 0, 'sortino_ratio': 1, 'profit_factor': 1, 'max_drawdown': 1},
+        raising=False,
+    )
+    monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
+
+    class DummyTrades:
+        pnl = pd.Series([1.0, -0.5])
+
+    class DummyPortfolio:
+        def value(self):
+            return pd.Series([100, 105, 110])
+
+        @property
+        def trades(self):
+            return DummyTrades()
+
+    class DummyPortfolioClass:
+        @staticmethod
+        def from_signals(**kwargs):
+            return DummyPortfolio()
+
+    monkeypatch.setattr(fitness.vbt, 'Portfolio', DummyPortfolioClass, raising=False)
+
+    score = evaluator(None, [], 0)
+    assert score > 0

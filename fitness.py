@@ -86,7 +86,10 @@ class FitnessEvaluator:
             # column Portfolio leads to a pandas warning and unpredictable
             # aggregation.  To avoid this, manually aggregate the equity curve and
             # compute the required metrics below.
-            total_value = portfolio.value().sum(axis=1)
+            # Ensure the portfolio value is treated as a DataFrame even for
+            # single-asset portfolios to avoid axis errors when summing.
+            value_df = pd.DataFrame(portfolio.value())
+            total_value = value_df.sum(axis=1)
             returns = total_value.pct_change().dropna()
 
             if returns.empty:
@@ -96,7 +99,7 @@ class FitnessEvaluator:
             downside_std = downside.std(ddof=0)
             sortino = returns.mean() / downside_std if downside_std != 0 else 0.0
 
-            pnl = portfolio.trades.pnl
+            pnl = pd.DataFrame(portfolio.trades.pnl)
             total_profit = pnl[pnl > 0].sum().sum()
             total_loss = -pnl[pnl < 0].sum().sum()
             profit_factor = total_profit / total_loss if total_loss != 0 else np.inf
