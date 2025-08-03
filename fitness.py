@@ -99,9 +99,13 @@ class FitnessEvaluator:
             downside_std = downside.std(ddof=0)
             sortino = returns.mean() / downside_std if downside_std != 0 else 0.0
 
-            pnl = pd.DataFrame(portfolio.trades.pnl)
-            total_profit = pnl[pnl > 0].sum().sum()
-            total_loss = -pnl[pnl < 0].sum().sum()
+            pnl = portfolio.trades.pnl
+            # ``trades.pnl`` is a ``MappedArray`` in vectorbt. Convert it to a
+            # pandas object before aggregation to avoid "DataFrame constructor
+            # not properly called" errors.
+            pnl_df = pd.DataFrame(pnl.to_pd())
+            total_profit = pnl_df[pnl_df > 0].sum().sum()
+            total_loss = -pnl_df[pnl_df < 0].sum().sum()
             profit_factor = total_profit / total_loss if total_loss != 0 else np.inf
 
             peak = total_value.cummax()

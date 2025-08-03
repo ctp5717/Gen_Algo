@@ -53,8 +53,15 @@ def test_aggregates_multi_asset_portfolio(monkeypatch):
     monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
     monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
 
+    class DummyPnl:
+        def __init__(self, data):
+            self.data = data
+
+        def to_pd(self):
+            return self.data
+
     class DummyTrades:
-        pnl = pd.DataFrame({'a': [1.0, -0.5], 'b': [0.5, -1.0]})
+        pnl = DummyPnl(pd.DataFrame({'a': [1.0, -0.5], 'b': [0.5, -1.0]}))
 
     class DummyPortfolio:
         def __init__(self):
@@ -107,8 +114,15 @@ def test_handles_single_asset_portfolio(monkeypatch):
     monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
     monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
 
+    class DummyPnl:
+        def __init__(self, data):
+            self.data = data
+
+        def to_pd(self):
+            return self.data
+
     class DummyTrades:
-        pnl = pd.Series([1.0, -0.5])
+        pnl = DummyPnl(pd.Series([1.0, -0.5]))
 
     class DummyPortfolio:
         def value(self):
