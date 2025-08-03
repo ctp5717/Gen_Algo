@@ -28,35 +28,35 @@ API_KEYS = {
 # --- 1. CRYPTOCURRENCY PAIR SELECTION ---
 CRYPTO_UNIVERSE = {
     # Tier 1 / Major Pairs
-    "Bitcoin": "BTC-USD",
-    "Ethereum": "ETH-USD",
+    "Bitcoin": "BTC-USDT",
+    "Ethereum": "ETH-USDT",
 
     # Major Altcoins
-    "Solana": "SOL-USD",
-    "XRP": "XRP-USD",
-    "Cardano": "ADA-USD",
-    "Avalanche": "AVAX-USD",
-    "Dogecoin": "DOGE-USD",
-    "Chainlink": "LINK-USD",
-    "Polkadot": "DOT-USD",
-    "Polygon": "MATIC-USD",
-    "Litecoin": "LTC-USD",
-    "Bitcoin_Cash": "BCH-USD",
-    "Shiba_Inu": "SHIB-USD",
-    "Toncoin": "TON-USD",
+    "Solana": "SOL-USDT",
+    "XRP": "XRP-USDT",
+    "Cardano": "ADA-USDT",
+    "Avalanche": "AVAX-USDT",
+    "Dogecoin": "DOGE-USDT",
+    "Chainlink": "LINK-USDT",
+    "Polkadot": "DOT-USDT",
+    "Polygon": "MATIC-USDT",
+    "Litecoin": "LTC-USDT",
+    "Bitcoin_Cash": "BCH-USDT",
+    "Shiba_Inu": "SHIB-USDT",
+    "Toncoin": "TON-USDT",
 
     # Other Prominent L1s / L2s / DeFi
-    "Uniswap": "UNI-USD",
-    "TRON": "TRX-USD",
-    "Dai": "DAI-USD",
-    "Stellar": "XLM-USD",
-    "Near_Protocol": "NEAR-USD",
-    "Internet_Computer": "ICP-USD",
-    "Ethereum_Classic": "ETC-USD",
-    "VeChain": "VET-USD",
-    "Filecoin": "FIL-USD",
-    "Optimism": "OP-USD",
-    "The_Graph": "GRT-USD"
+    "Uniswap": "UNI-USDT",
+    "TRON": "TRX-USDT",
+    "Dai": "DAI-USDT",
+    "Stellar": "XLM-USDT",
+    "Near_Protocol": "NEAR-USDT",
+    "Internet_Computer": "ICP-USDT",
+    "Ethereum_Classic": "ETC-USDT",
+    "VeChain": "VET-USDT",
+    "Filecoin": "FIL-USDT",
+    "Optimism": "OP-USDT",
+    "The_Graph": "GRT-USDT"
 }
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
@@ -65,15 +65,28 @@ SELECTED_ASSET_NAME = "Dogecoin"
 
 # Set your desired timeframe here. This now controls everything.
 TIMEFRAME = "15m"
-TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
+TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USDT")
 
 # --- Portfolio Optimisation Settings ---------------------------------------
 # When enabled the GA will optimise a single strategy across the entire basket
 # defined in ``ASSET_BASKET``.  ``TUNING_ASSET`` is used for the quick
 # hyperparameter search before the full portfolio run.
-PORTFOLIO_OPTIMIZATION_ENABLED = False
-ASSET_BASKET = [TICKER]
-TUNING_ASSET = TICKER
+PORTFOLIO_OPTIMIZATION_ENABLED = True
+ASSET_BASKET = [
+    "BTC-USDT",  # Bitcoin - Foundational Store of Value
+    "ETH-USDT",  # Ethereum - Dominant Smart Contract Platform
+    "SOL-USDT",  # Solana - High-Throughput L1 Competitor
+    "ADA-USDT",  # Cardano - Established L1 Competitor
+    "AVAX-USDT",  # Avalanche - High-Speed L1 Competitor
+    "DOT-USDT",  # Polkadot - Interoperability L1 Protocol
+    "MATIC-USDT",  # Polygon - Key Ethereum L2 Scaling Solution
+    "LINK-USDT",  # Chainlink - Core DeFi Oracle Infrastructure
+    "UNI-USDT",  # Uniswap - Leading Decentralized Exchange (DEX)
+    "AAVE-USDT",  # Aave - Leading DeFi Lending Protocol
+    "DOGE-USDT",  # Dogecoin - Legacy / High Cap Meme Coin
+    "FIL-USDT",  # Filecoin - Decentralized Storage Infrastructure
+]
+TUNING_ASSET = "BTC-USDT"
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
 MAX_HOLD_DAYS = 14
