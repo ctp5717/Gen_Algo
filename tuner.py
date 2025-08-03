@@ -29,7 +29,8 @@ def _evaluate_on_validation(solution, gene_map):
 
     rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
     entries = engine.process_strategy_rules(val_data, rules)
-    if entries.sum() < 1:
+    entries_sum = entries.to_numpy().sum()
+    if entries_sum < 1:
         return -np.inf
 
     exit_rules = rules.get("exit_rules", {})

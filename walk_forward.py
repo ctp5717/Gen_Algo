@@ -171,7 +171,8 @@ def run_walk_forward_validation(initial_champions=None):
 
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(test_data, rules)
-        if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+        entries_sum = entries.to_numpy().sum()
+        if entries_sum < config.FITNESS_WEIGHTS['min_trades']:
             print("No trades in test period.")
             results.append({
                 'Window': idx,
