@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import numpy as np
+import warnings
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -11,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 # Stub heavy optional dependencies
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import walk_forward  # noqa: E402
 
@@ -119,12 +121,24 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         lambda *a, **k: pd.Series([True, False], index=df.index),
     )
 
+    class DummyLoc:
+        def __getitem__(self, key):
+            return DummyPortfolio()
+
     class DummyPortfolio:
         def __init__(self, *a, **k):
-            pass
+            self.trades = types.SimpleNamespace(count=lambda: pd.Series([1], index=[0]))
+            self.loc = DummyLoc()
+            self.wrapper = types.SimpleNamespace(columns=[0])
+
+        def agg(self, how):
+            return self
 
         def stats(self):
             return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
+
+        def plot(self, *a, **k):
+            return None
 
     monkeypatch.setattr(
         walk_forward.vbt,
@@ -200,7 +214,19 @@ def test_walk_forward_returns_summary(monkeypatch):
         lambda *a, **k: pd.DataFrame({'A': [True, False], 'B': [False, False]}, index=df.index),
     )
 
+    class DummyLoc:
+        def __getitem__(self, key):
+            return DummyPortfolio()
+
     class DummyPortfolio:
+        def __init__(self, *a, **k):
+            self.trades = types.SimpleNamespace(count=lambda: pd.Series([1], index=[0]))
+            self.loc = DummyLoc()
+            self.wrapper = types.SimpleNamespace(columns=[0])
+
+        def agg(self, how):
+            return self
+
         def stats(self):
             return {
                 "Total Return [%]": 1.0,
@@ -209,6 +235,9 @@ def test_walk_forward_returns_summary(monkeypatch):
                 "Sortino Ratio": -np.inf,
                 "Win Rate [%]": 50.0,
             }
+
+        def plot(self, *a, **k):
+            return None
 
     monkeypatch.setattr(
         walk_forward.vbt,
