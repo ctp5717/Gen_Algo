@@ -33,6 +33,7 @@ CRYPTO_UNIVERSE = {
 
     # Major Altcoins
     "Solana": "SOL-USDT",
+    "SUI": "SUI-USDT",
     "XRP": "XRP-USDT",
     "Cardano": "ADA-USDT",
     "Avalanche": "AVAX-USDT",
@@ -73,14 +74,14 @@ TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USDT")
 # hyperparameter search before the full portfolio run.
 PORTFOLIO_OPTIMIZATION_ENABLED = True
 ASSET_BASKET = [
-    "ETH-USDT",  # Ethereum - Dominant Smart Contract Platform
+    "SUI-USDT",  # SUI
     "SOL-USDT",  # Solana - High-Throughput L1 Competitor
     "AVAX-USDT",  # Avalanche - High-Speed L1 Competitor
     "LINK-USDT",  # Chainlink - Core DeFi Oracle Infrastructure
     "AAVE-USDT",  # Aave - Leading DeFi Lending Protocol
     "DOGE-USDT",  # Dogecoin - Legacy / High Cap Meme Coin
 ]
-TUNING_ASSET = "BTC-USDT"
+TUNING_ASSET = "ETH-USDT"
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
 MAX_HOLD_DAYS = 14
