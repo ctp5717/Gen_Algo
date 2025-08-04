@@ -260,3 +260,72 @@ def test_fitness_plot_non_blocking(monkeypatch):
     assert plot_called['plot']
     assert show_called['show']
     assert pause_called['pause']
+
+
+def test_ga_fitness_metrics_finite(monkeypatch):
+    import importlib
+    import numpy as np
+    import pygad
+
+    # Use the real vectorbt module for this test
+    sys.modules.pop('vectorbt', None)
+    import vectorbt  # noqa: F401  # re-import real module
+
+    # Reload fitness to bind real vectorbt
+    import fitness
+    importlib.reload(fitness)
+
+    # Minimal OHLC data with three periods
+    df = pd.DataFrame(
+        {
+            'Open': [1, 2, 3],
+            'High': [1, 2, 3],
+            'Low': [1, 2, 3],
+            'Close': [1, 2, 3],
+            'Volume': [100, 100, 100],
+        },
+        index=pd.date_range('2020-01-01', periods=3),
+    )
+
+    # Simplify config parameters for a tiny GA run
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1.0, 'profit_factor': 0.0, 'max_drawdown': 0.0, 'min_trades': 0},
+        raising=False,
+    )
+    monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
+
+    # Simple trading signals: enter on first bar and exit on second
+    entries = pd.Series([True, False, False], index=df.index)
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *_args, **_kwargs: entries,
+    )
+
+    gene_space = [{'low': 0, 'high': 1}]
+    gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
+    gene_types = [float]
+
+    evaluator = fitness.FitnessEvaluator(df, {}, gene_map)
+
+    ga = pygad.GA(
+        num_generations=1,
+        num_parents_mating=1,
+        sol_per_pop=2,
+        num_genes=len(gene_space),
+        gene_space=gene_space,
+        gene_type=gene_types,
+        mutation_num_genes=1,
+        fitness_func=evaluator.__call__,
+    )
+
+    ga.run()
+
+    fitness_array = np.array(ga.best_solutions_fitness + ga.last_generation_fitness)
+    assert np.isfinite(fitness_array).all()
+
+    # Restore stubbed vectorbt for other tests
+    sys.modules['vectorbt'] = types.ModuleType('vectorbt')
