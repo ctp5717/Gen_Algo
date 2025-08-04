@@ -76,6 +76,13 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             freq=config.TIMEFRAME
         )
 
+        # Filter out assets with no trades and aggregate remaining columns
+        cols_mask = portfolio.trades.count() > 0
+        if not cols_mask.any():
+            print("\nChampion strategy produced no trades in the validation period.")
+            return
+        portfolio = portfolio.loc[:, cols_mask].agg('sum')
+
     except Exception as e:
         print(f"An error occurred during analysis backtest: {e}")
         traceback.print_exc() # Use traceback for more detailed errors
@@ -94,6 +101,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
     fig = portfolio.plot(
-        title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
+        title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)",
+        column='agg'
     )
     fig.show()
