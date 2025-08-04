@@ -238,6 +238,7 @@ def test_fitness_plot_non_blocking(monkeypatch):
     ion_called = {}
     plot_called = {}
     show_called = {}
+    pause_called = {}
 
     monkeypatch.setattr(
         main,
@@ -249,6 +250,7 @@ def test_fitness_plot_non_blocking(monkeypatch):
             ylabel=lambda *a, **k: None,
             legend=lambda *a, **k: None,
             show=lambda *a, **k: show_called.setdefault('show', True),
+            pause=lambda *a, **k: pause_called.setdefault('pause', True),
         ),
     )
 
@@ -257,3 +259,4 @@ def test_fitness_plot_non_blocking(monkeypatch):
     assert ion_called['ion']
     assert plot_called['plot']
     assert show_called['show']
+    assert pause_called['pause']
