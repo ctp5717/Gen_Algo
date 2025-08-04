@@ -68,7 +68,7 @@ def test_run_champion_analysis_aggregates_portfolio(monkeypatch):
     printed = []
 
     class DummyAggregatedPortfolio:
-        def stats(self):
+        def stats(self, column=None):
             data = {m: [0] for m in metrics}
             data['Sharpe Ratio'] = [np.inf]
             data['Sortino Ratio'] = [-np.inf]

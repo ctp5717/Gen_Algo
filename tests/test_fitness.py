@@ -71,7 +71,7 @@ def test_aggregates_multi_asset_portfolio(monkeypatch):
             self.value_called = True
             return pd.DataFrame({'a': [100, 105, 110], 'b': [200, 198, 202]})
 
-        def stats(self):  # Should never be called
+        def stats(self, column=None):  # Should never be called
             raise AssertionError("stats should not be called")
 
         @property

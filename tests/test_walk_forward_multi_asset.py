@@ -96,7 +96,9 @@ def test_walk_forward_multi_asset_stats_finite(monkeypatch):
             agg_counts = pd.Series([self.trades.count().sum()], index=[0])
             return DummyPortfolio(agg_counts)
 
-        def stats(self):
+        def stats(self, column=None):
+            if column is None:
+                warnings.warn("mean aggregation", UserWarning)
             return {
                 "Total Return [%]": 0.0,
                 "Max Drawdown [%]": 0.0,

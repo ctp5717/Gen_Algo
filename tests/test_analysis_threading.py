@@ -68,7 +68,7 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         def agg(self, how):
             return self
 
-        def stats(self):
+        def stats(self, column=None):
             return pd.DataFrame({m: [0] for m in metrics})
 
         def plot(self, *a, **k):
