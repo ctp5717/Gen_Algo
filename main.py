@@ -135,7 +135,8 @@ def main():
     plt.xlabel("Generation")
     plt.ylabel("Fitness")
     plt.legend()
-    plt.show()
+    plt.show(block=False)
+    plt.pause(0.001)
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)
