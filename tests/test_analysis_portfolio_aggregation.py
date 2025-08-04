@@ -2,7 +2,6 @@ import sys
 import types
 from pathlib import Path
 import pandas as pd
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -111,4 +110,3 @@ def test_run_champion_analysis_aggregates_portfolio(monkeypatch):
 
     assert len(record) == 0
     assert calls == ['show']
-
