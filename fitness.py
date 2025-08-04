@@ -78,15 +78,39 @@ class FitnessEvaluator:
                 exits=time_based_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
+                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
                 fees=0.001,
                 freq=config.TIMEFRAME
             )
-            
-            stats = portfolio.stats()
-            sortino = stats['Sortino Ratio']
-            profit_factor = stats['Profit Factor']
-            max_drawdown = stats['Max Drawdown [%]']
+            # Vectorbt returns one column per asset.  Calling ``stats`` on a multi-
+            # column Portfolio leads to a pandas warning and unpredictable
+            # aggregation.  To avoid this, manually aggregate the equity curve and
+            # compute the required metrics below.
+            # Ensure the portfolio value is treated as a DataFrame even for
+            # single-asset portfolios to avoid axis errors when summing.
+            value_df = pd.DataFrame(portfolio.value())
+            total_value = value_df.sum(axis=1)
+            returns = total_value.pct_change().dropna()
+
+            if returns.empty:
+                return -1.0
+
+            downside = returns[returns < 0]
+            downside_std = downside.std(ddof=0)
+            sortino = returns.mean() / downside_std if downside_std != 0 else 0.0
+
+            pnl = portfolio.trades.pnl
+            # ``trades.pnl`` is a ``MappedArray`` in vectorbt. Convert it to a
+            # pandas object before aggregation to avoid "DataFrame constructor
+            # not properly called" errors.
+            pnl_df = pd.DataFrame(pnl.to_pd())
+            total_profit = pnl_df[pnl_df > 0].sum().sum()
+            total_loss = -pnl_df[pnl_df < 0].sum().sum()
+            profit_factor = total_profit / total_loss if total_loss != 0 else np.inf
+
+            peak = total_value.cummax()
+            drawdown = (total_value / peak - 1.0).min()
+            max_drawdown = abs(drawdown) * 100
             
             if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
             if np.isnan(sortino): sortino = 0
