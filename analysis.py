@@ -101,8 +101,18 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     print("\nDisplaying equity curve plot for the validation period...")
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
+    # After aggregating the portfolio above, the resulting object only has a
+    # single column (usually indexed by ``0``).  Passing a non-existent
+    # column name such as ``'agg'`` to ``plot`` would raise ``TypeError``.
+    # Select the first (and only) column explicitly to avoid this.
+    agg_column = 0
+    if getattr(portfolio, 'wrapper', None) is not None:
+        try:
+            agg_column = portfolio.wrapper.columns[0]
+        except Exception:
+            pass
     fig = portfolio.plot(
         title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)",
-        column='agg'
+        column=agg_column
     )
     fig.show()
