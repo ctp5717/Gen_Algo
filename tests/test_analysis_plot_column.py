@@ -69,7 +69,7 @@ def test_run_champion_analysis_plots_without_typeerror(monkeypatch):
         def __init__(self):
             self.wrapper = types.SimpleNamespace(columns=[0])
 
-        def stats(self):
+        def stats(self, column=None):
             data = {m: [0] for m in metrics}
             return pd.DataFrame(data)
 

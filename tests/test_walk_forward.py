@@ -134,7 +134,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         def agg(self, how):
             return self
 
-        def stats(self):
+        def stats(self, column=None):
             return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
 
         def plot(self, *a, **k):
@@ -227,7 +227,7 @@ def test_walk_forward_returns_summary(monkeypatch):
         def agg(self, how):
             return self
 
-        def stats(self):
+        def stats(self, column=None):
             return {
                 "Total Return [%]": 1.0,
                 "Max Drawdown [%]": 0.0,

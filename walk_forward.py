@@ -239,7 +239,7 @@ def run_walk_forward_validation(initial_champions=None):
             continue
         portfolio = portfolio.loc[:, cols_mask].agg('sum')
 
-        stats = portfolio.stats()
+        stats = portfolio.stats(column=0)
         if isinstance(stats, dict):
             stats = pd.Series(stats)
         elif isinstance(stats, pd.DataFrame):
