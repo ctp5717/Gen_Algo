@@ -73,18 +73,12 @@ TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USDT")
 # hyperparameter search before the full portfolio run.
 PORTFOLIO_OPTIMIZATION_ENABLED = True
 ASSET_BASKET = [
-    "BTC-USDT",  # Bitcoin - Foundational Store of Value
     "ETH-USDT",  # Ethereum - Dominant Smart Contract Platform
     "SOL-USDT",  # Solana - High-Throughput L1 Competitor
-    "ADA-USDT",  # Cardano - Established L1 Competitor
     "AVAX-USDT",  # Avalanche - High-Speed L1 Competitor
-    "DOT-USDT",  # Polkadot - Interoperability L1 Protocol
-    "MATIC-USDT",  # Polygon - Key Ethereum L2 Scaling Solution
     "LINK-USDT",  # Chainlink - Core DeFi Oracle Infrastructure
-    "UNI-USDT",  # Uniswap - Leading Decentralized Exchange (DEX)
     "AAVE-USDT",  # Aave - Leading DeFi Lending Protocol
     "DOGE-USDT",  # Dogecoin - Legacy / High Cap Meme Coin
-    "FIL-USDT",  # Filecoin - Decentralized Storage Infrastructure
 ]
 TUNING_ASSET = "BTC-USDT"
 
