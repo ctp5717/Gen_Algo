@@ -81,8 +81,7 @@ def test_walk_forward_multi_asset_stats_finite(monkeypatch):
         def __init__(self, portfolio):
             self.portfolio = portfolio
 
-        def __getitem__(self, item):
-            _, cols_mask = item
+        def __getitem__(self, cols_mask):
             counts = self.portfolio.trades.count()[cols_mask]
             return DummyPortfolio(counts)
 

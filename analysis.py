@@ -82,7 +82,10 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         if not cols_mask.any():
             print("\nChampion strategy produced no trades in the validation period.")
             return
-        portfolio = portfolio.loc[:, cols_mask].agg('sum')
+        # ``vectorbt`` treats ``Portfolio`` objects as column-only containers.
+        # Using ``.loc[:, mask]`` attempts two-dimensional indexing and raises
+        # ``IndexingError: Too many indexers``. Select columns directly instead.
+        portfolio = portfolio.loc[cols_mask].agg('sum')
 
     except Exception as e:
         print(f"An error occurred during analysis backtest: {e}")

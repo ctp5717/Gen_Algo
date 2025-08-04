@@ -237,7 +237,10 @@ def run_walk_forward_validation(initial_champions=None):
                 'Params': winning_params,
             })
             continue
-        portfolio = portfolio.loc[:, cols_mask].agg('sum')
+        # ``vectorbt``'s portfolio indexer expects a single column selector.
+        # Using two-dimensional indexing (``.loc[:, mask]``) results in
+        # ``IndexingError``. Select columns directly with a boolean mask.
+        portfolio = portfolio.loc[cols_mask].agg('sum')
 
         stats = portfolio.stats(column=0)
         if isinstance(stats, dict):

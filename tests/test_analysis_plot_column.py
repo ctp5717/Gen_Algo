@@ -89,7 +89,7 @@ def test_run_champion_analysis_plots_without_typeerror(monkeypatch):
 
     class DummyLoc:
         def __getitem__(self, key):
-            _, mask = key
+            mask = key
             assert mask.tolist() == [True, False]
             return DummySelectedPortfolio()
 
