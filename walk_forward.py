@@ -223,6 +223,22 @@ def run_walk_forward_validation(initial_champions=None):
             fees=0.001,
             freq=config.TIMEFRAME,
         )
+        # Filter out assets with no trades and aggregate the remainder
+        cols_mask = portfolio.trades.count() > 0
+        if not cols_mask.any():
+            print("No trades in test period.")
+            results.append({
+                'Window': idx,
+                'Total Return [%]': np.nan,
+                'Max Drawdown [%]': np.nan,
+                'Sharpe Ratio': np.nan,
+                'Sortino Ratio': np.nan,
+                'Win Rate [%]': np.nan,
+                'Params': winning_params,
+            })
+            continue
+        portfolio = portfolio.loc[:, cols_mask].agg('sum')
+
         stats = portfolio.stats()
         if isinstance(stats, dict):
             stats = pd.Series(stats)
