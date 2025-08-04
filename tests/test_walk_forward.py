@@ -3,6 +3,7 @@ import types
 from pathlib import Path
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -196,7 +197,7 @@ def test_walk_forward_returns_summary(monkeypatch):
     monkeypatch.setattr(
         walk_forward.engine,
         "process_strategy_rules",
-        lambda *a, **k: pd.Series([True, False], index=df.index),
+        lambda *a, **k: pd.DataFrame({'A': [True, False], 'B': [False, False]}, index=df.index),
     )
 
     class DummyPortfolio:
@@ -204,8 +205,8 @@ def test_walk_forward_returns_summary(monkeypatch):
             return {
                 "Total Return [%]": 1.0,
                 "Max Drawdown [%]": 0.0,
-                "Sharpe Ratio": 1.0,
-                "Sortino Ratio": 1.0,
+                "Sharpe Ratio": np.inf,
+                "Sortino Ratio": -np.inf,
                 "Win Rate [%]": 50.0,
             }
 
@@ -223,6 +224,8 @@ def test_walk_forward_returns_summary(monkeypatch):
     assert isinstance(summary, dict)
     for key in ["average_return", "total_compounded_return", "folds"]:
         assert key in summary
+    assert np.isfinite(summary["average_sharpe"])
+    assert np.isfinite(summary["average_sortino"])
 
 
 def test_walk_forward_portfolio_basket(monkeypatch):

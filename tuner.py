@@ -61,8 +61,13 @@ def _evaluate_on_validation(solution, gene_map):
         freq=config.TIMEFRAME,
     )
     stats = portfolio.stats()
+    if isinstance(stats, dict):
+        stats = pd.Series(stats)
+    elif isinstance(stats, pd.DataFrame):
+        stats = stats.iloc[:, 0]
+    stats = stats.replace([np.inf, -np.inf], np.nan)
     score = stats.get("Sortino Ratio")
-    return -np.inf if np.isnan(score) else score
+    return -np.inf if pd.isna(score) else score
 
 
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):

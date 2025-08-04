@@ -7,6 +7,7 @@ Analysis & Reporting Module
 
 import vectorbt as vbt
 import pandas as pd
+import numpy as np
 import config
 import data_loader
 import fitness
@@ -89,7 +90,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         return
 
     print("\n--- Validation Period Performance Stats ---")
-    stats = portfolio.stats()
+    stats = portfolio.stats().replace([np.inf, -np.inf], np.nan).fillna(0)
     metrics_to_show = [
         'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
         'Max Drawdown [%]', 'Sortino Ratio', 'Sharpe Ratio', 'Profit Factor',
