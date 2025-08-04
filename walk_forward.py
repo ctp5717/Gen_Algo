@@ -224,11 +224,16 @@ def run_walk_forward_validation(initial_champions=None):
             freq=config.TIMEFRAME,
         )
         stats = portfolio.stats()
-        tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')
-        dd = stats['Max Drawdown [%]'] if isinstance(stats, dict) else stats.get('Max Drawdown [%]')
-        sharpe = stats.get('Sharpe Ratio') if isinstance(stats, dict) else stats.get('Sharpe Ratio')
-        sortino = stats.get('Sortino Ratio') if isinstance(stats, dict) else stats.get('Sortino Ratio')
-        win_rate = stats.get('Win Rate [%]') if isinstance(stats, dict) else stats.get('Win Rate [%]')
+        if isinstance(stats, dict):
+            stats = pd.Series(stats)
+        elif isinstance(stats, pd.DataFrame):
+            stats = stats.iloc[:, 0]
+        stats = stats.replace([np.inf, -np.inf], np.nan).fillna(0)
+        tr = stats.get('Total Return [%]')
+        dd = stats.get('Max Drawdown [%]')
+        sharpe = stats.get('Sharpe Ratio')
+        sortino = stats.get('Sortino Ratio')
+        win_rate = stats.get('Win Rate [%]')
         print(f"Test Return: {tr:.2f}% | Max DD: {dd:.2f}%")
         print("Winning Parameters:")
         for param_name, param_value in winning_params.items():

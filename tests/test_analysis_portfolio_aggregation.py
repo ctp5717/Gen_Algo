@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -64,10 +65,15 @@ def test_run_champion_analysis_aggregates_portfolio(monkeypatch):
     ]
 
     calls = []
+    printed = []
 
     class DummyAggregatedPortfolio:
         def stats(self):
-            return pd.DataFrame({m: [0] for m in metrics})
+            data = {m: [0] for m in metrics}
+            data['Sharpe Ratio'] = [np.inf]
+            data['Sortino Ratio'] = [-np.inf]
+            data['Profit Factor'] = [np.inf]
+            return pd.DataFrame(data)
 
         def plot(self, *a, **k):
             class DummyFig:
@@ -99,7 +105,9 @@ def test_run_champion_analysis_aggregates_portfolio(monkeypatch):
         raising=False,
     )
 
+    import builtins
     monkeypatch.setattr(analysis.plt, 'ion', lambda: None)
+    monkeypatch.setattr(builtins, 'print', lambda *a, **k: printed.append(' '.join(map(str, a))))
 
     import warnings
     with warnings.catch_warnings(record=True) as record:
@@ -108,5 +116,7 @@ def test_run_champion_analysis_aggregates_portfolio(monkeypatch):
             {0: {'name': 'x', 'path': [], 'type': float}},
         )
 
+    out = '\n'.join(printed).lower()
+    assert 'inf' not in out
     assert len(record) == 0
     assert calls == ['show']
