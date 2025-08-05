@@ -126,9 +126,36 @@ def test_portfolio_stats_called_without_agg(monkeypatch):
 @pytest.mark.parametrize(
     "stats_series,expected",
     [
-        (pd.Series({'Sortino Ratio': np.nan, 'Profit Factor': 1.0, 'Max Drawdown [%]': 10.0}), 'Sortino Ratio'),
-        (pd.Series({'Sortino Ratio': 1.0, 'Profit Factor': 0.0, 'Max Drawdown [%]': 10.0}), 'Profit Factor'),
-        (pd.Series({'Sortino Ratio': 1.0, 'Profit Factor': 1.0, 'Max Drawdown [%]': 100.0}), 'Drawdown Score'),
+        (
+            pd.Series(
+                {
+                    'Sortino Ratio': np.nan,
+                    'Profit Factor': 1.0,
+                    'Max Drawdown [%]': 10.0,
+                }
+            ),
+            'Sortino Ratio',
+        ),
+        (
+            pd.Series(
+                {
+                    'Sortino Ratio': 1.0,
+                    'Profit Factor': 0.0,
+                    'Max Drawdown [%]': 10.0,
+                }
+            ),
+            'Profit Factor',
+        ),
+        (
+            pd.Series(
+                {
+                    'Sortino Ratio': 1.0,
+                    'Profit Factor': 1.0,
+                    'Max Drawdown [%]': 100.0,
+                }
+            ),
+            'Drawdown Score',
+        ),
     ],
 )
 def test_invalid_metrics_penalize(monkeypatch, caplog, stats_series, expected):
