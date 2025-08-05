@@ -68,3 +68,29 @@ def test_get_data_handles_asset_list(monkeypatch, capsys):
     assert isinstance(result.columns, pd.MultiIndex)
     assert ("A", "Close") in result.columns
     assert ("B", "Close") in result.columns
+
+
+def test_get_data_logs_skipped_assets(monkeypatch, capsys):
+    df = pd.DataFrame(
+        {
+            "Open": [1, 2],
+            "High": [1, 2],
+            "Low": [1, 2],
+            "Close": [1, 2],
+            "Volume": [1, 2],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    def fake_loader(ticker, *a, **k):
+        if ticker == "A":
+            return df
+        raise RuntimeError("fail")
+
+    monkeypatch.setattr(data_loader, "_load_single_asset", fake_loader)
+
+    result = data_loader.get_data(["A", "B"], "2020-01-01", "2020-01-02")
+    out = capsys.readouterr().out
+    assert "Skipped assets: B" in out
+    assert ("A", "Close") in result.columns
+    assert ("B", "Close") not in result.columns

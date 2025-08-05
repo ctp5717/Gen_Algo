@@ -34,6 +34,7 @@ def test_find_best_hyperparameters_selects_best(monkeypatch):
     ]
     monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', search, raising=False)
     monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda *a, **k: df)
 
     scores = [0.1, 0.2]
 
@@ -79,6 +80,7 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
 
     monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', search, raising=False)
     monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda *a, **k: df)
 
     class DummyGA:
         def __init__(self, *a, **k):

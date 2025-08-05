@@ -64,14 +64,28 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
 
-    tuning_data = data_loader.get_data(
-        ticker=config.TUNING_ASSET,
-        start_date=config.TRAINING_PERIOD["start"],
-        end_date=config.TRAINING_PERIOD["end"],
-        interval=config.TIMEFRAME,
-    )
-    if tuning_data.empty:
-        tuning_data = ohlc_data
+    tuning_data = None
+    last_exception = None
+    for attempt in range(2):
+        try:
+            tuning_data = data_loader.get_data(
+                ticker=config.TUNING_ASSET,
+                start_date=config.TRAINING_PERIOD["start"],
+                end_date=config.TRAINING_PERIOD["end"],
+                interval=config.TIMEFRAME,
+            )
+            if tuning_data.empty:
+                raise ValueError("Tuning data is empty")
+            break
+        except Exception as e:
+            last_exception = e
+            print(
+                f"Attempt {attempt + 1} failed to load tuning asset {config.TUNING_ASSET}: {e}"
+            )
+    else:
+        raise RuntimeError(
+            f"Unable to load tuning data for {config.TUNING_ASSET}"
+        ) from last_exception
 
     fitness_evaluator = fitness.FitnessEvaluator(tuning_data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
