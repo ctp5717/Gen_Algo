@@ -367,7 +367,10 @@ def test_walk_forward_uses_asset_basket(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
+    calls = {"count": 0}
+
     def fake_get_data(ticker, *a, **k):
+        calls["count"] += 1
         if isinstance(ticker, list):
             frames = {tk: df for tk in ticker}
             return pd.concat(frames, axis=1)
@@ -438,3 +441,5 @@ def test_walk_forward_uses_asset_basket(monkeypatch):
     summary = walk_forward.run_walk_forward_validation()
 
     assert isinstance(summary, dict)
+    # `get_data` should only be called once for the entire walk-forward run.
+    assert calls["count"] == 1

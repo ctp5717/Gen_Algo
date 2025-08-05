@@ -138,7 +138,10 @@ def run_walk_forward_validation(initial_champions=None):
         if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
         else config.TICKER
     )
-
+    # Fetch the complete dataset required for all walk-forward windows once.
+    # Subsequent training and testing slices will be taken directly from this
+    # `all_data` frame to avoid redundant calls to the data loader for each
+    # window.
     all_data = data_loader.get_data(
         ticker=tickers,
         start_date=start_date,
@@ -172,24 +175,13 @@ def run_walk_forward_validation(initial_champions=None):
         print(f"\n--- Window {idx} ---")
         print(f"Train: {p['train_start'].date()} -> {p['train_end'].date()}")
         print(f"Test : {p['test_start'].date()} -> {p['test_end'].date()}")
-        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False):
-            train_data = data_loader.get_data(
-                tickers,
-                p['train_start'].strftime("%Y-%m-%d"),
-                p['train_end'].strftime("%Y-%m-%d"),
-                interval=config.TIMEFRAME,
-            )
-            test_data = data_loader.get_data(
-                tickers,
-                p['test_start'].strftime("%Y-%m-%d"),
-                p['test_end'].strftime("%Y-%m-%d"),
-                interval=config.TIMEFRAME,
-            )
-        else:
-            # fmt: off
-            train_data = all_data.loc[p['train_start']:p['train_end']]
-            test_data = all_data.loc[p['test_start']:p['test_end']]
-            # fmt: on
+        # Slice the pre-fetched `all_data` for training and testing windows.
+        # Using `loc` works for both single-asset DataFrames and multi-asset
+        # structures returned when portfolio optimisation is enabled.
+        # fmt: off
+        train_data = all_data.loc[p['train_start']:p['train_end']]
+        test_data = all_data.loc[p['test_start']:p['test_end']]
+        # fmt: on
 
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
         evaluator = fitness.FitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map)
