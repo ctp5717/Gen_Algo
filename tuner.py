@@ -88,7 +88,10 @@ def _evaluate_on_validation(solution, gene_map):
     stats = portfolio.stats(agg_func=None)
     if isinstance(stats, pd.DataFrame):
         stats = _reduce_stats_df(stats)
-    score = stats.get("Sortino Ratio") if isinstance(stats, (dict, pd.Series)) else stats["Sortino Ratio"]
+    if isinstance(stats, (dict, pd.Series)):
+        score = stats.get("Sortino Ratio")
+    else:
+        score = stats["Sortino Ratio"]
     return -np.inf if np.isnan(score) else score
 
 
