@@ -36,7 +36,23 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         end_date=config.VALIDATION_PERIOD['end'],
         interval=config.TIMEFRAME
     )
-    if validation_data.empty: return
+    if validation_data.empty:
+        return
+
+    requested = tickers if isinstance(tickers, (list, tuple)) else [tickers]
+    if isinstance(validation_data.columns, pd.MultiIndex):
+        col_level0 = validation_data.columns.get_level_values(0)
+        available = col_level0.unique().tolist()
+        missing = [tk for tk in requested if tk not in available]
+        if missing:
+            print(f"Warning: Missing data for tickers: {', '.join(missing)}")
+            if len(missing) / len(requested) > 0.5:
+                print("Too many requested tickers missing. Aborting analysis.")
+                return
+        keep = [tk for tk in requested if tk in available]
+        validation_data = validation_data.loc[:, col_level0.isin(keep)]
+    else:
+        missing = []
 
     try:
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
