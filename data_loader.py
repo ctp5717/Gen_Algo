@@ -60,8 +60,14 @@ def _load_single_asset(
     interval: str,
     idx: int = 1,
     total: int = 1,
+    max_retries: int = 3,
 ) -> pd.DataFrame:
-    """Load data for one asset with unified progress logging."""
+    """Load data for one asset with unified progress logging.
+
+    Retries the download a limited number of times and raises an exception if
+    all attempts fail so callers can surface the failure instead of silently
+    returning an empty frame.
+    """
 
     prefix = f"[{idx}/{total}] "
     source = config.DATA_SOURCE.lower()
@@ -79,40 +85,44 @@ def _load_single_asset(
         except Exception as e:
             print(f"Error loading from cache file {cache_filepath}: {e}. Re-downloading.")
 
-    try:
-        if source == "binance":
-            print(f"{prefix}{ticker} from Binance")
-            data = _get_binance_data(ticker, start_date, end_date, interval)
-        elif source == "yfinance":
-            print(f"{prefix}{ticker} from Yahoo Finance")
-            data = yf.download(
-                ticker,
-                start=start_date,
-                end=end_date,
-                interval=interval,
-                progress=False,
-            )
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-        else:
-            raise ValueError(
-                f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'."
-            )
+    last_exception = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            if source == "binance":
+                print(f"{prefix}{ticker} from Binance")
+                data = _get_binance_data(ticker, start_date, end_date, interval)
+            elif source == "yfinance":
+                print(f"{prefix}{ticker} from Yahoo Finance")
+                data = yf.download(
+                    ticker,
+                    start=start_date,
+                    end=end_date,
+                    interval=interval,
+                    progress=False,
+                )
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+            else:
+                raise ValueError(
+                    f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'."
+                )
 
-        if data.empty:
-            print(
-                f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters."
-            )
-            return pd.DataFrame()
+            if data.empty:
+                raise ValueError(
+                    f"No data returned for ticker '{ticker}' from source '{source}'."
+                )
 
-        data.columns = [col.capitalize() for col in data.columns]
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        data.to_csv(cache_filepath)
-        return data
+            data.columns = [col.capitalize() for col in data.columns]
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            data.to_csv(cache_filepath)
+            return data
+        except Exception as e:
+            last_exception = e
+            print(f"Attempt {attempt} for {ticker} failed: {e}")
 
-    except Exception as e:
-        print(f"An error occurred while downloading data for {ticker}: {e}")
-        return pd.DataFrame()
+    raise RuntimeError(
+        f"Failed to load data for {ticker} after {max_retries} attempts"
+    ) from last_exception
 
 
 def get_data(ticker, start_date: str, end_date: str, interval: str = "1d") -> pd.DataFrame:
@@ -122,12 +132,18 @@ def get_data(ticker, start_date: str, end_date: str, interval: str = "1d") -> pd
         tickers = list(ticker)
         print(f"Assets: {', '.join(tickers)}")
         frames = []
+        skipped = []
         for i, tk in enumerate(tickers, 1):
-            df = _load_single_asset(tk, start_date, end_date, interval, i, len(tickers))
-            if df.empty:
+            try:
+                df = _load_single_asset(tk, start_date, end_date, interval, i, len(tickers))
+            except Exception as e:
+                print(f"Skipping {tk}: {e}")
+                skipped.append(tk)
                 continue
             df.columns = pd.MultiIndex.from_product([[tk], df.columns])
             frames.append(df)
+        if skipped:
+            print(f"Skipped assets: {', '.join(skipped)}")
         return pd.concat(frames, axis=1) if frames else pd.DataFrame()
 
     return _load_single_asset(ticker, start_date, end_date, interval)
