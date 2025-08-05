@@ -14,6 +14,41 @@ import strategy_engine as engine
 import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
 
+
+def _reduce_stats_df(stats: pd.DataFrame) -> pd.Series:
+    """Reduce multi-column stats to a single series.
+
+    Numerical ratio metrics are averaged while count metrics are summed.
+    Non-numeric metrics take the first column's value.
+    """
+
+    ratio_metrics = {
+        'Total Return [%]',
+        'Benchmark Return [%]',
+        'Max Drawdown [%]',
+        'Sortino Ratio',
+        'Sharpe Ratio',
+        'Profit Factor',
+        'Win Rate [%]',
+        'Avg Winning Trade [%]',
+        'Avg Losing Trade [%]'
+    }
+    count_metrics = {'Total Trades'}
+
+    reduced = {}
+    for metric in stats.index:
+        values = stats.loc[metric]
+        numeric_values = pd.to_numeric(values, errors='coerce')
+        if metric in count_metrics:
+            reduced[metric] = numeric_values.sum()
+        elif metric in ratio_metrics:
+            reduced[metric] = numeric_values.mean()
+        else:
+            # Use the first non-null value for non-numeric metrics like dates
+            reduced[metric] = values.dropna().iloc[0]
+
+    return pd.Series(reduced)
+
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """
     Runs a full backtest and analysis on the champion solution using validation data.
@@ -99,7 +134,9 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         return
 
     print("\n--- Validation Period Performance Stats ---")
-    stats = portfolio.stats()
+    stats = portfolio.stats(agg_func=None)
+    if isinstance(stats, pd.DataFrame):
+        stats = _reduce_stats_df(stats)
     metrics_to_show = [
         'Start',
         'End',
@@ -120,7 +157,9 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     if isinstance(entries, pd.DataFrame) and len(entries.columns) > 1:
         print("\n--- Per-Asset Performance Breakdown ---")
         for asset in entries.columns:
-            asset_stats = portfolio[asset].stats()
+            asset_stats = portfolio[asset].stats(agg_func=None)
+            if isinstance(asset_stats, pd.DataFrame):
+                asset_stats = _reduce_stats_df(asset_stats)
             print(f"\nAsset: {asset}")
             print(asset_stats[metrics_to_show].to_string())
 

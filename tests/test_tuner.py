@@ -169,7 +169,7 @@ def test_evaluate_on_validation_uses_tuning_asset(monkeypatch):
     monkeypatch.setattr(pd.DataFrame, "ta", None, raising=False)
 
     class DummyPortfolio:
-        def stats(self):
+        def stats(self, *args, **kwargs):
             return {"Sortino Ratio": 1}
 
     monkeypatch.setattr(

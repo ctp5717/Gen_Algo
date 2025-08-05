@@ -122,7 +122,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         def __init__(self, *a, **k):
             pass
 
-        def stats(self):
+        def stats(self, *args, **kwargs):
             return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
 
     monkeypatch.setattr(
@@ -200,7 +200,7 @@ def test_walk_forward_returns_summary(monkeypatch):
     )
 
     class DummyPortfolio:
-        def stats(self):
+        def stats(self, *args, **kwargs):
             return {
                 "Total Return [%]": 1.0,
                 "Max Drawdown [%]": 0.0,
@@ -223,6 +223,106 @@ def test_walk_forward_returns_summary(monkeypatch):
     assert isinstance(summary, dict)
     for key in ["average_return", "total_compounded_return", "folds"]:
         assert key in summary
+
+
+def test_walk_forward_reduces_multicolumn_stats(monkeypatch):
+    import pandas as pd
+    import types
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, []))
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, *a, **k):
+            return 1.0
+
+    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    monkeypatch.setattr(
+        walk_forward.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.DataFrame({"A": [True, False], "B": [True, False]}, index=df.index),
+    )
+
+    stats_df = pd.DataFrame(
+        {
+            "A": {
+                "Total Return [%]": 10.0,
+                "Max Drawdown [%]": 5.0,
+                "Sharpe Ratio": 1.0,
+                "Sortino Ratio": 2.0,
+                "Win Rate [%]": 60.0,
+            },
+            "B": {
+                "Total Return [%]": 20.0,
+                "Max Drawdown [%]": 15.0,
+                "Sharpe Ratio": 2.0,
+                "Sortino Ratio": 3.0,
+                "Win Rate [%]": 40.0,
+            },
+        }
+    )
+
+    class DummyPortfolio:
+        def stats(self, *args, **kwargs):
+            return stats_df
+
+    monkeypatch.setattr(
+        walk_forward.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+
+    summary = walk_forward.run_walk_forward_validation()
+
+    first = summary["folds"].iloc[0]
+    assert first["Total Return [%]"] == 15.0
+    assert first["Max Drawdown [%]"] == 10.0
+    assert first["Sharpe Ratio"] == 1.5
+    assert first["Sortino Ratio"] == 2.5
+    assert first["Win Rate [%]"] == 50.0
 
 
 def test_update_champion_pool_logic(monkeypatch, capsys):
@@ -321,7 +421,7 @@ def test_walk_forward_uses_asset_basket(monkeypatch):
         def __init__(self, *a, **k):
             pass
 
-        def stats(self):
+        def stats(self, *args, **kwargs):
             return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
 
     monkeypatch.setattr(

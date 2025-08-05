@@ -30,8 +30,8 @@ def _stub_portfolio(monkeypatch):
     ]
 
     class DummyPortfolio:
-        def stats(self):
-            return pd.DataFrame({m: [0] for m in metrics})
+        def stats(self, *args, **kwargs):
+            return pd.Series({m: 0 for m in metrics})
 
         def plot(self, *a, **k):
             class DummyFig:

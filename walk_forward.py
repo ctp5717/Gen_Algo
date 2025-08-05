@@ -20,6 +20,40 @@ import fitness
 logging.basicConfig(level=logging.DEBUG)
 
 
+def _reduce_stats_df(stats: pd.DataFrame) -> pd.Series:
+    """Reduce multi-column stats to a single series.
+
+    Ratio metrics are averaged and counts are summed. Non-numeric metrics
+    take the first column's value.
+    """
+
+    ratio_metrics = {
+        'Total Return [%]',
+        'Benchmark Return [%]',
+        'Max Drawdown [%]',
+        'Sortino Ratio',
+        'Sharpe Ratio',
+        'Profit Factor',
+        'Win Rate [%]',
+        'Avg Winning Trade [%]',
+        'Avg Losing Trade [%]'
+    }
+    count_metrics = {'Total Trades'}
+
+    reduced = {}
+    for metric in stats.index:
+        values = stats.loc[metric]
+        numeric_values = pd.to_numeric(values, errors='coerce')
+        if metric in count_metrics:
+            reduced[metric] = numeric_values.sum()
+        elif metric in ratio_metrics:
+            reduced[metric] = numeric_values.mean()
+        else:
+            reduced[metric] = values.dropna().iloc[0]
+
+    return pd.Series(reduced)
+
+
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
     """Generate rolling training and testing windows."""
     # Ensure plain Python datetimes for relativedelta calculations
@@ -243,12 +277,14 @@ def run_walk_forward_validation(initial_champions=None):
             fees=0.001,
             freq=config.TIMEFRAME,
         )
-        stats = portfolio.stats()
-        tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')
-        dd = stats['Max Drawdown [%]'] if isinstance(stats, dict) else stats.get('Max Drawdown [%]')
-        sharpe = stats.get('Sharpe Ratio') if isinstance(stats, dict) else stats.get('Sharpe Ratio')
-        sortino = stats.get('Sortino Ratio') if isinstance(stats, dict) else stats.get('Sortino Ratio')
-        win_rate = stats.get('Win Rate [%]') if isinstance(stats, dict) else stats.get('Win Rate [%]')
+        stats = portfolio.stats(agg_func=None)
+        if isinstance(stats, pd.DataFrame):
+            stats = _reduce_stats_df(stats)
+        tr = stats.get('Total Return [%]') if isinstance(stats, (dict, pd.Series)) else stats['Total Return [%]']
+        dd = stats.get('Max Drawdown [%]') if isinstance(stats, (dict, pd.Series)) else stats['Max Drawdown [%]']
+        sharpe = stats.get('Sharpe Ratio') if isinstance(stats, (dict, pd.Series)) else stats['Sharpe Ratio']
+        sortino = stats.get('Sortino Ratio') if isinstance(stats, (dict, pd.Series)) else stats['Sortino Ratio']
+        win_rate = stats.get('Win Rate [%]') if isinstance(stats, (dict, pd.Series)) else stats['Win Rate [%]']
         print(f"Test Return: {tr:.2f}% | Max DD: {dd:.2f}%")
         print("Winning Parameters:")
         for param_name, param_value in winning_params.items():

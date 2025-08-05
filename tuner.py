@@ -10,6 +10,36 @@ import fitness
 import strategy_engine as engine
 
 
+def _reduce_stats_df(stats: pd.DataFrame) -> pd.Series:
+    """Reduce multi-column stats to a single series."""
+
+    ratio_metrics = {
+        'Total Return [%]',
+        'Benchmark Return [%]',
+        'Max Drawdown [%]',
+        'Sortino Ratio',
+        'Sharpe Ratio',
+        'Profit Factor',
+        'Win Rate [%]',
+        'Avg Winning Trade [%]',
+        'Avg Losing Trade [%]'
+    }
+    count_metrics = {'Total Trades'}
+
+    reduced = {}
+    for metric in stats.index:
+        values = stats.loc[metric]
+        numeric_values = pd.to_numeric(values, errors='coerce')
+        if metric in count_metrics:
+            reduced[metric] = numeric_values.sum()
+        elif metric in ratio_metrics:
+            reduced[metric] = numeric_values.mean()
+        else:
+            reduced[metric] = values.dropna().iloc[0]
+
+    return pd.Series(reduced)
+
+
 def _evaluate_on_validation(solution, gene_map):
     """Evaluate solution on validation data and return Sortino Ratio."""
     # If heavy optional dependencies are missing, skip evaluation to keep tests
@@ -55,8 +85,10 @@ def _evaluate_on_validation(solution, gene_map):
         fees=0.001,
         freq=config.TIMEFRAME,
     )
-    stats = portfolio.stats()
-    score = stats.get("Sortino Ratio")
+    stats = portfolio.stats(agg_func=None)
+    if isinstance(stats, pd.DataFrame):
+        stats = _reduce_stats_df(stats)
+    score = stats.get("Sortino Ratio") if isinstance(stats, (dict, pd.Series)) else stats["Sortino Ratio"]
     return -np.inf if np.isnan(score) else score
 
 
