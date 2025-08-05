@@ -53,8 +53,8 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
     ]
 
     class DummyPortfolio:
-        def stats(self):
-            return pd.DataFrame({m: [0] for m in metrics})
+        def stats(self, *args, **kwargs):
+            return pd.Series({m: 0 for m in metrics})
 
         def plot(self, *a, **k):
             class DummyFig:
@@ -128,28 +128,63 @@ def test_run_champion_analysis_asset_breakdown(monkeypatch, capsys):
         lambda *a, **k: pd.DataFrame({"A": [True, False], "B": [True, False]}, index=df.index),
     )
 
-    metrics = [
-        "Start",
-        "End",
-        "Period",
-        "Total Return [%]",
-        "Benchmark Return [%]",
-        "Max Drawdown [%]",
-        "Sortino Ratio",
-        "Sharpe Ratio",
-        "Profit Factor",
-        "Win Rate [%]",
-        "Total Trades",
-        "Avg Winning Trade [%]",
-        "Avg Losing Trade [%]",
-    ]
-
     class DummyPortfolio:
         def __init__(self, name="agg"):
             self.name = name
 
-        def stats(self):
-            return pd.DataFrame({m: [0] for m in metrics})
+        def stats(self, *args, **kwargs):
+            if self.name == "agg":
+                return pd.DataFrame(
+                    {
+                        "A": {
+                            "Start": 0,
+                            "End": 0,
+                            "Period": 0,
+                            "Total Return [%]": 10.0,
+                            "Benchmark Return [%]": 0.0,
+                            "Max Drawdown [%]": 5.0,
+                            "Sortino Ratio": 1.0,
+                            "Sharpe Ratio": 1.0,
+                            "Profit Factor": 1.0,
+                            "Win Rate [%]": 60.0,
+                            "Total Trades": 5,
+                            "Avg Winning Trade [%]": 1.0,
+                            "Avg Losing Trade [%]": -1.0,
+                        },
+                        "B": {
+                            "Start": 0,
+                            "End": 0,
+                            "Period": 0,
+                            "Total Return [%]": 20.0,
+                            "Benchmark Return [%]": 0.0,
+                            "Max Drawdown [%]": 15.0,
+                            "Sortino Ratio": 2.0,
+                            "Sharpe Ratio": 2.0,
+                            "Profit Factor": 2.0,
+                            "Win Rate [%]": 40.0,
+                            "Total Trades": 7,
+                            "Avg Winning Trade [%]": 2.0,
+                            "Avg Losing Trade [%]": -2.0,
+                        },
+                    }
+                )
+            else:
+                data = {
+                    "Start": 0,
+                    "End": 0,
+                    "Period": 0,
+                    "Total Return [%]": 10.0 if self.name == "A" else 20.0,
+                    "Benchmark Return [%]": 0.0,
+                    "Max Drawdown [%]": 5.0 if self.name == "A" else 15.0,
+                    "Sortino Ratio": 1.0 if self.name == "A" else 2.0,
+                    "Sharpe Ratio": 1.0 if self.name == "A" else 2.0,
+                    "Profit Factor": 1.0 if self.name == "A" else 2.0,
+                    "Win Rate [%]": 60.0 if self.name == "A" else 40.0,
+                    "Total Trades": 5 if self.name == "A" else 7,
+                    "Avg Winning Trade [%]": 1.0 if self.name == "A" else 2.0,
+                    "Avg Losing Trade [%]": -1.0 if self.name == "A" else -2.0,
+                }
+                return pd.Series(data)
 
         def plot(self, *a, **k):
             class DummyFig:
@@ -174,3 +209,6 @@ def test_run_champion_analysis_asset_breakdown(monkeypatch, capsys):
     assert "Per-Asset Performance Breakdown" in out
     assert "Asset: A" in out
     assert "Asset: B" in out
+    assert "Total Return [%]" in out
+    assert "15.0" in out  # mean of 10 and 20
+    assert "12" in out  # total trades summed
