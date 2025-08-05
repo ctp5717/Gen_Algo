@@ -5,9 +5,12 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
-import pandas as pd
+import logging
+
 import numpy as np
+import pandas as pd
 import vectorbt as vbt
+
 import strategy_engine as engine
 import config
 
@@ -107,14 +110,19 @@ class FitnessEvaluator:
 
             if np.isinf(profit_factor) or profit_factor > 5:
                 profit_factor = 5
-            if np.isnan(sortino):
-                sortino = 0
-            if np.isnan(profit_factor):
-                profit_factor = 0
-            if np.isnan(max_drawdown):
-                max_drawdown = 100.0
 
             drawdown_score = 1 - (max_drawdown / 100.0)
+
+            if np.isnan(sortino) or sortino == 0:
+                logging.debug("Penalizing fitness due to invalid Sortino Ratio: %s", sortino)
+                return -999.0
+            if np.isnan(profit_factor) or profit_factor == 0:
+                logging.debug("Penalizing fitness due to invalid Profit Factor: %s", profit_factor)
+                return -999.0
+            if np.isnan(drawdown_score) or drawdown_score == 0:
+                logging.debug("Penalizing fitness due to invalid Drawdown Score: %s", drawdown_score)
+                return -999.0
+
             weights = config.FITNESS_WEIGHTS
 
             fitness_score = (
