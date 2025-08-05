@@ -34,6 +34,12 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
 
         param_key = path[-1]
 
+        expected_type = gene_info.get("type")
+        if expected_type is int:
+            gene_value = int(gene_value)
+        elif expected_type is float:
+            gene_value = float(gene_value)
+
         current_level[param_key] = gene_value
 
     return injected_rules
@@ -84,7 +90,7 @@ class FitnessEvaluator:
                 freq=config.TIMEFRAME,
             )
 
-            stats = portfolio.stats()
+            stats = portfolio.stats(agg_func=None)
 
             # ``portfolio.stats`` returns a Series for single-column inputs and a
             # DataFrame for multi-column inputs.  The latter caused the fitness
