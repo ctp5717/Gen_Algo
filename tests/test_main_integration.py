@@ -53,7 +53,7 @@ def test_main_runs(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
+        def plot_fitness(self, *args, **kwargs):
             return None
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
@@ -128,7 +128,7 @@ def test_main_uses_tuner(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
+        def plot_fitness(self, *args, **kwargs):
             return None
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
@@ -218,7 +218,7 @@ def test_main_uses_asset_basket_when_portfolio_enabled(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
+        def plot_fitness(self, *args, **kwargs):
             return None
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
@@ -293,8 +293,9 @@ def test_fitness_plot_non_blocking(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
+        def plot_fitness(self, *args, **kwargs):
             events['plot_called'] = True
+            events['legend'] = kwargs.get('legend')
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
     monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
@@ -337,3 +338,4 @@ def test_fitness_plot_non_blocking(monkeypatch):
 
     assert ion_called['ion']
     assert events['plot_called']
+    assert events['legend'] is False
