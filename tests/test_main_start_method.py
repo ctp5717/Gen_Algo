@@ -60,7 +60,7 @@ def test_main_sets_spawn_start_method(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
+        def plot_fitness(self, *args, **kwargs):
             return None
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
