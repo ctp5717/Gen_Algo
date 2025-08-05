@@ -2,9 +2,11 @@
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import pandas as pd
+import logging
 import os
+
 import numpy as np
+import pandas as pd
 import pygad
 import vectorbt as vbt
 
@@ -13,6 +15,9 @@ import data_loader
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
+
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):

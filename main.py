@@ -6,12 +6,14 @@ Main Application Orchestrator for the GA Trading Framework
 """
 import os
 import multiprocessing as mp
-import pygad
+import logging
 import pprint
+import time  # <-- NEW: Import the time module
+
+import matplotlib.pyplot as plt  # For non-blocking plot display
+import pygad
 import tuner
 import traceback
-import time  # <-- NEW: Import the time module
-import matplotlib.pyplot as plt  # For non-blocking plot display
 
 # Import our custom modules
 import config
@@ -19,6 +21,9 @@ import data_loader
 import fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
+
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 # --- NEW: Callback function for progress tracking ---

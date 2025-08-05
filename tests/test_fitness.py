@@ -13,6 +13,8 @@ sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 import fitness  # noqa: E402
+import numpy as np  # noqa: E402
+import logging  # noqa: E402
 
 
 def test_exception_logging(capsys, monkeypatch):
@@ -119,3 +121,41 @@ def test_portfolio_stats_called_without_agg(monkeypatch):
     evaluator(None, [], 0)
 
     assert 'agg_func' in called and called['agg_func'] is None
+
+
+@pytest.mark.parametrize(
+    "stats_series,expected",
+    [
+        (pd.Series({'Sortino Ratio': np.nan, 'Profit Factor': 1.0, 'Max Drawdown [%]': 10.0}), 'Sortino Ratio'),
+        (pd.Series({'Sortino Ratio': 1.0, 'Profit Factor': 0.0, 'Max Drawdown [%]': 10.0}), 'Profit Factor'),
+        (pd.Series({'Sortino Ratio': 1.0, 'Profit Factor': 1.0, 'Max Drawdown [%]': 100.0}), 'Drawdown Score'),
+    ],
+)
+def test_invalid_metrics_penalize(monkeypatch, caplog, stats_series, expected):
+    ohlc = pd.DataFrame({'Close': [1, 2, 3]})
+    evaluator = fitness.FitnessEvaluator(ohlc, {'exit_rules': {}}, {})
+
+    entries = pd.Series([True, False, False])
+    monkeypatch.setattr(fitness.engine, 'process_strategy_rules', lambda *a, **k: entries)
+
+    class DummyPortfolio:
+        def stats(self, *args, **kwargs):
+            return stats_series
+
+    portfolio_ns = types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio())
+    monkeypatch.setattr(fitness.vbt, 'Portfolio', portfolio_ns, raising=False)
+
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1.0, 'profit_factor': 1.0, 'max_drawdown': 1.0, 'min_trades': 0},
+        raising=False,
+    )
+    monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
+
+    with caplog.at_level(logging.DEBUG):
+        score = evaluator(None, [], 0)
+
+    assert score == -999.0
+    assert expected in caplog.text
