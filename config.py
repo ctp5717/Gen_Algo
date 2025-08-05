@@ -90,8 +90,8 @@ ASSET_BASKET = [
     "FIL-USD",  # Filecoin - Decentralized Storage Infrastructure
 ]
 
-# Use Bitcoin as the tuning asset for the initial hyperparameter search
-TUNING_ASSET = "BTC-USD"
+# Use Solana as the tuning asset for the initial hyperparameter search
+TUNING_ASSET = "SOL-USD"
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
 MAX_HOLD_DAYS = 14
