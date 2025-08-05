@@ -166,7 +166,16 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     print("\nDisplaying equity curve plot for the validation period...")
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
-    fig = portfolio.plot(
-        title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
-    )
+    if isinstance(entries, pd.DataFrame) and len(entries.columns) > 1:
+        # Plot aggregated equity when multiple assets are present
+        fig = portfolio.total().plot(
+            title="Champion Strategy Portfolio Performance (Validation)",
+        )
+    else:
+        # Plot the single asset or aggregated column directly
+        column = entries.columns[0] if isinstance(entries, pd.DataFrame) else 0
+        fig = portfolio.plot(
+            column=column,
+            title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)",
+        )
     fig.show()

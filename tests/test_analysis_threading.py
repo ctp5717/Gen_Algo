@@ -128,6 +128,9 @@ def test_run_champion_analysis_asset_breakdown(monkeypatch, capsys):
         lambda *a, **k: pd.DataFrame({"A": [True, False], "B": [True, False]}, index=df.index),
     )
 
+    plot_calls = []
+    total_called = []
+
     class DummyPortfolio:
         def __init__(self, name="agg"):
             self.name = name
@@ -187,11 +190,17 @@ def test_run_champion_analysis_asset_breakdown(monkeypatch, capsys):
                 return pd.Series(data)
 
         def plot(self, *a, **k):
+            plot_calls.append({"name": self.name, "column": k.get("column")})
+
             class DummyFig:
                 def show(self):
                     pass
 
             return DummyFig()
+
+        def total(self):
+            total_called.append(True)
+            return DummyPortfolio("total")
 
         def __getitem__(self, key):
             return DummyPortfolio(key)
@@ -212,3 +221,5 @@ def test_run_champion_analysis_asset_breakdown(monkeypatch, capsys):
     assert "Total Return [%]" in out
     assert "15.0" in out  # mean of 10 and 20
     assert "12" in out  # total trades summed
+    assert total_called
+    assert plot_calls[-1]["name"] == "total"
