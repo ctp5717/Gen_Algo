@@ -443,3 +443,98 @@ def test_walk_forward_uses_asset_basket(monkeypatch):
     assert isinstance(summary, dict)
     # `get_data` should only be called once for the entire walk-forward run.
     assert calls["count"] == 1
+
+
+def test_walk_forward_skips_when_no_train_data(monkeypatch):
+    import pandas as pd
+    import numpy as np
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [np.nan, np.nan],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+
+    # Ensure no further processing occurs by raising if gene parsing is attempted
+    def fail_parse(*a, **k):
+        raise AssertionError("parse_genes_from_config should not be called")
+
+    monkeypatch.setattr(walk_forward, "parse_genes_from_config", fail_parse)
+
+    result = walk_forward.run_walk_forward_validation()
+    assert result is None
+
+
+def test_walk_forward_skips_on_penalized_fitness(monkeypatch):
+    import pandas as pd
+    import types
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, []))
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, *a, **k):
+            return -999.0
+
+    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], -999.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    result = walk_forward.run_walk_forward_validation()
+    assert result is None
