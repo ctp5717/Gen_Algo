@@ -23,7 +23,11 @@ import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
 
-logging.basicConfig(level=logging.DEBUG)
+# Default to INFO logging to avoid overwhelming debug output from
+# third-party libraries like ``asyncio`` or ``urllib3`` which can make it
+# appear that the application has hung.  Users can still override the level
+# externally if more verbose logs are needed.
+logging.basicConfig(level=logging.INFO)
 
 
 # --- NEW: Callback function for progress tracking ---
