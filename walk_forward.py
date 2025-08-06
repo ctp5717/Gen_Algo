@@ -183,6 +183,19 @@ def run_walk_forward_validation(initial_champions=None):
         test_data = all_data.loc[p['test_start']:p['test_end']]
         # fmt: on
 
+        # Skip this window if the training slice contains no ticker data
+        try:
+            close_train = (
+                train_data['Close']
+                if 'Close' in train_data
+                else train_data.xs('Close', level=-1, axis=1)
+            )
+        except (KeyError, IndexError):
+            close_train = pd.DataFrame()
+        if close_train.dropna().empty:
+            print("No training data available in this window; skipping.")
+            continue
+
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
         evaluator = fitness.FitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map)
         ga_instance = pygad.GA(
@@ -209,6 +222,9 @@ def run_walk_forward_validation(initial_champions=None):
         ga_instance.run()
         best_solution, best_fitness, _ = ga_instance.best_solution()
         print(f"Best training fitness: {best_fitness:.4f}")
+        if best_fitness <= -1:
+            print("Penalized fitness encountered; skipping window.")
+            continue
 
         winning_params = {
             gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
