@@ -5,6 +5,5 @@ numpy
 yfinance
 python-binance
 pandas-ta
-setuptools
 python-dateutil
 matplotlib
