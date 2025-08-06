@@ -140,7 +140,14 @@ def main():
     print("\nDisplaying GA fitness evolution plot...")
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
-    ga_instance.plot_fitness(legend=False)
+    # ``plot_fitness`` in recent versions of PyGAD no longer accepts the
+    # ``legend`` argument that earlier releases used.  Passing it raises a
+    # ``TypeError`` and aborts the optimisation after the GA finishes.  This
+    # occurred in production runs where the best fitness was reported as
+    # ``-999`` but no actionable error message was displayed until the plot
+    # call.  Removing the unsupported argument keeps the plotting optional and
+    # prevents the crash.
+    ga_instance.plot_fitness()
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)
