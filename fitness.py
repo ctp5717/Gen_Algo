@@ -14,6 +14,47 @@ import vectorbt as vbt
 import strategy_engine as engine
 import config
 
+
+def _reduce_stats_df(stats: pd.DataFrame) -> pd.Series:
+    """Reduce a DataFrame of per-asset statistics to a single Series.
+
+    ``vectorbt.Portfolio.stats`` returns a DataFrame when multiple asset
+    columns are passed to ``from_signals``.  Downstream code expects a
+    Series so that scalar comparisons (e.g. ``profit_factor > 5``) work
+    correctly.  Prior to this helper the fitness function attempted to
+    operate on the DataFrame directly, which raised exceptions in the
+    worker process and caused ``BrokenProcessPool`` errors.  The reduction
+    mirrors the logic used in other modules: ratio style metrics are
+    averaged while counts such as ``Total Trades`` are summed.  Any
+    remaining metric is taken from the first non-null value.
+    """
+
+    ratio_metrics = {
+        'Total Return [%]',
+        'Benchmark Return [%]',
+        'Max Drawdown [%]',
+        'Sortino Ratio',
+        'Sharpe Ratio',
+        'Profit Factor',
+        'Win Rate [%]',
+        'Avg Winning Trade [%]',
+        'Avg Losing Trade [%]'
+    }
+    count_metrics = {'Total Trades'}
+
+    reduced = {}
+    for metric in stats.index:
+        values = stats.loc[metric]
+        numeric_values = pd.to_numeric(values, errors='coerce')
+        if metric in count_metrics:
+            reduced[metric] = numeric_values.sum()
+        elif metric in ratio_metrics:
+            reduced[metric] = numeric_values.mean()
+        else:
+            reduced[metric] = values.dropna().iloc[0]
+
+    return pd.Series(reduced)
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
     Injects the gene values from a GA solution into a copy of the strategy rules.
@@ -96,13 +137,13 @@ class FitnessEvaluator:
             stats = portfolio.stats(agg_func=None)
 
             # ``portfolio.stats`` returns a Series for single-column inputs and a
-            # DataFrame for multi-column inputs.  The latter caused the fitness
-            # function to work with DataFrames, eventually raising an exception
-            # when applying scalar operations (e.g. ``profit_factor > 5``) and
-            # terminating the worker process.  Reduce multi-column stats by
-            # averaging across columns so we always operate on scalars.
+            # DataFrame for multi-column inputs.  The latter previously allowed a
+            # DataFrame to propagate through the fitness calculation causing
+            # unhandled exceptions inside the worker process which in turn
+            # resulted in ``BrokenProcessPool`` errors.  Reduce the DataFrame to a
+            # single Series so that downstream scalar operations are safe.
             if isinstance(stats, pd.DataFrame):
-                stats = stats.mean(axis=1, numeric_only=True)
+                stats = _reduce_stats_df(stats)
 
             sortino = stats.get('Sortino Ratio', np.nan)
             profit_factor = stats.get('Profit Factor', np.nan)

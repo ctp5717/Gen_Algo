@@ -49,16 +49,19 @@ def test_multi_column_stats_are_reduced(monkeypatch):
             'Sortino Ratio': 1.0,
             'Profit Factor': 2.0,
             'Max Drawdown [%]': 10.0,
+            'Total Trades': 10,
         },
         'B': {
             'Sortino Ratio': 2.0,
             'Profit Factor': 3.0,
             'Max Drawdown [%]': 20.0,
+            'Total Trades': 20,
         },
         'C': {
             'Sortino Ratio': 'x',
             'Profit Factor': 'y',
             'Max Drawdown [%]': 'z',
+            'Total Trades': 'w',
         },
     })
 
@@ -82,6 +85,33 @@ def test_multi_column_stats_are_reduced(monkeypatch):
 
     expected = (1.5 + 2.5 + (1 - 15 / 100))
     assert score == pytest.approx(expected)
+
+
+def test_reduce_stats_df_handles_count_metrics():
+    """_reduce_stats_df sums count metrics instead of averaging."""
+
+    stats_df = pd.DataFrame({
+        'A': {
+            'Sortino Ratio': 1.0,
+            'Profit Factor': 2.0,
+            'Max Drawdown [%]': 10.0,
+            'Total Trades': 10,
+        },
+        'B': {
+            'Sortino Ratio': 2.0,
+            'Profit Factor': 3.0,
+            'Max Drawdown [%]': 20.0,
+            'Total Trades': 20,
+        },
+    })
+
+    reduced = fitness._reduce_stats_df(stats_df)
+
+    assert reduced['Sortino Ratio'] == pytest.approx(1.5)
+    assert reduced['Profit Factor'] == pytest.approx(2.5)
+    assert reduced['Max Drawdown [%]'] == pytest.approx(15.0)
+    # Total Trades should be summed across columns, not averaged
+    assert reduced['Total Trades'] == 30
 
 
 def test_inject_genes_casts_int():
