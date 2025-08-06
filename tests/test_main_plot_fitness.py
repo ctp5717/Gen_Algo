@@ -1,13 +1,13 @@
 import sys
 from pathlib import Path
-import types
+
 import pandas as pd
 
 # Ensure repository root is on the import path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import main
+import main  # noqa: E402
 
 
 def test_plot_fitness_called_without_legend(monkeypatch):
@@ -29,7 +29,11 @@ def test_plot_fitness_called_without_legend(monkeypatch):
     gene_space = [range(2)]
     gene_map = {0: {"name": "ema_period", "path": [], "type": int}}
     gene_types = [int]
-    monkeypatch.setattr(main, "parse_genes_from_config", lambda rules: (gene_space, gene_map, gene_types))
+
+    def fake_parser(_):
+        return gene_space, gene_map, gene_types
+
+    monkeypatch.setattr(main, "parse_genes_from_config", fake_parser)
 
     # Dummy fitness evaluator that always returns a constant fitness.
     class DummyEvaluator:
