@@ -338,4 +338,5 @@ def test_fitness_plot_non_blocking(monkeypatch):
 
     assert ion_called['ion']
     assert events['plot_called']
-    assert events['legend'] is False
+    # ``plot_fitness`` is now called without the deprecated ``legend`` argument.
+    assert events['legend'] is None

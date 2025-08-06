@@ -114,13 +114,19 @@ class FitnessEvaluator:
             drawdown_score = 1 - (max_drawdown / 100.0)
 
             if np.isnan(sortino) or sortino == 0:
-                logging.debug("Penalizing fitness due to invalid Sortino Ratio: %s", sortino)
+                logging.warning(
+                    "Penalizing fitness due to invalid Sortino Ratio: %s", sortino
+                )
                 return -999.0
             if np.isnan(profit_factor) or profit_factor == 0:
-                logging.debug("Penalizing fitness due to invalid Profit Factor: %s", profit_factor)
+                logging.warning(
+                    "Penalizing fitness due to invalid Profit Factor: %s", profit_factor
+                )
                 return -999.0
             if np.isnan(drawdown_score) or drawdown_score == 0:
-                logging.debug("Penalizing fitness due to invalid Drawdown Score: %s", drawdown_score)
+                logging.warning(
+                    "Penalizing fitness due to invalid Drawdown Score: %s", drawdown_score
+                )
                 return -999.0
 
             weights = config.FITNESS_WEIGHTS
