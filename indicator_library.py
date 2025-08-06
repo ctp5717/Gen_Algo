@@ -27,6 +27,9 @@ To Add a New Indicator:
 
 import pandas as pd
 import numpy as np
+import sys
+import types
+import importlib.metadata as importlib_metadata
 
 # -- Compatibility shim -------------------------------------------------------
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
@@ -36,6 +39,31 @@ import numpy as np
 # importing pandas_ta.
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
+
+# -- pkg_resources shim ------------------------------------------------------
+# ``pandas_ta`` imports ``pkg_resources`` from ``setuptools`` to detect its
+# version.  Newer ``setuptools`` releases emit a deprecation warning each time
+# ``pkg_resources`` is imported.  To keep the console output clean (and to be
+# forward compatible once ``pkg_resources`` is removed), provide a very small
+# stub that offers only the pieces ``pandas_ta`` needs.  The stub relies on
+# ``importlib.metadata`` which is part of the standard library.
+
+if "pkg_resources" not in sys.modules:
+    pkg_resources_stub = types.ModuleType("pkg_resources")
+
+    class DistributionNotFound(Exception):
+        """Replacement for the real pkg_resources exception."""
+
+    def get_distribution(name: str):
+        try:
+            dist = importlib_metadata.distribution(name)
+            return types.SimpleNamespace(version=dist.version)
+        except importlib_metadata.PackageNotFoundError as exc:  # pragma: no cover - unlikely
+            raise DistributionNotFound from exc
+
+    pkg_resources_stub.get_distribution = get_distribution
+    pkg_resources_stub.DistributionNotFound = DistributionNotFound
+    sys.modules["pkg_resources"] = pkg_resources_stub
 
 import pandas_ta as ta
 
