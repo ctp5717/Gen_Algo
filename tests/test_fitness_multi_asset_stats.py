@@ -1,12 +1,5 @@
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
-
-# Ensure repository root is importable
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
 import fitness
 
