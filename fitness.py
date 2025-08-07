@@ -14,6 +14,23 @@ import vectorbt as vbt
 import strategy_engine as engine
 import config
 
+# Metrics aggregated across assets are defined at module scope so the helper
+# does not recreate the sets on every invocation.  Ratio-style metrics are
+# averaged, while count-based metrics such as ``Total Trades`` are summed.
+RATIO_METRICS = {
+    'Total Return [%]',
+    'Benchmark Return [%]',
+    'Max Drawdown [%]',
+    'Sortino Ratio',
+    'Sharpe Ratio',
+    'Profit Factor',
+    'Win Rate [%]',
+    'Avg Winning Trade [%]',
+    'Avg Losing Trade [%]'
+}
+
+COUNT_METRICS = {'Total Trades'}
+
 
 def _reduce_stats_df(stats: pd.DataFrame) -> pd.Series:
     """Reduce a DataFrame of per-asset statistics to a single Series.
@@ -29,26 +46,13 @@ def _reduce_stats_df(stats: pd.DataFrame) -> pd.Series:
     remaining metric is taken from the first non-null value.
     """
 
-    ratio_metrics = {
-        'Total Return [%]',
-        'Benchmark Return [%]',
-        'Max Drawdown [%]',
-        'Sortino Ratio',
-        'Sharpe Ratio',
-        'Profit Factor',
-        'Win Rate [%]',
-        'Avg Winning Trade [%]',
-        'Avg Losing Trade [%]'
-    }
-    count_metrics = {'Total Trades'}
-
     reduced = {}
     for metric in stats.index:
         values = stats.loc[metric]
         numeric_values = pd.to_numeric(values, errors='coerce')
-        if metric in count_metrics:
+        if metric in COUNT_METRICS:
             reduced[metric] = numeric_values.sum()
-        elif metric in ratio_metrics:
+        elif metric in RATIO_METRICS:
             reduced[metric] = numeric_values.mean()
         else:
             reduced[metric] = values.dropna().iloc[0]
