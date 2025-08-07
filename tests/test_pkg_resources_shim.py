@@ -26,3 +26,7 @@ def test_indicator_library_provides_pkg_resources_stub(monkeypatch):
     # The shim should be able to report versions using importlib.metadata
     dist = pkg.get_distribution("pytest")
     assert isinstance(dist.version, str)
+    # pandas_ta also expects distributions to expose the installation path via
+    # the ``location`` attribute.  Ensure our shim provides it.
+    assert hasattr(dist, "location"), "distribution should expose location"
+    assert Path(dist.location).exists()
