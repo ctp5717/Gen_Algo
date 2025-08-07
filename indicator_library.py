@@ -55,9 +55,23 @@ if "pkg_resources" not in sys.modules:
         """Replacement for the real pkg_resources exception."""
 
     def get_distribution(name: str):
+        """Lightweight replacement for pkg_resources.get_distribution.
+
+        ``pandas_ta`` expects the returned object to expose both ``version`` and
+        ``location`` attributes.  The previous implementation only provided the
+        version which caused ``AttributeError`` when pandas_ta accessed
+        ``dist.location`` during import.  Here we mirror the minimal interface
+        using ``importlib.metadata`` and supply the package installation path as
+        ``location``.
+        """
+
         try:
-            dist = importlib_metadata.distribution(name)
-            return types.SimpleNamespace(version=dist.version)
+            # ``importlib.metadata`` uses hyphenated package names.  Handle both
+            # styles by normalising underscores to hyphens.
+            dist = importlib_metadata.distribution(name.replace("_", "-"))
+            # ``locate_file('')`` returns the distribution root path
+            location = str(dist.locate_file(""))
+            return types.SimpleNamespace(version=dist.version, location=location)
         except importlib_metadata.PackageNotFoundError as exc:  # pragma: no cover - unlikely
             raise DistributionNotFound from exc
 
