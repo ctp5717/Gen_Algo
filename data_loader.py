@@ -54,13 +54,41 @@ def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str
     print("Binance data loaded and formatted successfully.")
     return data
 
-def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
-    """
-    Acts as a router to fetch data from the selected source (yfinance or binance).
+def get_data(ticker, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
+    """Fetch price data for one or more tickers.
+
+    Parameters
+    ----------
+    ticker : str or sequence of str
+        Single ticker symbol or list of symbols.  When a list is provided the
+        returned DataFrame will have a ``pd.MultiIndex`` on the columns with the
+        top level representing the ticker and the second level the OHLCV fields.
+    start_date, end_date : str
+        Date range for the data.
+    interval : str
+        Bar size / timeframe.
     """
     source = config.DATA_SOURCE.lower()
-    
-    # Include the source in the cache filename to prevent conflicts
+
+    # ------------------------------------------------------------------
+    # Handle portfolio requests by recursively loading each asset and
+    # concatenating the results into a multi-column DataFrame.
+    # ------------------------------------------------------------------
+    if isinstance(ticker, (list, tuple, set)):
+        frames = []
+        symbols = list(ticker)
+        for tk in symbols:
+            df = get_data(tk, start_date, end_date, interval)
+            if not df.empty:
+                frames.append(df)
+        if not frames:
+            return pd.DataFrame()
+        # Concatenate along columns with ticker names as the first level
+        return pd.concat(frames, axis=1, keys=symbols)
+
+    # ------------------------------------------------------------------
+    # Single asset logic (existing behaviour)
+    # ------------------------------------------------------------------
     cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
 
@@ -75,7 +103,6 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
         except Exception as e:
             print(f"Error loading from cache file {cache_filepath}: {e}. Re-downloading.")
 
-    # --- Router Logic ---
     try:
         if source == 'binance':
             data = _get_binance_data(ticker, start_date, end_date, interval)
@@ -91,10 +118,8 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
             print(f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters.")
             return pd.DataFrame()
 
-        # Standardize column names
         data.columns = [col.capitalize() for col in data.columns]
-        
-        # Save the newly fetched data to cache
+
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
         print(f"Saved data to cache: {cache_filename}")

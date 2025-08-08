@@ -12,14 +12,18 @@ import strategy_engine as engine
 
 def _evaluate_on_validation(solution, gene_map):
     """Evaluate solution on validation data and return Sortino Ratio."""
-    # If heavy optional dependencies are missing, skip evaluation to keep tests
-    # lightweight. We check for the pandas_ta accessor and vectorbt's Portfolio
-    # class. When absent, return -inf so the tuner can continue without errors.
+    # Skip evaluation if heavy optional dependencies are missing
     if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
         return -np.inf
 
+    ticker = (
+        config.TUNING_ASSET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
+
     val_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=ticker,
         start_date=config.VALIDATION_PERIOD["start"],
         end_date=config.VALIDATION_PERIOD["end"],
         interval=config.TIMEFRAME,
@@ -29,7 +33,7 @@ def _evaluate_on_validation(solution, gene_map):
 
     rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
     entries = engine.process_strategy_rules(val_data, rules)
-    if entries.sum() < 1:
+    if fitness._count_trades(entries) < 1:
         return -np.inf
 
     exit_rules = rules.get("exit_rules", {})
@@ -41,27 +45,42 @@ def _evaluate_on_validation(solution, gene_map):
     sl_trail = tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
     tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
 
-    time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-    time_exit = time_exit.reindex(entries.index, fill_value=False)
-
-    portfolio = vbt.Portfolio.from_signals(
-        close=val_data["Close"],
-        entries=entries,
-        exits=time_exit,
+    _, _, agg_stats, _ = fitness.run_portfolio_backtest(
+        val_data,
+        entries,
         sl_stop=sl_stop,
-        tp_stop=tp_stop,
         sl_trail=sl_trail,
-        fees=0.001,
-        freq=config.TIMEFRAME,
+        tp_stop=tp_stop,
+        weights=getattr(config, "PORTFOLIO_WEIGHTS", None),
     )
-    stats = portfolio.stats()
-    score = stats.get("Sortino Ratio")
+    score = (
+        agg_stats.loc["Sortino Ratio"].iloc[0]
+        if isinstance(agg_stats, pd.DataFrame)
+        else agg_stats.get("Sortino Ratio")
+    )
     return -np.inf if np.isnan(score) else score
 
 
-def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
-    """Run short GA optimisations to find the best hyperparameter set."""
+def find_best_hyperparameters(gene_space, gene_map, gene_types):
+    """Run short GA optimisations to find the best hyperparameter set.
+
+    When portfolio optimisation is disabled the function loads ``config.TICKER``.
+    If portfolio mode is enabled only ``config.TUNING_ASSET`` is used so the
+    tuning phase stays lightweight.
+    """
     print("\n--- Express Hyperparameter Tuning ---")
+
+    tuning_ticker = (
+        config.TUNING_ASSET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
+    ohlc_data = data_loader.get_data(
+        ticker=tuning_ticker,
+        start_date=config.TRAINING_PERIOD["start"],
+        end_date=config.TRAINING_PERIOD["end"],
+        interval=config.TIMEFRAME,
+    )
     fitness_evaluator = fitness.FitnessEvaluator(ohlc_data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()

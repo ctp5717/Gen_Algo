@@ -126,10 +126,14 @@ def test_walk_forward_uses_all_cores(monkeypatch):
             return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
 
     monkeypatch.setattr(
-        walk_forward.vbt,
-        "Portfolio",
-        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
-        raising=False,
+        walk_forward.fitness,
+        "run_portfolio_backtest",
+        lambda *a, **k: (
+            DummyPortfolio(),
+            DummyPortfolio(),
+            pd.Series({"Total Return [%]":0,"Max Drawdown [%]":0,"Sharpe Ratio":0,"Sortino Ratio":0,"Win Rate [%]":0}),
+            None,
+        ),
     )
 
     monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
@@ -199,21 +203,17 @@ def test_walk_forward_returns_summary(monkeypatch):
         lambda *a, **k: pd.Series([True, False], index=df.index),
     )
 
-    class DummyPortfolio:
-        def stats(self):
-            return {
-                "Total Return [%]": 1.0,
-                "Max Drawdown [%]": 0.0,
-                "Sharpe Ratio": 1.0,
-                "Sortino Ratio": 1.0,
-                "Win Rate [%]": 50.0,
-            }
-
+    stats = pd.Series({
+        "Total Return [%]": 1.0,
+        "Max Drawdown [%]": 0.0,
+        "Sharpe Ratio": 1.0,
+        "Sortino Ratio": 1.0,
+        "Win Rate [%]": 50.0,
+    })
     monkeypatch.setattr(
-        walk_forward.vbt,
-        "Portfolio",
-        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
-        raising=False,
+        walk_forward.fitness,
+        "run_portfolio_backtest",
+        lambda *a, **k: (None, None, stats, None),
     )
 
     monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
@@ -223,6 +223,34 @@ def test_walk_forward_returns_summary(monkeypatch):
     assert isinstance(summary, dict)
     for key in ["average_return", "total_compounded_return", "folds"]:
         assert key in summary
+
+
+def test_walk_forward_uses_aggregated_stats(monkeypatch):
+    import pandas as pd
+    df = pd.DataFrame({'Open':[1], 'High':[1], 'Low':[1], 'Close':[1], 'Volume':[1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    monkeypatch.setattr(walk_forward.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(walk_forward, '_generate_periods', lambda *a, **k: [{'train_start': df.index[0], 'train_end': df.index[0], 'test_start': df.index[0], 'test_end': df.index[0]}])
+    monkeypatch.setattr(walk_forward, 'parse_genes_from_config', lambda *a, **k: ([], {}, []))
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            pass
+        def run(self):
+            pass
+        def best_solution(self, **k):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, 'GA', DummyGA)
+    monkeypatch.setattr(walk_forward.fitness, 'FitnessEvaluator', lambda *a, **k: lambda *a2, **k2: 1.0)
+    monkeypatch.setattr(walk_forward.engine, 'process_strategy_rules', lambda *a, **k: pd.Series([True], index=df.index))
+
+    stats = pd.Series({'Total Return [%]': 5.0, 'Max Drawdown [%]': 1.0, 'Sharpe Ratio': 1.0, 'Sortino Ratio': 1.0, 'Win Rate [%]': 50.0})
+    monkeypatch.setattr(walk_forward.fitness, 'run_portfolio_backtest', lambda *a, **k: (None, None, stats, None))
+    monkeypatch.setattr(walk_forward.config, 'FITNESS_WEIGHTS', {'min_trades':0}, raising=False)
+
+    summary = walk_forward.run_walk_forward_validation()
+    assert summary['folds']['Total Return [%]'].iloc[0] == 5.0
 
 
 def test_update_champion_pool_logic(monkeypatch, capsys):
@@ -250,3 +278,26 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert len(pool) == 1 + 1 + settings["num_clones"]
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
+
+
+def test_walk_forward_uses_asset_basket(monkeypatch):
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {'Open': [1], 'High': [1], 'Low': [1], 'Close': [1], 'Volume': [1]},
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+
+    captured = {}
+
+    def fake_get_data(ticker, *a, **k):
+        captured['ticker'] = ticker
+        return df
+
+    monkeypatch.setattr(walk_forward.data_loader, 'get_data', fake_get_data)
+    monkeypatch.setattr(walk_forward.config, 'PORTFOLIO_OPTIMIZATION_ENABLED', True, raising=False)
+    monkeypatch.setattr(walk_forward.config, 'ASSET_BASKET', ['A', 'B'], raising=False)
+    monkeypatch.setattr(walk_forward, '_generate_periods', lambda *a, **k: [])
+
+    walk_forward.run_walk_forward_validation()
+    assert captured['ticker'] == ['A', 'B']

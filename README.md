@@ -14,6 +14,7 @@ The core philosophy is a modular, "batteries-included" design that separates the
   * **Multi-Source Data Loader:** Fetches historical data from both `yfinance` and the **Binance.US** API, with automated caching.
   * **Automated Rolling Dates:** Intelligently calculates training and validation periods based on the current date and selected timeframe.
   * **Robust Backtesting:** Utilizes the `vectorbt` library for high-speed, vectorized backtesting.
+  * **Portfolio-Level Optimisation:** Optimise a single strategy across a basket of assets with optional custom weighting and aggregated performance metrics.
   * **Advanced Risk Management:** Includes optimizable stop-loss, take-profit, trailing stop loss, and a static max hold period.
   * **Composite Fitness Function:** The GA optimizes for a blended score of multiple metrics (Sortino Ratio, Profit Factor, Max Drawdown) to find more balanced strategies.
   * **Automated Validation:** After optimization, the "champion" strategy is automatically tested on a separate, unseen out-of-sample dataset.
@@ -158,6 +159,10 @@ This module's purpose is to provide a final, unbiased report on the performance 
       * Set the `SELECTED_ASSET_NAME`, `TIMEFRAME`, and `DATA_SOURCE`.
       * Go to the `STRATEGY_RULES` dictionary. Use the `'is_active': True/False` flags to choose which indicator conditions to include in your strategy.
       * Adjust the `low` and `high` ranges for any genes you want to optimize.
+      * To enable portfolio optimisation, set `PORTFOLIO_OPTIMIZATION_ENABLED = True`,
+        populate `ASSET_BASKET` with a list of tickers, and optionally specify
+        `PORTFOLIO_WEIGHTS` to apply custom weighting (equal weights are used if
+        omitted).
 
 2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
 
