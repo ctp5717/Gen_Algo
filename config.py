@@ -69,12 +69,12 @@ CRYPTO_UNIVERSE = {
 # ``TUNING_ASSET`` defines which asset is used during the fast hyperparameter
 # tuning phase before the main portfolio optimisation.
 
-PORTFOLIO_OPTIMIZATION_ENABLED = False
+PORTFOLIO_OPTIMIZATION_ENABLED = True
 
 # Define a basket of tickers when portfolio optimisation is enabled.  Leaving
 # this list empty will result in an error if ``PORTFOLIO_OPTIMIZATION_ENABLED``
 # is set to True.
-ASSET_BASKET: list[str] = []  # e.g. ['BTC-USD', 'ETH-USD']
+ASSET_BASKET: list[str] = ['ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'LINK-USD']  # e.g. ['BTC-USD', 'ETH-USD']
 
 # Optional custom weights corresponding to ASSET_BASKET.  If ``None`` each
 # asset is equally weighted during portfolio backtests.  The weights will be
