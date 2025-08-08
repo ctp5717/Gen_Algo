@@ -66,8 +66,6 @@ def test_fitness_uses_aggregated_stats(monkeypatch):
 
 
 def test_run_portfolio_backtest_weights(monkeypatch):
-    import numpy as np
-
     ohlc = pd.DataFrame(
         {
             ('A', 'Close'): [1, 2],
@@ -84,26 +82,37 @@ def test_run_portfolio_backtest_weights(monkeypatch):
 
     captured = {}
 
-    class DummyAgg:
-        def stats(self):
-            return pd.Series({'Total Return [%]': 0})
-
     class DummyPortfolio:
         def stats(self):
             return pd.DataFrame({'A': [0], 'B': [0]}, index=['Total Return [%]'])
 
-        def total(self):
-            return DummyAgg()
+        def value(self):
+            # provide constant value series for each asset
+            return pd.DataFrame(
+                {
+                    'A': [100, 100],
+                    'B': [100, 100],
+                },
+                index=ohlc.index,
+            )
+
+    orig_from_signals = fitness.vbt.Portfolio.from_signals
+
+    def fake_from_signals(*a, **k):
+        # Calls originating from from_holding pass boolean entries/exits
+        if isinstance(k.get('entries'), bool):
+            return orig_from_signals(*a, **k)
+        captured.update(k)
+        return DummyPortfolio()
 
     monkeypatch.setattr(
         fitness.vbt.Portfolio,
         'from_signals',
-        lambda **k: (captured.update(k) or DummyPortfolio()),
+        fake_from_signals,
     )
 
     _, agg_pf, agg_stats, per_asset = fitness.run_portfolio_backtest(ohlc, entries)
-    assert np.allclose(captured['weights'], [0.5, 0.5])
-    assert isinstance(agg_pf, DummyAgg)
+    assert 'weights' not in captured
     assert isinstance(agg_stats, pd.Series)
     assert list(per_asset.columns) == ['A', 'B']
 
@@ -113,4 +122,4 @@ def test_run_portfolio_backtest_weights(monkeypatch):
         entries,
         weights=[0.7, 0.3],
     )
-    assert np.allclose(captured['weights'], [0.7, 0.3])
+    assert 'weights' not in captured

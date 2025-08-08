@@ -47,7 +47,10 @@ def run_portfolio_backtest(
         ``vectorbt.Portfolio.from_signals``.
     weights : list[float] or np.ndarray, optional
         Custom portfolio weights applied across assets.  If ``None`` each asset
-        is equally weighted.  The weights will be normalised to sum to one.
+        is equally weighted.  The weights are normalised to sum to one and are
+        used when aggregating per-asset equity curves after the backtest.  They
+        are not passed to ``vectorbt.Portfolio.from_signals`` due to API
+        changes in recent versions of *vectorbt*.
 
     Returns
     -------
@@ -70,15 +73,16 @@ def run_portfolio_backtest(
 
     # Equal-weight all assets unless custom weights are provided
     group_by = None
+    weights_arr = None
     if isinstance(close_prices, pd.DataFrame) and close_prices.shape[1] > 1:
         group_by = close_prices.columns
         if weights is None:
-            weights = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
+            weights_arr = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
         else:
-            weights = np.asarray(weights, dtype=float)
-            if weights.size != close_prices.shape[1]:
+            weights_arr = np.asarray(weights, dtype=float)
+            if weights_arr.size != close_prices.shape[1]:
                 raise ValueError("weights length must match number of assets")
-            weights = weights / weights.sum()
+            weights_arr = weights_arr / weights_arr.sum()
 
     portfolio = vbt.Portfolio.from_signals(
         close=close_prices,
@@ -90,14 +94,20 @@ def run_portfolio_backtest(
         fees=0.001,
         freq=config.TIMEFRAME,
         group_by=group_by,
-        weights=weights,
     )
 
     per_asset_stats = portfolio.stats()
     agg_portfolio = portfolio
     agg_stats = per_asset_stats
-    if isinstance(close_prices, pd.DataFrame) and hasattr(portfolio, "total"):
-        agg_portfolio = portfolio.total()
+    if isinstance(close_prices, pd.DataFrame):
+        if weights_arr is None:
+            weights_arr = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
+
+        weighted_value = (portfolio.value() * weights_arr).sum(axis=1)
+        agg_portfolio = vbt.Portfolio.from_holding(
+            close=weighted_value,
+            freq=config.TIMEFRAME,
+        )
         agg_stats = agg_portfolio.stats()
 
     return portfolio, agg_portfolio, agg_stats, per_asset_stats
