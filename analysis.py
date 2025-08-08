@@ -152,7 +152,11 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         'Avg Winning Trade [%]',
         'Avg Losing Trade [%]'
     ]
-    print(stats[metrics_to_show].to_string())
+    available = [m for m in metrics_to_show if m in stats.index]
+    missing = set(metrics_to_show) - set(available)
+    if missing:
+        print(f"Warning: Missing metrics: {', '.join(sorted(missing))}")
+    print(stats.reindex(available).to_string())
 
     if isinstance(entries, pd.DataFrame) and len(entries.columns) > 1:
         print("\n--- Per-Asset Performance Breakdown ---")
@@ -161,7 +165,13 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             if isinstance(asset_stats, pd.DataFrame):
                 asset_stats = _reduce_stats_df(asset_stats)
             print(f"\nAsset: {asset}")
-            print(asset_stats[metrics_to_show].to_string())
+            available = [m for m in metrics_to_show if m in asset_stats.index]
+            missing = set(metrics_to_show) - set(available)
+            if missing:
+                print(
+                    f"Warning: Missing metrics for {asset}: {', '.join(sorted(missing))}"
+                )
+            print(asset_stats.reindex(available).to_string())
 
     print("\nDisplaying equity curve plot for the validation period...")
     # Enable interactive mode so the plot window does not block execution.
