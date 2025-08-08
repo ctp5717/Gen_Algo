@@ -154,41 +154,85 @@ def test_portfolio_stats_called_without_agg(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "stats_series,expected",
+    "stats_series",
     [
-        (
-            pd.Series(
-                {
-                    'Sortino Ratio': np.nan,
-                    'Profit Factor': 1.0,
-                    'Max Drawdown [%]': 10.0,
-                }
-            ),
-            'Sortino Ratio',
+        pd.Series(
+            {
+                'Sortino Ratio': 1.0,
+                'Profit Factor': 1.0,
+                'Max Drawdown [%]': 10.0,
+            }
         ),
-        (
-            pd.Series(
-                {
-                    'Sortino Ratio': 1.0,
-                    'Profit Factor': 0.0,
-                    'Max Drawdown [%]': 10.0,
-                }
-            ),
-            'Profit Factor',
-        ),
-        (
-            pd.Series(
-                {
-                    'Sortino Ratio': 1.0,
-                    'Profit Factor': 1.0,
-                    'Max Drawdown [%]': 100.0,
-                }
-            ),
-            'Drawdown Score',
+        pd.Series(
+            {
+                'Sortino Ratio': 1.0,
+                'Profit Factor': 1.0,
+                'Max Drawdown [%]': 10.0,
+                'Total Trades': 0,
+            }
         ),
     ],
 )
-def test_invalid_metrics_penalize(monkeypatch, caplog, stats_series, expected):
+def test_no_trade_portfolios_return_minus_one(monkeypatch, caplog, stats_series):
+    ohlc = pd.DataFrame({'Close': [1, 2, 3]})
+    evaluator = fitness.FitnessEvaluator(ohlc, {'exit_rules': {}}, {})
+
+    entries = pd.Series([True, False, False])
+    monkeypatch.setattr(fitness.engine, 'process_strategy_rules', lambda *a, **k: entries)
+
+    class DummyPortfolio:
+        def stats(self, *args, **kwargs):
+            return stats_series
+
+    portfolio_ns = types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio())
+    monkeypatch.setattr(fitness.vbt, 'Portfolio', portfolio_ns, raising=False)
+
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1.0, 'profit_factor': 1.0, 'max_drawdown': 1.0, 'min_trades': 1},
+        raising=False,
+    )
+    monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
+
+    with caplog.at_level(logging.WARNING):
+        score = evaluator(None, [], 0)
+
+    assert score == -1.0
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize(
+    "stats_series",
+    [
+        pd.Series(
+            {
+                'Sortino Ratio': np.nan,
+                'Profit Factor': 1.0,
+                'Max Drawdown [%]': 10.0,
+                'Total Trades': 1,
+            }
+        ),
+        pd.Series(
+            {
+                'Sortino Ratio': 1.0,
+                'Profit Factor': np.nan,
+                'Max Drawdown [%]': 10.0,
+                'Total Trades': 1,
+            }
+        ),
+        pd.Series(
+            {
+                'Sortino Ratio': 1.0,
+                'Profit Factor': np.inf,
+                'Max Drawdown [%]': 10.0,
+                'Total Trades': 1,
+            }
+        ),
+    ],
+)
+def test_invalid_metrics_fallback_no_warnings(monkeypatch, caplog, stats_series):
     ohlc = pd.DataFrame({'Close': [1, 2, 3]})
     evaluator = fitness.FitnessEvaluator(ohlc, {'exit_rules': {}}, {})
 
@@ -211,8 +255,8 @@ def test_invalid_metrics_penalize(monkeypatch, caplog, stats_series, expected):
     monkeypatch.setattr(fitness.config, 'MAX_HOLD_PERIOD', 1, raising=False)
     monkeypatch.setattr(fitness.config, 'TIMEFRAME', '1d', raising=False)
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.WARNING):
         score = evaluator(None, [], 0)
 
-    assert score == -999.0
-    assert expected in caplog.text
+    assert np.isfinite(score)
+    assert caplog.text == ""

@@ -5,8 +5,6 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
-import logging
-
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
@@ -149,6 +147,10 @@ class FitnessEvaluator:
             if isinstance(stats, pd.DataFrame):
                 stats = _reduce_stats_df(stats)
 
+            total_trades = stats.get('Total Trades', 0)
+            if total_trades < config.FITNESS_WEIGHTS['min_trades']:
+                return -1.0
+
             sortino = stats.get('Sortino Ratio', np.nan)
             profit_factor = stats.get('Profit Factor', np.nan)
             max_drawdown = stats.get('Max Drawdown [%]', np.nan)
@@ -156,23 +158,16 @@ class FitnessEvaluator:
             if np.isinf(profit_factor) or profit_factor > 5:
                 profit_factor = 5
 
-            drawdown_score = 1 - (max_drawdown / 100.0)
+            drawdown_score = (
+                1 - (max_drawdown / 100.0) if np.isfinite(max_drawdown) else 0.0
+            )
 
-            if np.isnan(sortino) or sortino == 0:
-                logging.warning(
-                    "Penalizing fitness due to invalid Sortino Ratio: %s", sortino
-                )
-                return -999.0
-            if np.isnan(profit_factor) or profit_factor == 0:
-                logging.warning(
-                    "Penalizing fitness due to invalid Profit Factor: %s", profit_factor
-                )
-                return -999.0
-            if np.isnan(drawdown_score) or drawdown_score == 0:
-                logging.warning(
-                    "Penalizing fitness due to invalid Drawdown Score: %s", drawdown_score
-                )
-                return -999.0
+            if not np.isfinite(sortino) or sortino == 0:
+                sortino = 0.0
+            if not np.isfinite(profit_factor) or profit_factor == 0:
+                profit_factor = 0.0
+            if not np.isfinite(drawdown_score) or drawdown_score <= 0:
+                drawdown_score = 0.0
 
             weights = config.FITNESS_WEIGHTS
 
