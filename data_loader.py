@@ -1,106 +1,74 @@
-# data_loader.py
-
-"""
-Data Loader & Caching Module
-============================
-
-(This final version flattens MultiIndex columns from yfinance and ensures
-the DatetimeIndex is correctly loaded from the cache, which is critical
-for the indicator and backtesting engines.)
-"""
-
+from __future__ import annotations
 import os
+from typing import List, Union, Dict
 import pandas as pd
+
 import yfinance as yf
 from binance.client import Client
 import config
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
+_BN_INTERVALS = {
+    "1m":"1m","3m":"3m","5m":"5m","15m":"15m","30m":"30m","1h":"1h","2h":"2h","4h":"4h","6h":"6h","8h":"8h","12h":"12h","1d":"1d","3d":"3d","1w":"1w","1M":"1M"
+}
 
-def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
-    """ Fetches historical kline data from Binance and formats it. """
-    print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
-    
-    # --- MODIFIED: Added the tld parameter to correctly connect to Binance.US ---
-    client = Client(
-        api_key=config.API_KEYS['binance']['api_key'],
-        api_secret=config.API_KEYS['binance']['api_secret'],
-        tld=config.API_KEYS['binance']['tld']
-    )
-    
-    # Fetch the data
-    klines = client.get_historical_klines(ticker.replace('-',''), interval, start_str=start_date, end_str=end_date)
-    
+def _fetch_yf(ticker: str, start: str, end: str, interval: str) -> pd.DataFrame:
+    df = yf.download(ticker, start=start, end=end, interval=interval, progress=False)
+    if df.empty:
+        return df
+    df = df.rename(columns={c: c.title() for c in df.columns})
+    df.index = pd.to_datetime(df.index)
+    return df[['Open','High','Low','Close','Volume']]
+
+def _fetch_binance(symbol: str, start: str, end: str, interval: str) -> pd.DataFrame:
+    api = config.API_KEYS.get('binance', {})
+    client = Client(api.get('api_key', ''), api.get('api_secret', ''), tld=api.get('tld','us'))
+    bn_interval = _BN_INTERVALS.get(interval, "1h")
+    klines = client.get_historical_klines(symbol, bn_interval, f"{start} 00:00:00", f"{end} 23:59:59")
     if not klines:
-        print(
-            "No data returned from Binance for "
-            f"{ticker}. It may not be listed on Binance.US or have history in this range."
-        )
-        return pd.DataFrame()
+        return pd.DataFrame(columns=['Open','High','Low','Close','Volume'])
+    cols = ['Open time','Open','High','Low','Close','Volume','Close time','Quote asset volume','Number of trades','Taker buy base','Taker buy quote','Ignore']
+    df = pd.DataFrame(klines, columns=cols)
+    for c in ['Open','High','Low','Close','Volume']:
+        df[c] = pd.to_numeric(df[c])
+    df['Date'] = pd.to_datetime(df['Open time'], unit='ms')
+    df = df.set_index('Date')[['Open','High','Low','Close','Volume']]
+    return df
 
-    # Create a pandas DataFrame
-    data = pd.DataFrame(klines, columns=[
-        'Open time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close time',
-        'Quote asset volume', 'Number of trades', 'Taker buy base asset volume',
-        'Taker buy quote asset volume', 'Ignore'
-    ])
-    
-    # --- Data Cleaning and Formatting ---
-    data['Date'] = pd.to_datetime(data['Open time'], unit='ms')
-    data.set_index('Date', inplace=True)
-    data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
-    data = data.apply(pd.to_numeric, errors='coerce')
-    
-    print("Binance data loaded and formatted successfully.")
-    return data
+def _normalize_symbol(t: str) -> str:
+    if config.DATA_SOURCE == 'binance':
+        t = t.replace('-', '')
+        if t.endswith('USD') and not t.endswith('USDT'):
+            t = t[:-3] + 'USDT'
+    return t
 
-def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
+def _fetch_single(ticker: str, start: str, end: str, interval: str) -> pd.DataFrame:
+    if config.DATA_SOURCE == 'binance':
+        sym = _normalize_symbol(ticker)
+        df = _fetch_binance(sym, start, end, interval)
+    else:
+        df = _fetch_yf(ticker, start, end, interval)
+    return df
+
+def get_data(ticker: Union[str, List[str]], start_date: str, end_date: str, interval: str) -> pd.DataFrame:
     """
-    Acts as a router to fetch data from the selected source (yfinance or binance).
+    Returns OHLCV for one or many tickers. If a list is passed, returns a
+    MultiIndex dataframe: columns = (asset, field).
     """
-    source = config.DATA_SOURCE.lower()
-    
-    # Include the source in the cache filename to prevent conflicts
-    cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
-    cache_filepath = os.path.join(CACHE_DIR, cache_filename)
-
-    if os.path.exists(cache_filepath):
-        print(f"Loading '{ticker}' data from local cache: {cache_filename}")
-        try:
-            data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
-            if not isinstance(data.index, pd.DatetimeIndex):
-                raise TypeError("Loaded data index is not a DatetimeIndex.")
-            print("Cache loaded successfully.")
-            return data
-        except Exception as e:
-            print(f"Error loading from cache file {cache_filepath}: {e}. Re-downloading.")
-
-    # --- Router Logic ---
-    try:
-        if source == 'binance':
-            data = _get_binance_data(ticker, start_date, end_date, interval)
-        elif source == 'yfinance':
-            print(f"Cache not found. Downloading '{ticker}' data from Yahoo Finance...")
-            data = yf.download(ticker, start=start_date, end=end_date, interval=interval, progress=False)
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-        else:
-            raise ValueError(f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'.")
-
-        if data.empty:
-            print(f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters.")
+    if isinstance(ticker, list):
+        frames: Dict[str, pd.DataFrame] = {}
+        for t in ticker:
+            df = _fetch_single(t, start_date, end_date, interval)
+            if df.empty:
+                continue
+            df = df.copy()
+            df.columns = pd.MultiIndex.from_product([[t], df.columns])
+            frames[t] = df
+        if not frames:
             return pd.DataFrame()
-
-        # Standardize column names
-        data.columns = [col.capitalize() for col in data.columns]
-        
-        # Save the newly fetched data to cache
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        data.to_csv(cache_filepath)
-        print(f"Saved data to cache: {cache_filename}")
-
-        return data
-
-    except Exception as e:
-        print(f"An error occurred while downloading data for {ticker}: {e}")
-        return pd.DataFrame()
+        out = None
+        for _, d in frames.items():
+            out = d if out is None else out.join(d, how='outer')
+        out = out.sort_index().fillna(method='ffill').dropna()
+        return out
+    else:
+        return _fetch_single(ticker, start_date, end_date, interval)

@@ -1,86 +1,85 @@
-# analysis.py
-
-"""
-Analysis & Reporting Module
-(This version uses the correct pandas .shift() method for time-based exits)
-"""
-
+import traceback
+from typing import Dict, List
+import matplotlib.pyplot as plt
+import pandas as pd
 import vectorbt as vbt
 import config
 import data_loader
 import fitness
 import strategy_engine as engine
-import traceback
-import matplotlib.pyplot as plt  # To display plots without blocking
 
-def run_champion_analysis(best_solution: list, gene_map: dict):
-    """
-    Runs a full backtest and analysis on the champion solution using validation data.
-    """
+def run_champion_analysis(best_solution: List[float], gene_map: Dict[int, dict]) -> None:
     print("\n\n--- Champion Strategy Analysis on Unseen Data ---")
-    
-    print(
-        "Loading validation data from "
-        f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
-    )
-    validation_data = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=config.VALIDATION_PERIOD['start'],
-        end_date=config.VALIDATION_PERIOD['end'],
-        interval=config.TIMEFRAME
-    )
-    if validation_data.empty: return
+    start = config.VALIDATION_PERIOD['start']
+    end = config.VALIDATION_PERIOD['end']
 
+    tickers = getattr(config, 'ASSET_BASKET', [config.TICKER]) if getattr(config, 'PORTFOLIO_OPTIMIZATION_ENABLED', False) else config.TICKER
+    validation_data = data_loader.get_data(tickers, start, end, config.TIMEFRAME)
+    if validation_data.empty:
+        print("No validation data available.")
+        return
     try:
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(validation_data, rules)
-        
-        if entries.sum() < 1:
+        total_trades = entries.astype(bool).values.sum() if isinstance(entries, pd.DataFrame) else int(entries.sum())
+        if total_trades < 1:
             print("\nChampion strategy produced no trades in the validation period.")
             return
 
-        # --- NEW: Logic to handle multiple, selectable exit types ---
-        exit_rules = rules.get('exit_rules', {})
-        sl_rule = exit_rules.get('stop_loss', {})
-        tsl_rule = exit_rules.get('trailing_stop', {})
-        tp_rule = exit_rules.get('take_profit', {})
+        exit_rules = rules.get('exit_rules', {}) or {}
+        def getp(name):
+            r = exit_rules.get(name, {}) or {}
+            return r.get('params', {}).get('value') if r.get('is_active', False) else None
+        sl_stop, sl_trail, tp_stop = getp('stop_loss'), getp('trailing_stop'), getp('take_profit')
 
-        sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
-        sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
-        tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
-            
-        time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
+        time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False).reindex(entries.index, fill_value=False)
+        if isinstance(validation_data.columns, pd.MultiIndex):
+            close_prices = validation_data.xs('Close', level=1, axis=1)
+        else:
+            close_prices = validation_data['Close']
 
         portfolio = vbt.Portfolio.from_signals(
-            close=validation_data['Close'],
-            entries=entries,
-            exits=time_based_exit,
-            sl_stop=sl_stop,
-            tp_stop=tp_stop,
-            sl_trail=sl_trail, # Pass the trailing stop value to the backtester
-            fees=0.001,
-            freq=config.TIMEFRAME
+            close=close_prices, entries=entries, exits=time_based_exit,
+            sl_stop=sl_stop, tp_stop=tp_stop, sl_trail=sl_trail,
+            fees=0.001, freq=config.TIMEFRAME,
         )
-
-    except Exception as e:
-        print(f"An error occurred during analysis backtest: {e}")
-        traceback.print_exc() # Use traceback for more detailed errors
+    except Exception as err:
+        print(f"An error occurred during analysis backtest: {err}")
+        traceback.print_exc()
         return
 
     print("\n--- Validation Period Performance Stats ---")
     stats = portfolio.stats()
-    metrics_to_show = [
-        'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
-        'Max Drawdown [%]', 'Sortino Ratio', 'Sharpe Ratio', 'Profit Factor',
-        'Win Rate [%]', 'Total Trades', 'Avg Winning Trade [%]', 'Avg Losing Trade [%]'
-    ]
-    print(stats[metrics_to_show].to_string())
+    metrics = ['Total Return [%]','Benchmark Return [%]','Max Drawdown [%]','Sortino Ratio','Sharpe Ratio','Profit Factor','Win Rate [%]','Total Trades']
+    if isinstance(stats, dict):
+        stats_df = pd.DataFrame([stats])[metrics]
+        print(stats_df.to_string(index=False))
+    else:
+        print(stats[metrics].to_string(index=False))
+
+    if isinstance(close_prices, pd.DataFrame) and close_prices.shape[1] > 1:
+        try:
+            per_asset_results = []
+            for asset in close_prices.columns:
+                asset_port = vbt.Portfolio.from_signals(
+                    close=close_prices[asset],
+                    entries=entries[asset] if isinstance(entries, pd.DataFrame) else entries,
+                    exits=time_based_exit[asset] if isinstance(time_based_exit, pd.DataFrame) else time_based_exit,
+                    sl_stop=sl_stop, tp_stop=tp_stop, sl_trail=sl_trail, fees=0.001, freq=config.TIMEFRAME,
+                )
+                asset_stats = asset_port.stats()
+                per_asset_results.append({
+                    'Asset': asset,
+                    'Total Return [%]': asset_stats.get('Total Return [%]', float('nan')) if isinstance(asset_stats, dict) else asset_stats.get('Total Return [%]'),
+                    'Max Drawdown [%]': asset_stats.get('Max Drawdown [%]', float('nan')) if isinstance(asset_stats, dict) else asset_stats.get('Max Drawdown [%]'),
+                })
+            per_df = pd.DataFrame(per_asset_results)
+            print("\n--- Per-Asset Breakdown ---")
+            print(per_df.to_string(index=False))
+        except Exception:
+            pass
 
     print("\nDisplaying equity curve plot for the validation period...")
-    # Enable interactive mode so the plot window does not block execution.
     plt.ion()
-    fig = portfolio.plot(
-        title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
-    )
+    fig = portfolio.plot(title="Champion Strategy Performance on Validation Portfolio")
     fig.show()
