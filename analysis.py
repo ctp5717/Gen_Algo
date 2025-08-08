@@ -5,6 +5,7 @@ Analysis & Reporting Module
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 
+import pandas as pd
 import vectorbt as vbt
 import config
 import data_loader
@@ -23,8 +24,13 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         "Loading validation data from "
         f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
     )
+    tickers = (
+        config.ASSET_BASKET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
     validation_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=tickers,
         start_date=config.VALIDATION_PERIOD['start'],
         end_date=config.VALIDATION_PERIOD['end'],
         interval=config.TIMEFRAME
@@ -34,11 +40,10 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     try:
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(validation_data, rules)
-        
-        if entries.sum() < 1:
+
+        if fitness._count_trades(entries) < 1:
             print("\nChampion strategy produced no trades in the validation period.")
             return
-
         # --- NEW: Logic to handle multiple, selectable exit types ---
         exit_rules = rules.get('exit_rules', {})
         sl_rule = exit_rules.get('stop_loss', {})
@@ -48,19 +53,14 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
         sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
         tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
-            
-        time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
-        portfolio = vbt.Portfolio.from_signals(
-            close=validation_data['Close'],
-            entries=entries,
-            exits=time_based_exit,
+        portfolio, agg_portfolio, agg_stats, per_asset_stats = fitness.run_portfolio_backtest(
+            validation_data,
+            entries,
             sl_stop=sl_stop,
+            sl_trail=sl_trail,
             tp_stop=tp_stop,
-            sl_trail=sl_trail, # Pass the trailing stop value to the backtester
-            fees=0.001,
-            freq=config.TIMEFRAME
+            weights=getattr(config, "PORTFOLIO_WEIGHTS", None),
         )
 
     except Exception as e:
@@ -69,18 +69,31 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         return
 
     print("\n--- Validation Period Performance Stats ---")
-    stats = portfolio.stats()
     metrics_to_show = [
         'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
         'Max Drawdown [%]', 'Sortino Ratio', 'Sharpe Ratio', 'Profit Factor',
-        'Win Rate [%]', 'Total Trades', 'Avg Winning Trade [%]', 'Avg Losing Trade [%]'
+        'Win Rate [%]', 'Total Trades', 'Avg Winning Trade [%]', 'Avg Losing Trade [%]',
+        'Volatility', 'Calmar Ratio', 'Max Consecutive Losses'
     ]
-    print(stats[metrics_to_show].to_string())
+
+    agg_to_print = agg_stats[metrics_to_show] if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc[metrics_to_show]
+    print(agg_to_print.to_string())
+
+    if isinstance(per_asset_stats, pd.DataFrame):
+        print("\nPer-Asset Breakdown:")
+        print(per_asset_stats.loc[metrics_to_show].to_string())
 
     print("\nDisplaying equity curve plot for the validation period...")
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
+    title_asset = (
+        "Portfolio" if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.SELECTED_ASSET_NAME
+    )
     fig = portfolio.plot(
-        title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
+        title=f"Champion Strategy Performance on {title_asset} (Validation)"
     )
     fig.show()
+    if agg_portfolio is not portfolio:
+        agg_fig = agg_portfolio.plot(title="Aggregated Portfolio Equity (Validation)")
+        agg_fig.show()

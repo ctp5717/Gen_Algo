@@ -21,7 +21,7 @@ Design Philosophy:
 """
 
 import pandas as pd
-import indicator_library as ind_lib # Import our toolbox of indicators
+import indicator_library as ind_lib  # Import our toolbox of indicators
 
 # A mapping dictionary to dynamically call indicator functions.
 # This makes the engine scalable. To add a new indicator, you just add an entry here
@@ -34,13 +34,20 @@ INDICATOR_MAPPING = {
     'bbands': ind_lib.calculate_bbands,
 }
 
-def _generate_signal(ohlc_data: pd.DataFrame, indicator_series: pd.Series, condition: dict) -> pd.Series:
+def _select_price(ohlc_data: pd.DataFrame, field: str) -> pd.DataFrame:
+    """Utility to extract a price field from single or multi-asset data."""
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        return ohlc_data.xs(field, axis=1, level=1)
+    return ohlc_data[field]
+
+
+def _generate_signal(ohlc_data: pd.DataFrame, indicator_series, condition: dict):
     """
     Generates a boolean signal series based on a condition between price and an indicator.
-    (This version is updated to handle Bollinger Band conditions).
+    Works with both Series and DataFrames to support portfolio-level operations.
     """
     condition_type = condition.get('type')
-    close_price = ohlc_data['Close']
+    close_price = _select_price(ohlc_data, 'Close')
 
     if condition_type == 'price_is_above_indicator':
         return close_price > indicator_series
@@ -63,10 +70,8 @@ def _generate_signal(ohlc_data: pd.DataFrame, indicator_series: pd.Series, condi
         print(f"Warning: Unknown condition type '{condition_type}'.")
         return pd.Series(False, index=ohlc_data.index)
 
-def _generate_signal_from_value(indicator_series: pd.Series, condition: dict) -> pd.Series:
-    """
-    Generates a boolean signal based on a condition between an indicator and a static value.
-    """
+def _generate_signal_from_value(indicator_series, condition: dict):
+    """Generate a boolean signal comparing an indicator to a static value."""
     condition_type = condition.get('type')
     value = condition.get('value')
 
@@ -82,10 +87,10 @@ def _generate_signal_from_value(indicator_series: pd.Series, condition: dict) ->
         print(f"Warning: Unknown condition type '{condition_type}' for value comparison.")
         return pd.Series(False, index=indicator_series.index)
 
-def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
-    """
-    Processes the full strategy rules dictionary to generate final entry signals.
-    (This version can intelligently select columns from multi-output indicators).
+def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict):
+    """Process the full strategy rules dictionary to generate entry signals.
+
+    The function now supports both single-asset Series and multi-asset DataFrames.
     """
     entry_rules = rules.get('entry_rules', {})
     conditions = entry_rules.get('conditions', [])
@@ -94,7 +99,11 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
     if not conditions:
         return pd.Series(False, index=ohlc_data.index)
 
-    final_entry_signal = pd.Series(True, index=ohlc_data.index)
+    close_price = _select_price(ohlc_data, 'Close')
+    if isinstance(close_price, pd.DataFrame):
+        final_entry_signal = pd.DataFrame(True, index=ohlc_data.index, columns=close_price.columns)
+    else:
+        final_entry_signal = pd.Series(True, index=ohlc_data.index)
 
     for rule in conditions:
         if not rule.get('is_active', True):
@@ -111,22 +120,25 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
 
         indicator_output = indicator_func(ohlc_data, **params)
         condition_type = condition_logic.get('type')
-        
-        # --- NEW: Intelligent Column Selection ---
-        target_series = indicator_output
-        if isinstance(indicator_output, pd.DataFrame):
-            # If the output is a DataFrame, find the correct column to use.
-            if 'bbands' in indicator_name:
-                if 'upper' in condition_type: target_series = indicator_output.filter(like='BBU').iloc[:, 0]
-                elif 'lower' in condition_type: target_series = indicator_output.filter(like='BBL').iloc[:, 0]
-                else: target_series = indicator_output.filter(like='BBM').iloc[:, 0] # Default to middle band
-            elif 'macd' in indicator_name:
-                target_series = indicator_output.filter(like='MACDh').iloc[:, 0] # Default to histogram
-            else:
-                # Fallback for other multi-column indicators if not specified
-                target_series = indicator_output.iloc[:, 0]
 
-        individual_signal = pd.Series(False, index=ohlc_data.index)
+        target_series = indicator_output
+        if isinstance(indicator_output, pd.DataFrame) and indicator_output.columns.nlevels > 1:
+            # Multi-output indicator, select the appropriate component
+            if 'bbands' in indicator_name:
+                if 'upper' in condition_type:
+                    target_series = indicator_output.xs('upper', level=1, axis=1)
+                elif 'lower' in condition_type:
+                    target_series = indicator_output.xs('lower', level=1, axis=1)
+                else:
+                    target_series = indicator_output.xs('middle', level=1, axis=1)
+            elif 'macd' in indicator_name:
+                target_series = indicator_output.xs('hist', level=1, axis=1)
+
+        if isinstance(close_price, pd.DataFrame):
+            individual_signal = pd.DataFrame(False, index=ohlc_data.index, columns=close_price.columns)
+        else:
+            individual_signal = pd.Series(False, index=ohlc_data.index)
+
         if 'price' in condition_type:
             individual_signal = _generate_signal(ohlc_data, target_series, condition_logic)
         elif 'indicator' in condition_type:

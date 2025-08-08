@@ -6,7 +6,6 @@ import pandas as pd
 import os
 import numpy as np
 import pygad
-import vectorbt as vbt
 
 import config
 import data_loader
@@ -94,8 +93,13 @@ def run_walk_forward_validation(initial_champions=None):
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
     end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
 
+    tickers = (
+        config.ASSET_BASKET
+        if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
+        else config.TICKER
+    )
     all_data = data_loader.get_data(
-        ticker=config.TICKER,
+        ticker=tickers,
         start_date=start_date,
         end_date=end_date,
         interval=config.TIMEFRAME,
@@ -165,7 +169,7 @@ def run_walk_forward_validation(initial_champions=None):
 
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         entries = engine.process_strategy_rules(test_data, rules)
-        if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+        if fitness._count_trades(entries) < config.FITNESS_WEIGHTS['min_trades']:
             print("No trades in test period.")
             results.append({
                 'Window': idx,
@@ -198,25 +202,24 @@ def run_walk_forward_validation(initial_champions=None):
             else None
         )
 
-        time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_exit = time_exit.reindex(entries.index, fill_value=False)
+        try:
+            _, _, agg_stats, _ = fitness.run_portfolio_backtest(
+                test_data,
+                entries,
+                sl_stop=sl_stop,
+                sl_trail=sl_trail,
+                tp_stop=tp_stop,
+                weights=getattr(config, "PORTFOLIO_WEIGHTS", None),
+            )
+        except RuntimeError as e:
+            print(e)
+            continue
 
-        portfolio = vbt.Portfolio.from_signals(
-            close=test_data['Close'],
-            entries=entries,
-            exits=time_exit,
-            sl_stop=sl_stop,
-            tp_stop=tp_stop,
-            sl_trail=sl_trail,
-            fees=0.001,
-            freq=config.TIMEFRAME,
-        )
-        stats = portfolio.stats()
-        tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')
-        dd = stats['Max Drawdown [%]'] if isinstance(stats, dict) else stats.get('Max Drawdown [%]')
-        sharpe = stats.get('Sharpe Ratio') if isinstance(stats, dict) else stats.get('Sharpe Ratio')
-        sortino = stats.get('Sortino Ratio') if isinstance(stats, dict) else stats.get('Sortino Ratio')
-        win_rate = stats.get('Win Rate [%]') if isinstance(stats, dict) else stats.get('Win Rate [%]')
+        tr = agg_stats.get('Total Return [%]') if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc['Total Return [%]'].iloc[0]
+        dd = agg_stats.get('Max Drawdown [%]') if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc['Max Drawdown [%]'].iloc[0]
+        sharpe = agg_stats.get('Sharpe Ratio') if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc['Sharpe Ratio'].iloc[0]
+        sortino = agg_stats.get('Sortino Ratio') if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc['Sortino Ratio'].iloc[0]
+        win_rate = agg_stats.get('Win Rate [%]') if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc['Win Rate [%]'].iloc[0]
         print(f"Test Return: {tr:.2f}% | Max DD: {dd:.2f}%")
         print("Winning Parameters:")
         for param_name, param_value in winning_params.items():

@@ -38,99 +38,110 @@ if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
 import pandas_ta as ta
+try:  # Optional dependency used for portfolio‑wide indicator computation
+    import vectorbt as vbt
+except Exception:  # pragma: no cover - vectorbt may be unavailable in tests
+    vbt = None
 
-def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
-    """
-    Calculates the Exponential Moving Average (EMA).
 
-    Args:
-        ohlc_data (pd.DataFrame): DataFrame with columns 'Open', 'High', 'Low', 'Close'.
-        period (int): The lookback period for the EMA.
+def _select_price(ohlc_data: pd.DataFrame, field: str) -> pd.DataFrame:
+    """Return the requested price field from single or multi-asset data."""
+    if isinstance(ohlc_data.columns, pd.MultiIndex):
+        return ohlc_data.xs(field, axis=1, level=1)
+    return ohlc_data[field]
 
-    Returns:
-        pd.Series: A pandas Series containing the EMA values.
-    """
+def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
+    """Calculate the Exponential Moving Average (EMA)."""
     if period is None:
         raise ValueError("EMA 'period' parameter cannot be None.")
-    
-    # pandas-ta automatically finds the 'Close' column to perform the calculation
-    ema_series = ohlc_data.ta.ema(length=period)
-    
-    if ema_series is None:
-        raise ConnectionError("Failed to calculate EMA. Check input data and parameters.")
-        
-    return ema_series
 
-def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
-    """
-    Calculates the Average True Range (ATR).
+    close = _select_price(ohlc_data, 'Close')
 
-    Args:
-        ohlc_data (pd.DataFrame): DataFrame with columns 'Open', 'High', 'Low', 'Close'.
-        period (int): The lookback period for the ATR.
+    if vbt is not None and hasattr(vbt, 'EMA'):
+        return vbt.EMA.run(close, window=period).ema
 
-    Returns:
-        pd.Series: A pandas Series containing the ATR values.
-    """
+    return close.ewm(span=period, adjust=False).mean()
+
+def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
+    """Calculate the Average True Range (ATR)."""
     if period is None:
         raise ValueError("ATR 'period' parameter cannot be None.")
-    
-    # pandas-ta uses the high, low, and close columns for the ATR calculation
-    atr_series = ohlc_data.ta.atr(length=period)
-    
-    if atr_series is None:
-        raise ConnectionError("Failed to calculate ATR. Check input data and parameters.")
-        
-    return atr_series
 
-def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
-    """
-    Calculates the Relative Strength Index (RSI).
-    """
+    high = _select_price(ohlc_data, 'High')
+    low = _select_price(ohlc_data, 'Low')
+    close = _select_price(ohlc_data, 'Close')
+
+    if vbt is not None and hasattr(vbt, 'ATR'):
+        return vbt.ATR.run(high, low, close, window=period).atr
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs(),
+    ], axis=1)
+    if isinstance(tr.columns, pd.MultiIndex):
+        tr = tr.groupby(level=0, axis=1).max()
+    else:
+        tr = tr.max(axis=1)
+    return tr.rolling(period).mean()
+
+def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
+    """Calculate the Relative Strength Index (RSI)."""
     if period is None:
         raise ValueError("RSI 'period' parameter cannot be None.")
-    
-    rsi_series = ohlc_data.ta.rsi(length=period)
-    
-    if rsi_series is None:
-        raise ConnectionError("Failed to calculate RSI. Check input data and parameters.")
-        
-    return rsi_series
+
+    close = _select_price(ohlc_data, 'Close')
+
+    if vbt is not None and hasattr(vbt, 'RSI'):
+        return vbt.RSI.run(close, window=period).rsi
+
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -> pd.DataFrame:
-    """
-    Calculates the Moving Average Convergence Divergence (MACD).
-    
-    Returns:
-        pd.DataFrame: A DataFrame containing MACD line, histogram, and signal line.
-    """
+    """Calculate MACD and return a DataFrame with columns ['macd','signal','hist']."""
     if not all([fast, slow, signal]):
         raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
-    
-    # The .ta.macd() function returns a DataFrame with multiple columns
-    macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
 
-    if macd_df is None:
-        raise ConnectionError("Failed to calculate MACD. Check input data and parameters.")
-    
-    return macd_df
+    close = _select_price(ohlc_data, 'Close')
+
+    if vbt is not None and hasattr(vbt, 'MACD'):
+        macd = vbt.MACD.run(close, fast_window=fast, slow_window=slow, signal_window=signal)
+        out = pd.concat({
+            'macd': macd.macd,
+            'signal': macd.signal,
+            'hist': macd.macd - macd.signal,
+        }, axis=1)
+        return out
+
+    fast_ema = close.ewm(span=fast, adjust=False).mean()
+    slow_ema = close.ewm(span=slow, adjust=False).mean()
+    macd_line = fast_ema - slow_ema
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    hist = macd_line - signal_line
+    return pd.concat({'macd': macd_line, 'signal': signal_line, 'hist': hist}, axis=1)
 
 def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd.DataFrame:
-    """
-    Calculates Bollinger Bands (BBands).
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the upper, middle, and lower bands.
-    """
+    """Calculate Bollinger Bands returning columns ['upper','middle','lower']."""
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
-    
-    bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
 
-    if bbands_df is None:
-        raise ConnectionError("Failed to calculate BBands. Check input data and parameters.")
+    close = _select_price(ohlc_data, 'Close')
 
-    return bbands_df
+    if vbt is not None and hasattr(vbt, 'BollingerBands'):
+        bb = vbt.BollingerBands.run(close, window=period, std=std_dev)
+        return pd.concat({'upper': bb.upper, 'middle': bb.middle, 'lower': bb.lower}, axis=1)
+
+    ma = close.rolling(window=period).mean()
+    sd = close.rolling(window=period).std(ddof=0)
+    upper = ma + sd * std_dev
+    lower = ma - sd * std_dev
+    return pd.concat({'upper': upper, 'middle': ma, 'lower': lower}, axis=1)
 
 # --- Future Indicators Will Be Added Below ---
 # Example of how we would add another indicator, like RSI.

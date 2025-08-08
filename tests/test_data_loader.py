@@ -35,3 +35,84 @@ def test_get_data_uses_cache(monkeypatch):
     result = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
 
     pd.testing.assert_frame_equal(result, df)
+
+
+def test_get_data_handles_multiple_tickers(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+
+    monkeypatch.setattr(data_loader.os.path, 'exists', lambda path: False)
+    monkeypatch.setattr(data_loader.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(pd.DataFrame, 'to_csv', lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance', raising=False)
+
+    def fake_download(ticker, *a, **k):
+        return df
+
+    monkeypatch.setattr(data_loader.yf, 'download', fake_download)
+
+    result = data_loader.get_data(['A', 'B'], '2020-01-01', '2020-01-02')
+    assert isinstance(result.columns, pd.MultiIndex)
+    assert set(result.columns.get_level_values(0)) == {'A', 'B'}
+
+
+def test_get_data_handles_three_tickers(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+
+    monkeypatch.setattr(data_loader.os.path, 'exists', lambda path: False)
+    monkeypatch.setattr(data_loader.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(pd.DataFrame, 'to_csv', lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance', raising=False)
+
+    def fake_download(ticker, *a, **k):
+        return df
+
+    monkeypatch.setattr(data_loader.yf, 'download', fake_download)
+
+    result = data_loader.get_data(['A', 'B', 'C'], '2020-01-01', '2020-01-02')
+    assert isinstance(result.columns, pd.MultiIndex)
+    assert set(result.columns.get_level_values(0)) == {'A', 'B', 'C'}
+
+
+def test_get_data_handles_missing_asset(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+
+    monkeypatch.setattr(data_loader.os.path, 'exists', lambda path: False)
+    monkeypatch.setattr(data_loader.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(pd.DataFrame, 'to_csv', lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance', raising=False)
+
+    def fake_download(ticker, *a, **k):
+        return df if ticker == 'A' else pd.DataFrame()
+
+    monkeypatch.setattr(data_loader.yf, 'download', fake_download)
+
+    result = data_loader.get_data(['A', 'B'], '2020-01-01', '2020-01-02')
+    assert 'A' in result.columns.get_level_values(0)
+    assert 'B' not in result.columns.get_level_values(0)

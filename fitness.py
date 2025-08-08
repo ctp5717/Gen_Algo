@@ -11,6 +11,97 @@ import vectorbt as vbt
 import strategy_engine as engine
 import config
 
+
+def _count_trades(entries: pd.DataFrame) -> int:
+    """Return the total number of entry signals.
+
+    Works for both Series and DataFrame inputs and ensures consistent
+    trade-counting logic across the codebase.
+    """
+    if isinstance(entries, pd.DataFrame):
+        return int(entries.to_numpy().sum())
+    return int(entries.sum())
+
+
+def run_portfolio_backtest(
+    ohlc_data: pd.DataFrame,
+    entries: pd.DataFrame,
+    sl_stop: float | None = None,
+    sl_trail: float | None = None,
+    tp_stop: float | None = None,
+    weights: list[float] | np.ndarray | None = None,
+):
+    """Backtest entries on single or multi-asset data.
+
+    Parameters
+    ----------
+    ohlc_data : pd.DataFrame
+        OHLCV data for one or many assets.  Multi-asset data must use a
+        ``MultiIndex`` column layout where the first level is the ticker and
+        the second level is the OHLCV field.
+    entries : pd.DataFrame
+        Entry signals produced by the strategy engine.  Should have the same
+        column layout as ``ohlc_data``'s close prices.
+    sl_stop, sl_trail, tp_stop : float, optional
+        Stop-loss, trailing-stop and take-profit parameters passed directly to
+        ``vectorbt.Portfolio.from_signals``.
+    weights : list[float] or np.ndarray, optional
+        Custom portfolio weights applied across assets.  If ``None`` each asset
+        is equally weighted.  The weights will be normalised to sum to one.
+
+    Returns
+    -------
+    tuple
+        ``(portfolio, agg_portfolio, agg_stats, per_asset_stats)`` where
+        ``agg_portfolio`` represents the combined equity curve when multiple
+        assets are present.
+    """
+    if not hasattr(vbt, "Portfolio"):
+        raise RuntimeError("vectorbt is required for backtesting but is not installed")
+
+    time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+    time_exit = time_exit.reindex(entries.index, fill_value=False)
+
+    close_prices = (
+        ohlc_data.xs("Close", level=1, axis=1)
+        if isinstance(ohlc_data.columns, pd.MultiIndex)
+        else ohlc_data["Close"]
+    )
+
+    # Equal-weight all assets unless custom weights are provided
+    group_by = None
+    if isinstance(close_prices, pd.DataFrame) and close_prices.shape[1] > 1:
+        group_by = close_prices.columns
+        if weights is None:
+            weights = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
+        else:
+            weights = np.asarray(weights, dtype=float)
+            if weights.size != close_prices.shape[1]:
+                raise ValueError("weights length must match number of assets")
+            weights = weights / weights.sum()
+
+    portfolio = vbt.Portfolio.from_signals(
+        close=close_prices,
+        entries=entries,
+        exits=time_exit,
+        sl_stop=sl_stop,
+        tp_stop=tp_stop,
+        sl_trail=sl_trail,
+        fees=0.001,
+        freq=config.TIMEFRAME,
+        group_by=group_by,
+        weights=weights,
+    )
+
+    per_asset_stats = portfolio.stats()
+    agg_portfolio = portfolio
+    agg_stats = per_asset_stats
+    if isinstance(close_prices, pd.DataFrame) and hasattr(portfolio, "total"):
+        agg_portfolio = portfolio.total()
+        agg_stats = agg_portfolio.stats()
+
+    return portfolio, agg_portfolio, agg_stats, per_asset_stats
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
     Injects the gene values from a GA solution into a copy of the strategy rules.
@@ -49,8 +140,8 @@ class FitnessEvaluator:
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
-            
-            if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+
+            if _count_trades(entries) < config.FITNESS_WEIGHTS['min_trades']:
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---
@@ -59,28 +150,40 @@ class FitnessEvaluator:
             tsl_rule = exit_rules.get('trailing_stop', {})
             tp_rule = exit_rules.get('take_profit', {})
 
-            sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
-            sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
-            tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
-            
-            time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-            time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
-
-            portfolio = vbt.Portfolio.from_signals(
-                close=self.ohlc_data['Close'],
-                entries=entries,
-                exits=time_based_exit,
-                sl_stop=sl_stop,
-                tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
-                fees=0.001,
-                freq=config.TIMEFRAME
+            sl_stop = (
+                sl_rule.get('params', {}).get('value')
+                if sl_rule.get('is_active', False)
+                else None
             )
-            
-            stats = portfolio.stats()
-            sortino = stats['Sortino Ratio']
-            profit_factor = stats['Profit Factor']
-            max_drawdown = stats['Max Drawdown [%]']
+            sl_trail = (
+                tsl_rule.get('params', {}).get('value')
+                if tsl_rule.get('is_active', False)
+                else None
+            )
+            tp_stop = (
+                tp_rule.get('params', {}).get('value')
+                if tp_rule.get('is_active', False)
+                else None
+            )
+
+            _, _, agg_stats, _ = run_portfolio_backtest(
+                self.ohlc_data,
+                entries,
+                sl_stop=sl_stop,
+                sl_trail=sl_trail,
+                tp_stop=tp_stop,
+                weights=getattr(config, "PORTFOLIO_WEIGHTS", None),
+            )
+
+            if isinstance(agg_stats, pd.DataFrame):
+                # Should not happen but keep fallback
+                sortino = agg_stats.loc['Sortino Ratio'].iloc[0]
+                profit_factor = agg_stats.loc['Profit Factor'].replace(np.inf, 5).iloc[0]
+                max_drawdown = agg_stats.loc['Max Drawdown [%]'].iloc[0]
+            else:
+                sortino = agg_stats.get('Sortino Ratio')
+                profit_factor = agg_stats.get('Profit Factor')
+                max_drawdown = agg_stats.get('Max Drawdown [%]')
             
             if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
             if np.isnan(sortino): sortino = 0

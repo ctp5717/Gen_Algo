@@ -60,7 +60,37 @@ CRYPTO_UNIVERSE = {
 }
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
+# ---------------------------------------------------------------------------
+# Portfolio settings
+# ---------------------------------------------------------------------------
+# The framework now supports optimising a single strategy across a basket of
+# assets.  When ``PORTFOLIO_OPTIMIZATION_ENABLED`` is ``True`` the data loader
+# and backtesting logic expect a list of tickers instead of a single string.
+# ``TUNING_ASSET`` defines which asset is used during the fast hyperparameter
+# tuning phase before the main portfolio optimisation.
 
+PORTFOLIO_OPTIMIZATION_ENABLED = False
+
+# Define a basket of tickers when portfolio optimisation is enabled.  Leaving
+# this list empty will result in an error if ``PORTFOLIO_OPTIMIZATION_ENABLED``
+# is set to True.
+ASSET_BASKET: list[str] = []  # e.g. ['BTC-USD', 'ETH-USD']
+
+# Optional custom weights corresponding to ASSET_BASKET.  If ``None`` each
+# asset is equally weighted during portfolio backtests.  The weights will be
+# normalised automatically.
+PORTFOLIO_WEIGHTS: list[float] | None = None  # e.g. [0.6, 0.4]
+
+# Asset to use for the express tuning phase.  When the basket is provided this
+# should typically be one of its members.
+TUNING_ASSET = CRYPTO_UNIVERSE["Bitcoin"]
+
+if PORTFOLIO_OPTIMIZATION_ENABLED and not ASSET_BASKET:
+    raise ValueError("ASSET_BASKET cannot be empty when portfolio optimisation is enabled")
+
+# ---------------------------------------------------------------------------
+# Legacy single asset settings
+# ---------------------------------------------------------------------------
 SELECTED_ASSET_NAME = "Dogecoin"
 
 # Set your desired timeframe here. This now controls everything.
