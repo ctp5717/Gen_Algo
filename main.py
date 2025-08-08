@@ -7,6 +7,8 @@ Main Application Orchestrator for the GA Trading Framework
 import os
 import multiprocessing as mp
 import logging
+from logging.handlers import QueueHandler, QueueListener
+from functools import partial
 import pprint
 import time  # <-- NEW: Import the time module
 
@@ -22,13 +24,8 @@ import fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
-
-# Default to INFO logging to avoid overwhelming debug output from
-# third-party libraries like ``asyncio`` or ``urllib3`` which can make it
-# appear that the application has hung.  Users can still override the level
-# externally if more verbose logs are needed.
-logging.basicConfig(level=logging.INFO)
-
+# Set root logger level to INFO by default.
+logging.getLogger().setLevel(logging.INFO)
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
@@ -51,12 +48,37 @@ def on_generation(ga_instance):
         end="\r",
     )
 
+
+def fitness_func_with_logging(solution, solution_idx, log_queue, base_func):
+    """Configure logging in workers and delegate to the actual fitness function."""
+    logger = logging.getLogger()
+    if not any(isinstance(h, QueueHandler) for h in logger.handlers):
+        logger.setLevel(logging.INFO)
+        logger.addHandler(QueueHandler(log_queue))
+    return base_func(solution, solution_idx)
+
 def main():
     """ The main execution function. """
     # Vectorbt and other numeric libraries can misbehave when forked; ensure
     # the safer "spawn" start method is used for multiprocessing to avoid
     # silent worker crashes that manifest as BrokenProcessPool errors.
     mp.set_start_method("spawn", force=True)
+
+    # Configure logging so all processes write to the same file.
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "ga_debug.log")
+    log_queue = mp.Queue()
+    file_handler = logging.FileHandler(log_file)
+    formatter = logging.Formatter("%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
+    file_handler.setFormatter(formatter)
+    listener = QueueListener(log_queue, file_handler)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.handlers = []
+    root_logger.addHandler(QueueHandler(log_queue))
+
+    listener.start()
 
     print("--- GA Trading Strategy Framework ---")
     if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False):
@@ -94,7 +116,7 @@ def main():
     fitness_evaluator = fitness.FitnessEvaluator(
         ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
     )
-    fitness_function = fitness_evaluator.__call__
+    base_fitness_function = fitness_evaluator.__call__
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
         tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)
@@ -109,6 +131,12 @@ def main():
     print("Initializing and running the Genetic Algorithm in parallel...")
     global start_time; start_time = time.time() # Start the timer right before the GA run
 
+    fitness_function = partial(
+        fitness_func_with_logging,
+        log_queue=log_queue,
+        base_func=base_fitness_function,
+    )
+
     ga_instance = pygad.GA(
         num_generations=config.GA_NUM_GENERATIONS,
         num_parents_mating=num_parents_mating,
@@ -122,8 +150,11 @@ def main():
         # --- NEW: Pass the callback function to the GA instance ---
         on_generation=on_generation
     )
-    
-    ga_instance.run()
+
+    try:
+        ga_instance.run()
+    finally:
+        listener.stop()
     
     # Print a newline character to move off the progress line.
     print("\n" + "-" * 35)
