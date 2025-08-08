@@ -22,12 +22,43 @@ def test_fitness_uses_aggregated_stats(monkeypatch):
     )
     ohlc.columns = pd.MultiIndex.from_tuples(ohlc.columns)
 
-    monkeypatch.setattr(fitness.engine, 'process_strategy_rules', lambda *a, **k: pd.DataFrame([[True, True]], index=ohlc.index, columns=['A','B']))
-    monkeypatch.setattr(fitness.config, 'FITNESS_WEIGHTS', {'sortino_ratio':1,'profit_factor':0,'max_drawdown':0,'min_trades':0}, raising=False)
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.DataFrame(
+            [[True, True]],
+            index=ohlc.index,
+            columns=['A', 'B'],
+        ),
+    )
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {
+            'sortino_ratio': 1,
+            'profit_factor': 0,
+            'max_drawdown': 0,
+            'min_trades': 0,
+        },
+        raising=False,
+    )
 
-    agg = pd.Series({'Sortino Ratio': 2.0, 'Profit Factor': 1.0, 'Max Drawdown [%]': 5.0})
-    per_asset = pd.DataFrame({'A':[1,1,1],'B':[1,1,1]}, index=['Sortino Ratio','Profit Factor','Max Drawdown [%]'])
-    monkeypatch.setattr(fitness, 'run_portfolio_backtest', lambda *a, **k: (None, None, agg, per_asset))
+    agg = pd.Series(
+        {
+            'Sortino Ratio': 2.0,
+            'Profit Factor': 1.0,
+            'Max Drawdown [%]': 5.0,
+        }
+    )
+    per_asset = pd.DataFrame(
+        {'A': [1, 1, 1], 'B': [1, 1, 1]},
+        index=['Sortino Ratio', 'Profit Factor', 'Max Drawdown [%]'],
+    )
+    monkeypatch.setattr(
+        fitness,
+        'run_portfolio_backtest',
+        lambda *a, **k: (None, None, agg, per_asset),
+    )
 
     evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
     score = evaluator(None, [], 0)
@@ -46,7 +77,9 @@ def test_run_portfolio_backtest_weights(monkeypatch):
     )
     ohlc.columns = pd.MultiIndex.from_tuples(ohlc.columns)
     entries = pd.DataFrame(
-        [[True, True], [False, False]], index=ohlc.index, columns=['A', 'B']
+        [[True, True], [False, False]],
+        index=ohlc.index,
+        columns=['A', 'B'],
     )
 
     captured = {}
@@ -75,5 +108,9 @@ def test_run_portfolio_backtest_weights(monkeypatch):
     assert list(per_asset.columns) == ['A', 'B']
 
     captured.clear()
-    _, _, _, _ = fitness.run_portfolio_backtest(ohlc, entries, weights=[0.7, 0.3])
+    _, _, _, _ = fitness.run_portfolio_backtest(
+        ohlc,
+        entries,
+        weights=[0.7, 0.3],
+    )
     assert np.allclose(captured['weights'], [0.7, 0.3])

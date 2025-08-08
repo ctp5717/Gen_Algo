@@ -89,16 +89,43 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
 
 
 def test_run_champion_analysis_prints_both_stats(monkeypatch, capsys):
-    df = pd.DataFrame({'Open': [1], 'High': [1], 'Low': [1], 'Close': [1], 'Volume': [1]}, index=pd.date_range('2020-01-01', periods=1))
+    df = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
     monkeypatch.setattr(analysis.data_loader, 'get_data', lambda *a, **k: df)
     monkeypatch.setattr(analysis.config, 'MAX_HOLD_PERIOD', 1, raising=False)
     monkeypatch.setattr(analysis.config, 'TIMEFRAME', '1d', raising=False)
-    monkeypatch.setattr(analysis.config, 'VALIDATION_PERIOD', {'start': '2020-01-01', 'end': '2020-01-02'}, raising=False)
-    monkeypatch.setattr(analysis.config, 'PORTFOLIO_OPTIMIZATION_ENABLED', True, raising=False)
+    monkeypatch.setattr(
+        analysis.config,
+        'VALIDATION_PERIOD',
+        {'start': '2020-01-01', 'end': '2020-01-02'},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        analysis.config,
+        'PORTFOLIO_OPTIMIZATION_ENABLED',
+        True,
+        raising=False,
+    )
     monkeypatch.setattr(analysis.config, 'ASSET_BASKET', ['A', 'B'], raising=False)
 
-    monkeypatch.setattr(analysis.fitness, '_inject_genes_into_rules', lambda *a, **k: {'exit_rules': {}})
-    monkeypatch.setattr(analysis.engine, 'process_strategy_rules', lambda *a, **k: pd.Series([True], index=df.index))
+    monkeypatch.setattr(
+        analysis.fitness,
+        '_inject_genes_into_rules',
+        lambda *a, **k: {'exit_rules': {}},
+    )
+    monkeypatch.setattr(
+        analysis.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.Series([True], index=df.index),
+    )
 
     metrics = [
         'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
@@ -107,7 +134,10 @@ def test_run_champion_analysis_prints_both_stats(monkeypatch, capsys):
         'Volatility', 'Calmar Ratio', 'Max Consecutive Losses'
     ]
     agg = pd.Series({m: 0 for m in metrics})
-    per_asset = pd.DataFrame({'A': [0]*len(metrics), 'B': [0]*len(metrics)}, index=metrics)
+    per_asset = pd.DataFrame(
+        {'A': [0] * len(metrics), 'B': [0] * len(metrics)},
+        index=metrics,
+    )
 
     class DummyPortfolio:
         def plot(self, *a, **k):
@@ -123,7 +153,10 @@ def test_run_champion_analysis_prints_both_stats(monkeypatch, capsys):
         lambda *a, **k: (DummyPortfolio(), DummyPortfolio(), agg, per_asset),
     )
 
-    analysis.run_champion_analysis([0], {0: {'name': 'x', 'path': [], 'type': float}})
+    analysis.run_champion_analysis(
+        [0],
+        {0: {'name': 'x', 'path': [], 'type': float}},
+    )
     out = capsys.readouterr().out
     assert 'Per-Asset Breakdown' in out
     assert 'Total Return [%]' in out

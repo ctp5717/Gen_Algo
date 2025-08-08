@@ -53,7 +53,11 @@ def _evaluate_on_validation(solution, gene_map):
         tp_stop=tp_stop,
         weights=getattr(config, "PORTFOLIO_WEIGHTS", None),
     )
-    score = agg_stats.get("Sortino Ratio") if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc["Sortino Ratio"].iloc[0]
+    score = (
+        agg_stats.loc["Sortino Ratio"].iloc[0]
+        if isinstance(agg_stats, pd.DataFrame)
+        else agg_stats.get("Sortino Ratio")
+    )
     return -np.inf if np.isnan(score) else score
 
 
