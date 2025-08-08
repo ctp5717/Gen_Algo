@@ -200,7 +200,7 @@ def test_no_trade_portfolios_return_minus_one(monkeypatch, caplog, stats_series)
         score = evaluator(None, [], 0)
 
     assert score == -1.0
-    assert caplog.text == ""
+    assert "below min_trades" in caplog.text
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+import logging
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
@@ -98,12 +99,24 @@ class FitnessEvaluator:
         self.gene_map = gene_map
 
     def __call__(self, ga_instance, solution, sol_idx):
+        logger = logging.getLogger(__name__)
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
-            
+
+            gene_values = {
+                info.get('name'): solution[i]
+                for i, info in self.gene_map.items()
+                if 'name' in info and i < len(solution)
+            }
             trade_count = entries.sum().sum() if isinstance(entries, pd.DataFrame) else entries.sum()
+            logger.info("Genes %s produced %s trades", gene_values, trade_count)
             if trade_count < config.FITNESS_WEIGHTS['min_trades']:
+                logger.warning(
+                    "Trade count %s below min_trades %s",
+                    trade_count,
+                    config.FITNESS_WEIGHTS['min_trades'],
+                )
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---
@@ -148,12 +161,23 @@ class FitnessEvaluator:
                 stats = _reduce_stats_df(stats)
 
             total_trades = stats.get('Total Trades', 0)
-            if total_trades < config.FITNESS_WEIGHTS['min_trades']:
-                return -1.0
-
             sortino = stats.get('Sortino Ratio', np.nan)
             profit_factor = stats.get('Profit Factor', np.nan)
             max_drawdown = stats.get('Max Drawdown [%]', np.nan)
+            logger.info(
+                "Stats - Total Trades: %s, Sortino Ratio: %s, Profit Factor: %s, Max Drawdown [%%]: %s",
+                total_trades,
+                sortino,
+                profit_factor,
+                max_drawdown,
+            )
+            if total_trades < config.FITNESS_WEIGHTS['min_trades']:
+                logger.warning(
+                    "Total trades %s below min_trades %s",
+                    total_trades,
+                    config.FITNESS_WEIGHTS['min_trades'],
+                )
+                return -1.0
 
             if np.isinf(profit_factor) or profit_factor > 5:
                 profit_factor = 5
@@ -180,5 +204,6 @@ class FitnessEvaluator:
             return fitness_score if not np.isnan(fitness_score) else -1.0
 
         except Exception as e:
+            logger.exception("Error in fitness evaluation: %s", e)
             print(f"Error in fitness evaluation: {e}")
             return -999.0
