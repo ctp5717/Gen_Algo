@@ -44,6 +44,20 @@ except Exception:  # pragma: no cover - vectorbt may be unavailable in tests
     vbt = None
 
 
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop any leading MultiIndex levels from *df*'s columns.
+
+    VectorBT prefixes indicator outputs with parameter information, producing
+    MultiIndex columns such as ``(14, 'ETH-USD')`` for RSI with a 14 period.
+    The strategy engine expects columns labelled only by asset symbol.  This
+    helper ensures compatibility by keeping the last level only.
+    """
+    if isinstance(df, pd.DataFrame) and isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(-1)
+    return df
+
+
 def _select_price(ohlc_data: pd.DataFrame, field: str) -> pd.DataFrame:
     """Return the requested price field from single or multi-asset data."""
     if isinstance(ohlc_data.columns, pd.MultiIndex):
@@ -58,7 +72,7 @@ def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
     close = _select_price(ohlc_data, 'Close')
 
     if vbt is not None and hasattr(vbt, 'EMA'):
-        return vbt.EMA.run(close, window=period).ema
+        return _flatten_columns(vbt.EMA.run(close, window=period).ema)
 
     return close.ewm(span=period, adjust=False).mean()
 
@@ -72,7 +86,7 @@ def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
     close = _select_price(ohlc_data, 'Close')
 
     if vbt is not None and hasattr(vbt, 'ATR'):
-        return vbt.ATR.run(high, low, close, window=period).atr
+        return _flatten_columns(vbt.ATR.run(high, low, close, window=period).atr)
 
     tr = pd.concat([
         high - low,
@@ -93,7 +107,7 @@ def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
     close = _select_price(ohlc_data, 'Close')
 
     if vbt is not None and hasattr(vbt, 'RSI'):
-        return vbt.RSI.run(close, window=period).rsi
+        return _flatten_columns(vbt.RSI.run(close, window=period).rsi)
 
     delta = close.diff()
     gain = delta.clip(lower=0)

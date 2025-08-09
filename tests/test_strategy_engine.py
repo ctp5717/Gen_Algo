@@ -59,3 +59,45 @@ def test_process_strategy_rules_simple(monkeypatch):
     signal = strategy_engine.process_strategy_rules(data, rules)
 
     assert signal.all()
+
+
+def test_process_strategy_rules_with_vectorbt_multiindex(monkeypatch):
+    """RSI from vectorbt returns MultiIndex columns; ensure they are flattened."""
+    dates = pd.date_range('2020-01-01', periods=3, freq='D')
+    base = pd.DataFrame({
+        'Open': [1, 1, 1],
+        'High': [1, 1, 1],
+        'Low': [1, 1, 1],
+        'Close': [1, 2, 3],
+        'Volume': [100, 100, 100],
+    }, index=dates)
+    # Portfolio-style multi-index columns
+    ohlc = pd.concat({'AAA': base, 'BBB': base}, axis=1)
+
+    class DummyRSI:
+        @staticmethod
+        def run(close, window):
+            cols = pd.MultiIndex.from_product([[window], close.columns], names=['rsi_window', None])
+            data = pd.DataFrame(60, index=close.index, columns=cols)
+            return types.SimpleNamespace(rsi=data)
+
+    monkeypatch.setattr(indicator_library, 'vbt', types.SimpleNamespace(RSI=DummyRSI))
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, 'rsi', indicator_library.calculate_rsi)
+
+    rules = {
+        'entry_rules': {
+            'combination_logic': 'AND',
+            'conditions': [
+                {
+                    'indicator': 'rsi',
+                    'params': {'period': 14},
+                    'condition': {'type': 'indicator_is_above_value', 'value': 50},
+                }
+            ],
+        }
+    }
+
+    signal = strategy_engine.process_strategy_rules(ohlc, rules)
+
+    assert list(signal.columns) == ['AAA', 'BBB']
+    assert signal.all().all()
