@@ -83,4 +83,3 @@ def test_run_champion_analysis_handles_missing_metrics(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert 'Total Return [%]' in out
     assert 'Volatility' in out
-
