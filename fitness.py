@@ -173,7 +173,7 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
 
         param_key = path[-1]
 
-        current_level[param_key] = gene_value
+        current_level[param_key] = gene_info["type"](gene_value)
 
     return injected_rules
 
