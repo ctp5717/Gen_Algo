@@ -121,12 +121,6 @@ else:
     training_start_date = training_end_date - relativedelta(months=training_months_intraday)
 
 # --- 3. FINAL CONFIGURATION OUTPUTS ---
-if DATA_SOURCE == 'binance':
-    TICKER = TICKER.replace('-', '')
-    # Binance typically provides deep history for USDT pairs rather than USD.
-    # Convert "BTCUSD" -> "BTCUSDT" to ensure sufficient historical data.
-    if TICKER.endswith('USD') and not TICKER.endswith('USDT'):
-        TICKER = TICKER[:-3] + 'USDT'
 TRAINING_PERIOD = {
     "start": training_start_date.strftime("%Y-%m-%d"),
     "end": training_end_date.strftime("%Y-%m-%d"),
