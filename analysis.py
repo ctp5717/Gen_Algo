@@ -121,8 +121,21 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             weight_map = {col: w for col, w in zip(cols, weights_arr)}
             trades_df = trades_df.copy()
             trades_df["weighted_pnl"] = trades_df["PnL"] * trades_df["Column"].map(weight_map)
+            exit_candidates = ["Exit", "Exit Time", "Exit Price", "exit_time"]
+            exit_col = None
+            for candidate in exit_candidates:
+                if candidate in trades_df.columns:
+                    if candidate != "Exit":
+                        trades_df = trades_df.rename(columns={candidate: "Exit"})
+                    exit_col = "Exit"
+                    break
+            if exit_col is None:
+                raise ValueError(
+                    f"Exit column not found. Available columns: {list(trades_df.columns)}"
+                )
+
             ax.scatter(
-                trades_df["Exit"],
+                trades_df[exit_col],
                 trades_df["weighted_pnl"],
                 color="red",
                 marker="x",
