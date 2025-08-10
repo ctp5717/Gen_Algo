@@ -96,19 +96,57 @@ def run_portfolio_backtest(
         group_by=group_by,
     )
 
-    per_asset_stats = portfolio.stats()
     agg_portfolio = portfolio
-    agg_stats = per_asset_stats
     if isinstance(close_prices, pd.DataFrame):
         if weights_arr is None:
             weights_arr = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
+
+        try:
+            per_asset_stats = pd.concat(
+                {col: portfolio.stats(column=col) for col in close_prices.columns},
+                axis=1,
+            )
+        except TypeError:
+            stats_df = portfolio.stats()
+            per_asset_stats = (
+                stats_df if isinstance(stats_df, pd.DataFrame) else pd.DataFrame(stats_df)
+            )
+
+        try:
+            agg_stats = portfolio.stats(silence_warnings=True)
+        except TypeError:
+            stats_res = portfolio.stats()
+            agg_stats = stats_res if isinstance(stats_res, pd.Series) else stats_res.iloc[:, 0]
 
         weighted_value = (portfolio.value() * weights_arr).sum(axis=1)
         agg_portfolio = vbt.Portfolio.from_holding(
             close=weighted_value,
             freq=config.TIMEFRAME,
         )
-        agg_stats = agg_portfolio.stats()
+
+        if hasattr(portfolio, "returns"):
+            weighted_returns = (portfolio.returns() * weights_arr).sum(axis=1)
+            agg_stats["Volatility"] = float(weighted_returns.std())
+        else:
+            agg_stats["Volatility"] = np.nan
+
+        if hasattr(portfolio, "trades"):
+            trades_df = portfolio.trades.records_readable.copy()
+            if not trades_df.empty:
+                weight_map = {col: w for col, w in zip(close_prices.columns, weights_arr)}
+                trades_df["weighted_pnl"] = trades_df["PnL"] * trades_df["Column"].map(weight_map)
+                losses = trades_df["weighted_pnl"] < 0
+                max_consec = (
+                    losses.groupby((losses != losses.shift()).cumsum()).cumsum().max()
+                )
+                agg_stats["Max Consecutive Losses"] = int(max_consec) if pd.notna(max_consec) else 0
+            else:
+                agg_stats["Max Consecutive Losses"] = 0
+        else:
+            agg_stats["Max Consecutive Losses"] = 0
+    else:
+        per_asset_stats = portfolio.stats()
+        agg_stats = per_asset_stats
 
     return portfolio, agg_portfolio, agg_stats, per_asset_stats
 

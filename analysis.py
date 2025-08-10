@@ -76,12 +76,16 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         'Volatility', 'Calmar Ratio', 'Max Consecutive Losses'
     ]
 
-    agg_to_print = agg_stats[metrics_to_show] if not isinstance(agg_stats, pd.DataFrame) else agg_stats.loc[metrics_to_show]
+    agg_to_print = (
+        agg_stats.reindex(metrics_to_show)
+        if not isinstance(agg_stats, pd.DataFrame)
+        else agg_stats.reindex(metrics_to_show)
+    )
     print(agg_to_print.to_string())
 
     if isinstance(per_asset_stats, pd.DataFrame):
         print("\nPer-Asset Breakdown:")
-        print(per_asset_stats.loc[metrics_to_show].to_string())
+        print(per_asset_stats.reindex(metrics_to_show).to_string())
 
     print("\nDisplaying equity curve plot for the validation period...")
     # Enable interactive mode so the plot window does not block execution.
