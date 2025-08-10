@@ -17,6 +17,20 @@ import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
+
+def normalize_symbol(symbol: str) -> str:
+    """Normalize ticker symbols for the active data source.
+
+    When using Binance the repository treats pairs as ``XXX-USD`` for
+    consistency with Yahoo Finance. Binance, however, expects ``XXXUSDT``.
+    This helper performs that conversion so the rest of the codebase can use
+    a uniform ``*-USD`` notation.
+    """
+
+    if config.DATA_SOURCE.lower() == "binance" and symbol.endswith("-USD"):
+        return symbol.replace("-USD", "USDT")
+    return symbol
+
 def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
     """ Fetches historical kline data from Binance and formats it. """
     print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
@@ -76,11 +90,13 @@ def get_data(ticker, start_date: str, end_date: str, interval: str = '1d') -> pd
     # ------------------------------------------------------------------
     if isinstance(ticker, (list, tuple, set)):
         frames = []
-        symbols = list(ticker)
-        for tk in symbols:
-            df = get_data(tk, start_date, end_date, interval)
+        symbols = []
+        for tk in ticker:
+            norm = normalize_symbol(tk)
+            df = get_data(norm, start_date, end_date, interval)
             if not df.empty:
                 frames.append(df)
+                symbols.append(norm)
         if not frames:
             return pd.DataFrame()
         # Concatenate along columns with ticker names as the first level
@@ -89,6 +105,7 @@ def get_data(ticker, start_date: str, end_date: str, interval: str = '1d') -> pd
     # ------------------------------------------------------------------
     # Single asset logic (existing behaviour)
     # ------------------------------------------------------------------
+    ticker = normalize_symbol(ticker)
     cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
 
