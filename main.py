@@ -10,6 +10,7 @@ import pprint
 import tuner
 import traceback
 import time  # <-- NEW: Import the time module
+import warnings
 import matplotlib.pyplot as plt  # For non-blocking plot display
 
 # Import our custom modules
@@ -22,24 +23,36 @@ from gene_parser import parse_genes_from_config  # now defined in its own module
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
+_last_progress_len = 0
+
+
+def format_progress_line(generation, total_generations, fitness, est_time_remaining):
+    return (
+        f"Generation {generation}/{total_generations} | "
+        f"Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s"
+    )
+
+
 def on_generation(ga_instance):
-    """
-    This function is called by PyGAD after each generation completes.
-    It prints a progress update to the console.
-    """
+    """Print a live progress update for each completed generation."""
     generation = ga_instance.generations_completed
     total_generations = ga_instance.num_generations
     fitness = ga_instance.best_solution(pop_fitness=ga_instance.last_generation_fitness)[1]
-    
+
     elapsed_time = time.time() - start_time
-    est_time_remaining = (elapsed_time / generation) * (total_generations - generation) if generation > 0 else 0
-    
-    # Use carriage return `\r` and `end=''` to keep the output on a single, updating line.
-    print(
-        "Generation "
-        f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s",
-        end="\r",
+    est_time_remaining = (
+        (elapsed_time / generation) * (total_generations - generation)
+        if generation > 0
+        else 0
     )
+
+    global _last_progress_len
+    text = format_progress_line(
+        generation, total_generations, fitness, est_time_remaining
+    )
+    padding = " " * max(_last_progress_len - len(text), 0)
+    print("\r" + text + padding, end="", flush=True)
+    _last_progress_len = len(text)
 
 def main():
     """ The main execution function. """
@@ -113,18 +126,20 @@ def main():
         if gene_type == int: print(f"  - {gene_name}: {int(gene_value)}")
         else: print(f"  - {gene_name}: {gene_value:.4f}")
     print("\nDisplaying GA fitness evolution plot...")
-    # Enable interactive mode so the plot window does not block execution.
-    plt.ion()
-    fig = ga_instance.plot_fitness()
-    if fig is not None and getattr(fig, "axes", None):
-        ax = fig.axes[0]
-        handles, labels = ax.get_legend_handles_labels()
-        if labels:
-            ax.legend()
-        else:
-            leg = ax.get_legend()
-            if leg:
-                leg.remove()
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "No artists with labels", UserWarning)
+        # Enable interactive mode so the plot window does not block execution.
+        plt.ion()
+        fig = ga_instance.plot_fitness()
+        if fig is not None and getattr(fig, "axes", None):
+            ax = fig.axes[0]
+            handles, labels = ax.get_legend_handles_labels()
+            if labels:
+                ax.legend()
+            else:
+                leg = ax.get_legend()
+                if leg:
+                    leg.remove()
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)
