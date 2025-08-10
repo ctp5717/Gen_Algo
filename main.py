@@ -115,7 +115,16 @@ def main():
     print("\nDisplaying GA fitness evolution plot...")
     # Enable interactive mode so the plot window does not block execution.
     plt.ion()
-    ga_instance.plot_fitness()
+    fig = ga_instance.plot_fitness()
+    if fig is not None and getattr(fig, "axes", None):
+        ax = fig.axes[0]
+        handles, labels = ax.get_legend_handles_labels()
+        if labels:
+            ax.legend()
+        else:
+            leg = ax.get_legend()
+            if leg:
+                leg.remove()
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)
