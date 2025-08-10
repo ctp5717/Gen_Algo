@@ -53,22 +53,29 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
     ]
 
     class DummyPortfolio:
-        def plot(self, *a, **k):
-            class DummyFig:
-                def show(self):
-                    calls.append('show')
-
-            return DummyFig()
+        pass
 
     agg = pd.Series({m: 0 for m in metrics})
     per_asset = pd.DataFrame({0: [0] * len(metrics)}, index=metrics)
+
+    calls = []
+
+    agg_series = pd.Series([1, 2], index=df.index)
+
+    class DummyFig:
+        def __init__(self):
+            self.figure = self
+
+        def show(self):
+            calls.append('show')
+
+    agg_series.plot = lambda *a, **k: DummyFig()
+
     monkeypatch.setattr(
         analysis.fitness,
         'run_portfolio_backtest',
-        lambda *a, **k: (DummyPortfolio(), DummyPortfolio(), agg, per_asset),
+        lambda *a, **k: (DummyPortfolio(), agg_series, agg, per_asset),
     )
-
-    calls = []
     ion_called = {}
 
     monkeypatch.setattr(
@@ -140,17 +147,23 @@ def test_run_champion_analysis_prints_both_stats(monkeypatch, capsys):
     )
 
     class DummyPortfolio:
-        def plot(self, *a, **k):
-            class DummyFig:
-                def show(self):
-                    pass
+        pass
 
-            return DummyFig()
+    agg_series = pd.Series([1], index=df.index)
+
+    class DummyFig:
+        def __init__(self):
+            self.figure = self
+
+        def show(self):
+            pass
+
+    agg_series.plot = lambda *a, **k: DummyFig()
 
     monkeypatch.setattr(
         analysis.fitness,
         'run_portfolio_backtest',
-        lambda *a, **k: (DummyPortfolio(), DummyPortfolio(), agg, per_asset),
+        lambda *a, **k: (DummyPortfolio(), agg_series, agg, per_asset),
     )
 
     analysis.run_champion_analysis(

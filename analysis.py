@@ -7,6 +7,7 @@ Analysis & Reporting Module
 
 import pandas as pd
 import vectorbt as vbt
+import numpy as np
 import config
 import data_loader
 import fitness
@@ -98,17 +99,40 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     is_grouped = getattr(wrapper, "grouper", None) is not None
     is_multi = getattr(wrapper, "ndim", 1) > 1
 
+    ax = agg_portfolio.plot(
+        title=f"Champion Strategy Performance on {title_asset} (Validation)"
+    )
+    if hasattr(portfolio, "trades"):
+        trades_df = portfolio.trades.records_readable
+        if not trades_df.empty:
+            cols = list(getattr(portfolio.value(), "columns", []))
+            weights = getattr(config, "PORTFOLIO_WEIGHTS", None)
+            if weights is None:
+                if len(cols) > 0:
+                    weights_arr = np.full(len(cols), 1 / len(cols))
+                else:
+                    weights_arr = np.array([1.0])
+                    cols = list(trades_df["Column"].unique())
+            else:
+                weights_arr = np.asarray(weights, dtype=float)
+                weights_arr = weights_arr / weights_arr.sum()
+                if len(cols) == 0:
+                    cols = list(trades_df["Column"].unique())
+            weight_map = {col: w for col, w in zip(cols, weights_arr)}
+            trades_df = trades_df.copy()
+            trades_df["weighted_pnl"] = trades_df["PnL"] * trades_df["Column"].map(weight_map)
+            ax.scatter(
+                trades_df["Exit"],
+                trades_df["weighted_pnl"],
+                color="red",
+                marker="x",
+                label="Trade PnL",
+            )
+            ax.legend()
+    ax.figure.show()
+
     if is_grouped or is_multi:
-        agg_fig = agg_portfolio.plot(
-            title=f"Champion Strategy Performance on {title_asset} (Validation)"
-        )
-        agg_fig.show()
         if hasattr(portfolio, "columns"):
             for col in portfolio.columns:
                 col_fig = portfolio.plot(column=col, title=f"{col} Equity Curve (Validation)")
                 col_fig.show()
-    else:
-        fig = portfolio.plot(
-            title=f"Champion Strategy Performance on {title_asset} (Validation)"
-        )
-        fig.show()

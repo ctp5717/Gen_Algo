@@ -63,19 +63,25 @@ def test_run_champion_analysis_handles_missing_metrics(monkeypatch, capsys):
     )
 
     class DummyPortfolio:
-        def plot(self, *a, **k):
-            class DummyFig:
-                def show(self):
-                    pass
+        pass
 
-            return DummyFig()
+    agg_series = pd.Series([1], index=df.index)
+
+    class DummyFig:
+        def __init__(self):
+            self.figure = self
+
+        def show(self):
+            pass
+
+    agg_series.plot = lambda *a, **k: DummyFig()
 
     agg = pd.Series({'Total Return [%]': 0})
     per_asset = pd.DataFrame({'A': [0]}, index=['Total Return [%]'])
     monkeypatch.setattr(
         analysis.fitness,
         'run_portfolio_backtest',
-        lambda *a, **k: (DummyPortfolio(), DummyPortfolio(), agg, per_asset),
+        lambda *a, **k: (DummyPortfolio(), agg_series, agg, per_asset),
     )
     monkeypatch.setattr(analysis, 'plt', types.SimpleNamespace(ion=lambda: None))
 
