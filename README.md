@@ -130,10 +130,12 @@ This module's purpose is to provide a final, unbiased report on the performance 
     yfinance
     python-binance
     pandas-ta
-    setuptools
+    setuptools<81
     python-dateutil
     matplotlib
     ```
+
+    > **Note:** `setuptools` is pinned below version 81 to avoid installation warnings from newer releases.
 
     **Installation Command:**
 
