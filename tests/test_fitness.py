@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -123,3 +124,57 @@ def test_run_portfolio_backtest_weights(monkeypatch):
         weights=[0.7, 0.3],
     )
     assert 'weights' not in captured
+
+
+def test_run_portfolio_backtest_aggregates_equity_and_trades(monkeypatch):
+    ohlc = pd.DataFrame(
+        {
+            ('A', 'Close'): [1, 2, 3],
+            ('B', 'Close'): [4, 5, 6],
+        },
+        index=pd.date_range('2020-01-01', periods=3),
+    )
+    ohlc.columns = pd.MultiIndex.from_tuples(ohlc.columns)
+    entries = pd.DataFrame(
+        [[True, False], [False, True], [False, False]],
+        index=ohlc.index,
+        columns=['A', 'B'],
+    )
+
+    class DummyPortfolio:
+        def stats(self, column=None, silence_warnings=None):
+            return pd.Series({'Total Trades': 1, 'Win Rate [%]': np.nan})
+
+        def value(self):
+            return pd.DataFrame(
+                {'A': [100, 110, 110], 'B': [200, 200, 210]}, index=ohlc.index
+            )
+
+        def returns(self):
+            return pd.DataFrame(
+                {'A': [0.1, 0.0, 0.0], 'B': [0.0, 0.0, 0.05]}, index=ohlc.index
+            )
+
+        @property
+        def trades(self):
+            class T:
+                @property
+                def records_readable(self):
+                    return pd.DataFrame({'PnL': [10, -5], 'Column': ['A', 'B']})
+
+            return T()
+
+    monkeypatch.setattr(
+        fitness.vbt.Portfolio, 'from_signals', lambda *a, **k: DummyPortfolio()
+    )
+
+    portfolio, agg_equity, agg_stats, per_asset_stats = fitness.run_portfolio_backtest(
+        ohlc, entries, weights=[0.6, 0.4]
+    )
+
+    expected = (portfolio.value() * np.array([0.6, 0.4])).sum(axis=1)
+    assert agg_equity.equals(expected)
+    assert agg_stats['Total Trades'] == 2 and isinstance(
+        agg_stats['Total Trades'], (int, np.integer)
+    )
+    assert not per_asset_stats.isna().any().any()

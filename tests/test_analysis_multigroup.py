@@ -48,6 +48,9 @@ def test_run_champion_analysis_multigroup(monkeypatch):
     )
 
     class DummyFig:
+        def __init__(self):
+            self.figure = self
+
         def show(self):
             pass
 
@@ -59,12 +62,8 @@ def test_run_champion_analysis_multigroup(monkeypatch):
         def plot(self, *a, **k):
             return DummyFig()
 
-    class DummyAggPortfolio:
-        def __init__(self):
-            self.wrapper = SimpleNamespace(grouper=None, ndim=1)
-
-        def plot(self, *a, **k):
-            return DummyFig()
+    agg_series = pd.Series([1, 2, 3, 4, 5], index=data.index)
+    agg_series.plot = lambda *a, **k: DummyFig()
 
     agg_stats = pd.Series({'Total Return [%]': 0.0})
     per_asset_stats = pd.DataFrame({'AAA': agg_stats, 'BBB': agg_stats})
@@ -72,7 +71,7 @@ def test_run_champion_analysis_multigroup(monkeypatch):
     monkeypatch.setattr(
         analysis.fitness,
         'run_portfolio_backtest',
-        lambda *a, **k: (DummyPortfolio(), DummyAggPortfolio(), agg_stats, per_asset_stats),
+        lambda *a, **k: (DummyPortfolio(), agg_series, agg_stats, per_asset_stats),
     )
 
     monkeypatch.setattr(analysis, 'plt', types.SimpleNamespace(ion=lambda: None))

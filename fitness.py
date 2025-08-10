@@ -96,7 +96,7 @@ def run_portfolio_backtest(
         group_by=group_by,
     )
 
-    agg_portfolio = portfolio
+    agg_portfolio = portfolio.value()
     if isinstance(close_prices, pd.DataFrame):
         if weights_arr is None:
             weights_arr = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
@@ -111,18 +111,19 @@ def run_portfolio_backtest(
             per_asset_stats = (
                 stats_df if isinstance(stats_df, pd.DataFrame) else pd.DataFrame(stats_df)
             )
+        per_asset_stats = per_asset_stats.applymap(
+            lambda x: np.nan_to_num(x) if isinstance(x, (int, float, np.floating, np.integer)) else x
+        )
 
         try:
             agg_stats = portfolio.stats(silence_warnings=True)
         except TypeError:
             stats_res = portfolio.stats()
             agg_stats = stats_res if isinstance(stats_res, pd.Series) else stats_res.iloc[:, 0]
+        agg_stats = agg_stats.astype(object)
 
         weighted_value = (portfolio.value() * weights_arr).sum(axis=1)
-        agg_portfolio = vbt.Portfolio.from_holding(
-            close=weighted_value,
-            freq=config.TIMEFRAME,
-        )
+        agg_portfolio = weighted_value
 
         if hasattr(portfolio, "returns"):
             weighted_returns = (portfolio.returns() * weights_arr).sum(axis=1)
@@ -144,9 +145,19 @@ def run_portfolio_backtest(
                 agg_stats["Max Consecutive Losses"] = 0
         else:
             agg_stats["Max Consecutive Losses"] = 0
+
+        if "Total Trades" in per_asset_stats.index:
+            agg_stats["Total Trades"] = int(
+                np.nan_to_num(per_asset_stats.loc["Total Trades"]).sum()
+            )
     else:
         per_asset_stats = portfolio.stats()
-        agg_stats = per_asset_stats
+        per_asset_stats = per_asset_stats.apply(
+            lambda x: np.nan_to_num(x) if isinstance(x, (int, float, np.floating, np.integer)) else x
+        )
+        agg_stats = per_asset_stats.copy().astype(object)
+        if "Total Trades" in per_asset_stats.index:
+            agg_stats["Total Trades"] = int(per_asset_stats.loc["Total Trades"])
 
     return portfolio, agg_portfolio, agg_stats, per_asset_stats
 
