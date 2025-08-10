@@ -112,7 +112,13 @@ def run_portfolio_backtest(
                 stats_df if isinstance(stats_df, pd.DataFrame) else pd.DataFrame(stats_df)
             )
         per_asset_stats = per_asset_stats.applymap(
-            lambda x: np.nan_to_num(x) if isinstance(x, (int, float, np.floating, np.integer)) else x
+            lambda x: (
+                int(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+                if isinstance(x, (int, np.integer))
+                else float(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+                if isinstance(x, (float, np.floating))
+                else x
+            )
         )
 
         try:
@@ -148,16 +154,42 @@ def run_portfolio_backtest(
 
         if "Total Trades" in per_asset_stats.index:
             agg_stats["Total Trades"] = int(
-                np.nan_to_num(per_asset_stats.loc["Total Trades"]).sum()
+                np.nan_to_num(
+                    per_asset_stats.loc["Total Trades"], nan=0.0, posinf=0.0, neginf=0.0
+                ).sum()
             )
+
+        for key, val in agg_stats.items():
+            if isinstance(val, (int, np.integer)):
+                agg_stats[key] = int(val)
+            elif isinstance(val, (float, np.floating)):
+                agg_stats[key] = float(
+                    np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
+                )
     else:
         per_asset_stats = portfolio.stats()
         per_asset_stats = per_asset_stats.apply(
-            lambda x: np.nan_to_num(x) if isinstance(x, (int, float, np.floating, np.integer)) else x
+            lambda x: (
+                int(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+                if isinstance(x, (int, np.integer))
+                else float(
+                    np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+                )
+                if isinstance(x, (float, np.floating))
+                else x
+            )
         )
         agg_stats = per_asset_stats.copy().astype(object)
         if "Total Trades" in per_asset_stats.index:
             agg_stats["Total Trades"] = int(per_asset_stats.loc["Total Trades"])
+
+        for key, val in agg_stats.items():
+            if isinstance(val, (int, np.integer)):
+                agg_stats[key] = int(val)
+            elif isinstance(val, (float, np.floating)):
+                agg_stats[key] = float(
+                    np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
+                )
 
     return portfolio, agg_portfolio, agg_stats, per_asset_stats
 
@@ -236,18 +268,26 @@ class FitnessEvaluator:
 
             if isinstance(agg_stats, pd.DataFrame):
                 # Should not happen but keep fallback
-                sortino = agg_stats.loc['Sortino Ratio'].iloc[0]
-                profit_factor = agg_stats.loc['Profit Factor'].replace(np.inf, 5).iloc[0]
-                max_drawdown = agg_stats.loc['Max Drawdown [%]'].iloc[0]
+                sortino = agg_stats.loc.get('Sortino Ratio', [np.nan])[0]
+                profit_factor = agg_stats.loc.get('Profit Factor', [np.nan])[0]
+                max_drawdown = agg_stats.loc.get('Max Drawdown [%]', [np.nan])[0]
+                volatility = agg_stats.loc.get('Volatility', [np.nan])[0]
             else:
-                sortino = agg_stats.get('Sortino Ratio')
-                profit_factor = agg_stats.get('Profit Factor')
-                max_drawdown = agg_stats.get('Max Drawdown [%]')
-            
-            if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
-            if np.isnan(sortino): sortino = 0
-            if np.isnan(profit_factor): profit_factor = 0
-            if np.isnan(max_drawdown): max_drawdown = 100.0
+                sortino = agg_stats.get('Sortino Ratio', np.nan)
+                profit_factor = agg_stats.get('Profit Factor', np.nan)
+                max_drawdown = agg_stats.get('Max Drawdown [%]', np.nan)
+                volatility = agg_stats.get('Volatility', np.nan)
+
+            if np.isinf(sortino):
+                sortino = 0.0
+            if np.isinf(profit_factor) or profit_factor > 5:
+                profit_factor = 5.0
+            if np.isinf(max_drawdown):
+                max_drawdown = 100.0
+
+            metrics = [sortino, profit_factor, max_drawdown, volatility]
+            if any(not np.isfinite(m) for m in metrics) or volatility == 0:
+                return -999.0
 
             drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
@@ -258,7 +298,7 @@ class FitnessEvaluator:
                 (drawdown_score * weights['max_drawdown'])
             )
 
-            return fitness_score if not np.isnan(fitness_score) else -1.0
+            return fitness_score if np.isfinite(fitness_score) else -999.0
 
         except Exception as e:
             print(f"Error in fitness evaluation: {e}")
