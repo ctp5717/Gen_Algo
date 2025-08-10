@@ -49,6 +49,7 @@ def test_fitness_uses_aggregated_stats(monkeypatch):
             'Sortino Ratio': 2.0,
             'Profit Factor': 1.0,
             'Max Drawdown [%]': 5.0,
+            'Volatility': 1.0,
         }
     )
     per_asset = pd.DataFrame(
@@ -178,3 +179,59 @@ def test_run_portfolio_backtest_aggregates_equity_and_trades(monkeypatch):
         agg_stats['Total Trades'], (int, np.integer)
     )
     assert not per_asset_stats.isna().any().any()
+    assert not agg_stats.isna().any()
+
+
+def test_fitness_penalizes_zero_volatility(monkeypatch):
+    ohlc = pd.DataFrame({('A', 'Close'): [1]}, index=pd.date_range('2020-01-01', periods=1))
+    ohlc.columns = pd.MultiIndex.from_tuples(ohlc.columns)
+
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.DataFrame([[True]], index=ohlc.index, columns=['A']),
+    )
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1, 'profit_factor': 0, 'max_drawdown': 0, 'min_trades': 0},
+        raising=False,
+    )
+
+    agg = pd.Series(
+        {
+            'Sortino Ratio': 1.0,
+            'Profit Factor': 1.0,
+            'Max Drawdown [%]': 5.0,
+            'Volatility': 0.0,
+        }
+    )
+    monkeypatch.setattr(
+        fitness,
+        'run_portfolio_backtest',
+        lambda *a, **k: (None, None, agg, None),
+    )
+
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+    score = evaluator(None, [], 0)
+    assert np.isfinite(score) and score == -999.0
+
+
+def test_fitness_is_finite_when_no_trades(monkeypatch):
+    ohlc = pd.DataFrame({'Close': [1, 2]}, index=pd.date_range('2020-01-01', periods=2))
+
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.DataFrame([[False], [False]], index=ohlc.index, columns=['Close']),
+    )
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1, 'profit_factor': 0, 'max_drawdown': 0, 'min_trades': 1},
+        raising=False,
+    )
+
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+    score = evaluator(None, [], 0)
+    assert np.isfinite(score)
