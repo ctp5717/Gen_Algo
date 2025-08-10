@@ -85,7 +85,7 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
     )
 
     assert ion_called['ion']
-    assert calls == ['show', 'show']
+    assert calls == ['show']
 
 
 def test_run_champion_analysis_prints_both_stats(monkeypatch, capsys):

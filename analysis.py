@@ -94,10 +94,21 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         "Portfolio" if getattr(config, "PORTFOLIO_OPTIMIZATION_ENABLED", False)
         else config.SELECTED_ASSET_NAME
     )
-    fig = portfolio.plot(
-        title=f"Champion Strategy Performance on {title_asset} (Validation)"
-    )
-    fig.show()
-    if agg_portfolio is not portfolio:
-        agg_fig = agg_portfolio.plot(title="Aggregated Portfolio Equity (Validation)")
+    wrapper = getattr(portfolio, "wrapper", None)
+    is_grouped = getattr(wrapper, "grouper", None) is not None
+    is_multi = getattr(wrapper, "ndim", 1) > 1
+
+    if is_grouped or is_multi:
+        agg_fig = agg_portfolio.plot(
+            title=f"Champion Strategy Performance on {title_asset} (Validation)"
+        )
         agg_fig.show()
+        if hasattr(portfolio, "columns"):
+            for col in portfolio.columns:
+                col_fig = portfolio.plot(column=col, title=f"{col} Equity Curve (Validation)")
+                col_fig.show()
+    else:
+        fig = portfolio.plot(
+            title=f"Champion Strategy Performance on {title_asset} (Validation)"
+        )
+        fig.show()
