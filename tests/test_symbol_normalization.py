@@ -123,7 +123,11 @@ def test_tuner_validation_loads_normalized_symbol(monkeypatch):
     monkeypatch.setattr(tuner.config, "TUNING_ASSET", "ADA-USD", raising=False)
 
     monkeypatch.setattr(tuner.fitness, "_inject_genes_into_rules", lambda *a, **k: {})
-    monkeypatch.setattr(tuner.engine, "process_strategy_rules", lambda *a, **k: pd.Series([True, True], index=df.index))
+    monkeypatch.setattr(
+        tuner.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.Series([True, True], index=df.index),
+    )
     monkeypatch.setattr(tuner.fitness, "_count_trades", lambda *a, **k: 1)
     monkeypatch.setattr(
         tuner.fitness,
@@ -188,7 +192,11 @@ def test_walk_forward_loads_normalized_symbol(monkeypatch):
             return 1.0
 
     monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
-    monkeypatch.setattr(walk_forward.engine, "process_strategy_rules", lambda *a, **k: pd.Series([True, True], index=df.index))
+    monkeypatch.setattr(
+        walk_forward.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.Series([True, True], index=df.index),
+    )
 
     class DummyGA:
         def __init__(self, *a, **k):
@@ -222,4 +230,3 @@ def test_walk_forward_loads_normalized_symbol(monkeypatch):
 
     walk_forward.run_walk_forward_validation()
     assert captured["ticker"] == "DOGEUSDT"
-
