@@ -4,6 +4,13 @@
 Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
+import warnings
+
+# Silence noisy warnings from specific third-party libraries while keeping other
+# warnings visible for debugging.
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"^pandas_ta")
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"^pkg_resources")
+
 import copy
 import pandas as pd
 import numpy as np
