@@ -1,8 +1,10 @@
 import sys
 import types
 from pathlib import Path
+
 import pandas as pd
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -219,7 +221,7 @@ def test_fitness_penalizes_zero_volatility(monkeypatch):
     assert np.isfinite(score) and score == -999.0
 
 
-def test_fitness_is_finite_when_no_trades(monkeypatch):
+def test_fitness_handles_zero_trades(monkeypatch):
     ohlc = pd.DataFrame({'Close': [1, 2]}, index=pd.date_range('2020-01-01', periods=2))
 
     monkeypatch.setattr(
@@ -230,10 +232,94 @@ def test_fitness_is_finite_when_no_trades(monkeypatch):
     monkeypatch.setattr(
         fitness.config,
         'FITNESS_WEIGHTS',
-        {'sortino_ratio': 1, 'profit_factor': 0, 'max_drawdown': 0, 'min_trades': 1},
+        {
+            'sortino_ratio': 1,
+            'profit_factor': 1,
+            'max_drawdown': 1,
+            'min_trades': 0,
+        },
         raising=False,
+    )
+    monkeypatch.setattr(
+        fitness,
+        'run_portfolio_backtest',
+        lambda *a, **k: (None, None, pd.Series({'Total Trades': 0}), None),
     )
 
     evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
     score = evaluator(None, [], 0)
-    assert np.isfinite(score)
+    assert np.isfinite(score) and score > -999
+
+
+def test_fitness_caps_sortino_when_no_downside(monkeypatch):
+    ohlc = pd.DataFrame({'Close': [1, 2]}, index=pd.date_range('2020-01-01', periods=2))
+
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.DataFrame([[True], [False]], index=ohlc.index, columns=['Close']),
+    )
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {'sortino_ratio': 1, 'profit_factor': 0, 'max_drawdown': 0, 'min_trades': 0},
+        raising=False,
+    )
+    agg = pd.Series(
+        {
+            'Sortino Ratio': 1000.0,
+            'Profit Factor': 1.0,
+            'Max Drawdown [%]': 5.0,
+            'Volatility': 1.0,
+            'Total Trades': 1,
+        }
+    )
+    monkeypatch.setattr(
+        fitness,
+        'run_portfolio_backtest',
+        lambda *a, **k: (None, None, agg, None),
+    )
+
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+    score = evaluator(None, [], 0)
+    assert np.isfinite(score) and score == 5.0
+
+
+def test_fitness_standard_scenario(monkeypatch):
+    ohlc = pd.DataFrame({'Close': [1, 2]}, index=pd.date_range('2020-01-01', periods=2))
+
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.DataFrame([[True], [False]], index=ohlc.index, columns=['Close']),
+    )
+    monkeypatch.setattr(
+        fitness.config,
+        'FITNESS_WEIGHTS',
+        {
+            'sortino_ratio': 1,
+            'profit_factor': 1,
+            'max_drawdown': 1,
+            'min_trades': 0,
+        },
+        raising=False,
+    )
+    agg = pd.Series(
+        {
+            'Sortino Ratio': 1.0,
+            'Profit Factor': 2.0,
+            'Max Drawdown [%]': 10.0,
+            'Volatility': 1.0,
+            'Total Trades': 1,
+        }
+    )
+    monkeypatch.setattr(
+        fitness,
+        'run_portfolio_backtest',
+        lambda *a, **k: (None, None, agg, None),
+    )
+
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+    score = evaluator(None, [], 0)
+    expected = 1.0 + 2.0 + (1 - 10 / 100)
+    assert score == pytest.approx(expected)
