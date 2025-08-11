@@ -8,6 +8,7 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
+import ga_utils
 
 
 def _evaluate_on_validation(solution, gene_map):
@@ -89,6 +90,7 @@ def find_best_hyperparameters(gene_space, gene_map, gene_types):
 
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
         print(f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}")
+        on_gen = ga_utils.make_stagnation_callback()
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],
@@ -99,6 +101,7 @@ def find_best_hyperparameters(gene_space, gene_map, gene_types):
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
+            on_generation=on_gen,
         )
         ga.run()
         best_solution, _, _ = ga.best_solution()

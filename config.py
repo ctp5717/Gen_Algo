@@ -162,6 +162,18 @@ GA_MUTATION_NUM_GENES = 1
 # GA_PARENTS_MATING = 50
 # GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
 
+# When the GA repeatedly produces invalid solutions (fitness ``-999``), the
+# optimisation can be configured to restart or expand the search space.
+# ``GA_STAGNATION_THRESHOLD`` controls how many consecutive generations of
+# ``-999`` fitness are tolerated before the policy triggers.  Set
+# ``GA_RESTART_POLICY`` to ``"restart"`` to simply randomise the population or
+# ``"expand"`` to widen each gene's range before randomising.  The expansion
+# applied when using ``"expand"`` is governed by ``GA_GENE_RANGE_EXPANSION``
+# and is expressed as a fraction of the current range (default 0.5 = 50%).
+GA_STAGNATION_THRESHOLD = 5
+GA_RESTART_POLICY = "restart"  # or "expand"
+GA_GENE_RANGE_EXPANSION = 0.5
+
 # --- AUTO-TUNER SETTINGS ---
 AUTO_TUNE_ENABLED = True
 GENERATIONS_PER_TUNE = 10

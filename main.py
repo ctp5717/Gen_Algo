@@ -19,11 +19,13 @@ import data_loader
 import fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
+import ga_utils
 
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
 _last_progress_len = 0
+stagnation_handler = ga_utils.make_stagnation_callback()
 
 
 def format_progress_line(generation, total_generations, fitness, est_time_remaining):
@@ -37,7 +39,12 @@ def on_generation(ga_instance):
     """Print a live progress update for each completed generation."""
     generation = ga_instance.generations_completed
     total_generations = ga_instance.num_generations
-    fitness = ga_instance.best_solution(pop_fitness=ga_instance.last_generation_fitness)[1]
+    fitness = ga_instance.best_solution(
+        pop_fitness=ga_instance.last_generation_fitness
+    )[1]
+
+    # Apply stagnation handling before printing progress.
+    stagnation_handler(ga_instance)
 
     elapsed_time = time.time() - start_time
     est_time_remaining = (
