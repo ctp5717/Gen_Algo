@@ -335,6 +335,11 @@ class FitnessEvaluator:
                 max_drawdown = _metric_get(agg_stats, "Max Drawdown [%]", 100.0)
                 volatility = _metric_get(agg_stats, "Volatility", 0.0)
 
+            # Volatility of zero indicates no movement in returns; penalize heavily
+            if volatility <= 0:
+                logging.warning("Returning -999 due to zero or negative volatility")
+                return -999.0
+
             profit_factor = min(profit_factor, 5.0)
             drawdown_score = np.clip(1 - safe_div(max_drawdown, 100.0, 1.0), 0.0, 1.0)
 
