@@ -159,12 +159,23 @@ This module's purpose is to provide a final, unbiased report on the performance 
 1.  **Configure Your Experiment:** Open `config.py`.
 
       * Set the `SELECTED_ASSET_NAME`, `TIMEFRAME`, and `DATA_SOURCE`.
+        Common `TIMEFRAME` inputs are normalised internally:
+
+        | Input        | Normalised |
+        | ------------ | ---------- |
+        | `15m`        | `15T`      |
+        | `1h`         | `1H`       |
+        | `1d`/`1day`  | `1D`       |
+        | `1w`/`1wk`   | `1W`       |
+        | `1mo`/`1mth` | `1M`       |
       * Go to the `STRATEGY_RULES` dictionary. Use the `'is_active': True/False` flags to choose which indicator conditions to include in your strategy.
       * Adjust the `low` and `high` ranges for any genes you want to optimize.
       * To enable portfolio optimisation, set `PORTFOLIO_OPTIMIZATION_ENABLED = True`,
         populate `ASSET_BASKET` with a list of tickers, and optionally specify
-        `PORTFOLIO_WEIGHTS` to apply custom weighting (equal weights are used if
-        omitted).
+        `PORTFOLIO_WEIGHTS` (a list of non‑negative numbers matching the basket
+        length) to apply custom weighting. Weights correspond to the order of
+        `ASSET_BASKET` and are normalised to sum to one; equal weighting is used
+        if `PORTFOLIO_WEIGHTS` is omitted.
 
 2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
 

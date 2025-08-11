@@ -56,7 +56,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict, verbose: bool = F
         sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
         tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
 
-        portfolio, agg_portfolio, agg_stats, per_asset_stats = fitness.run_portfolio_backtest(
+        portfolio, agg_equity, agg_stats, per_asset_stats = fitness.run_portfolio_backtest(
             validation_data,
             entries,
             sl_stop=sl_stop,
@@ -100,7 +100,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict, verbose: bool = F
     is_grouped = getattr(wrapper, "grouper", None) is not None
     is_multi = getattr(wrapper, "ndim", 1) > 1
 
-    ax = agg_portfolio.plot(
+    ax = agg_equity.plot(
         title=f"Champion Strategy Performance on {title_asset} (Validation)"
     )
     if hasattr(portfolio, "trades"):

@@ -4,27 +4,26 @@ import ga_utils
 import config
 
 
-def test_restart_policy_resets_population(monkeypatch):
+def test_mutation_escalates_after_stagnation(monkeypatch):
     monkeypatch.setattr(config, "GA_STAGNATION_THRESHOLD", 2, raising=False)
-    monkeypatch.setattr(config, "GA_RESTART_POLICY", "restart", raising=False)
+    monkeypatch.setattr(config, "GA_MUTATION_ESCALATION_FACTOR", 2.0, raising=False)
     cb = ga_utils.make_stagnation_callback()
 
     class DummyGA:
         def __init__(self):
-            self.calls = 0
             self.gene_space = [{"low": 0, "high": 1}]
             self.last_generation_fitness = [-999]
+            self.mutation_num_genes = 1
+            self.num_genes = 10
 
         def best_solution(self, pop_fitness=None):
             return None, -999, None
 
-        def initialize_population(self):
-            self.calls += 1
-
     ga = DummyGA()
     cb(ga)
+    assert ga.mutation_num_genes == 1
     cb(ga)
-    assert ga.calls == 1
+    assert ga.mutation_num_genes == 2
 
 
 def test_expand_policy_expands_ranges(monkeypatch):
@@ -37,19 +36,17 @@ def test_expand_policy_expands_ranges(monkeypatch):
         def __init__(self):
             self.gene_space = [{"low": 0, "high": 10}]
             self.last_generation_fitness = [-999]
-            self.init_called = 0
+            self.mutation_num_genes = 1
+            self.num_genes = 10
 
         def best_solution(self, pop_fitness=None):
             return None, -999, None
 
-        def initialize_population(self):
-            self.init_called += 1
-
     ga = DummyGA()
     cb(ga)
-    assert ga.init_called == 1
     assert ga.gene_space[0]["low"] < 0
     assert ga.gene_space[0]["high"] > 10
+    assert ga.mutation_num_genes > 1
 
 
 def test_stagnation_callback_picklable():

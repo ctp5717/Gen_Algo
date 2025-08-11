@@ -145,3 +145,35 @@ def test_find_best_hyperparameters_uses_tuning_asset(monkeypatch):
 
     tuner.find_best_hyperparameters(gene_space, gene_map, gene_types)
     assert captured['ticker'] == 'TEST-ASSET'
+
+
+def test_find_best_hyperparameters_handles_exception(monkeypatch):
+    df = pd.DataFrame({
+        'Open': [1],
+        'High': [1],
+        'Low': [1],
+        'Close': [1],
+        'Volume': [1],
+    }, index=pd.date_range('2020-01-01', periods=1))
+
+    gene_space = [{'low': 0, 'high': 1}]
+    gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
+    gene_types = [float]
+
+    search = [{'sol_per_pop': 1, 'num_parents_mating': 1, 'mutation_num_genes': 1}]
+    monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', search, raising=False)
+    monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            raise RuntimeError('boom')
+
+    monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
+    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda *a, **k: 0)
+    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda *a, **k: df)
+
+    best = tuner.find_best_hyperparameters(gene_space, gene_map, gene_types)
+    assert best == search[0]

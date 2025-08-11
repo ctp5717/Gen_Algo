@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import warnings
+import atexit
 
 # Silence noisy warnings from specific third-party libraries while keeping other
 # warnings visible for debugging.
@@ -46,22 +47,45 @@ def _count_trades(entries: pd.DataFrame) -> int:
     return int(entries.sum())
 
 
+_penalty_counts: dict[tuple[str, str], int] = {}
+
+
 def _log_penalty_metrics(
     metrics: dict[str, float | int | None],
     total_trades: int,
     reason: str,
     drawdown_score: float | None,
 ) -> None:
-    """Log each metric with a structured warning for easier debugging."""
+    """Log penalty metrics, de-duplicating repeated messages."""
+    verbose = getattr(config, "VERBOSE_FITNESS_LOGS", False)
     for name, value in metrics.items():
-        logging.warning(
-            "fitness_penalty metric=%s value=%s total_trades=%s drawdown_score=%s reason=%s",
-            name,
-            value,
-            total_trades,
-            drawdown_score,
-            reason,
-        )
+        key = (name, reason)
+        _penalty_counts[key] = _penalty_counts.get(key, 0) + 1
+        if verbose or _penalty_counts[key] == 1:
+            logging.warning(
+                "fitness_penalty metric=%s value=%s total_trades=%s drawdown_score=%s reason=%s",
+                name,
+                value,
+                total_trades,
+                drawdown_score,
+                reason,
+            )
+
+
+def _flush_penalty_summary() -> None:
+    if getattr(config, "VERBOSE_FITNESS_LOGS", False):
+        return
+    for (metric, reason), count in _penalty_counts.items():
+        if count > 1:
+            logging.warning(
+                "suppressed %s duplicate fitness_penalty warnings metric=%s reason=%s",
+                count - 1,
+                metric,
+                reason,
+            )
+
+
+atexit.register(_flush_penalty_summary)
 
 
 def run_portfolio_backtest(
@@ -96,8 +120,8 @@ def run_portfolio_backtest(
     Returns
     -------
     tuple
-        ``(portfolio, agg_portfolio, agg_stats, per_asset_stats)`` where
-        ``agg_portfolio`` represents the combined equity curve when multiple
+        ``(portfolio, agg_equity, agg_stats, per_asset_stats)`` where
+        ``agg_equity`` represents the combined equity curve when multiple
         assets are present.
     """
     if not hasattr(vbt, "Portfolio"):
@@ -123,6 +147,8 @@ def run_portfolio_backtest(
             weights_arr = np.asarray(weights, dtype=float)
             if weights_arr.size != close_prices.shape[1]:
                 raise ValueError("weights length must match number of assets")
+            if np.any(weights_arr < 0):
+                raise ValueError("weights must be non-negative")
             total_w = weights_arr.sum()
             weights_arr = np.array([safe_div(w, total_w) for w in weights_arr])
 
@@ -134,11 +160,11 @@ def run_portfolio_backtest(
         tp_stop=tp_stop,
         sl_trail=sl_trail,
         fees=0.001,
-        freq=config.TIMEFRAME,
         group_by=group_by,
+        freq=_timeframe_to_freq(config.TIMEFRAME),
     )
 
-    agg_portfolio = portfolio.value()
+    agg_equity = portfolio.value()
     if isinstance(close_prices, pd.DataFrame):
         if weights_arr is None:
             weights_arr = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
@@ -161,16 +187,22 @@ def run_portfolio_backtest(
             return x
 
         per_asset_stats = per_asset_stats.map(_sanitize)
+        if "Volatility [%]" in per_asset_stats.index and "Volatility" not in per_asset_stats.index:
+            per_asset_stats.rename(index={"Volatility [%]": "Volatility"}, inplace=True)
 
         try:
             agg_stats = portfolio.stats(silence_warnings=True)
         except TypeError:
             stats_res = portfolio.stats()
             agg_stats = stats_res if isinstance(stats_res, pd.Series) else stats_res.iloc[:, 0]
+        if isinstance(agg_stats, pd.Series) and "Volatility [%]" in agg_stats:
+            if "Volatility" not in agg_stats:
+                agg_stats["Volatility"] = agg_stats["Volatility [%]"]
+            agg_stats = agg_stats.drop(labels=["Volatility [%]"], errors="ignore")
         agg_stats = agg_stats.astype(object)
 
         weighted_value = (portfolio.value() * weights_arr).sum(axis=1)
-        agg_portfolio = weighted_value
+        agg_equity = weighted_value
 
         if hasattr(portfolio, "returns"):
             weighted_returns = (portfolio.returns() * weights_arr).sum(axis=1)
@@ -248,6 +280,8 @@ def run_portfolio_backtest(
                 agg_stats[key] = float(nan_to_num(val))
     else:
         per_asset_stats = portfolio.stats()
+        if "Volatility [%]" in per_asset_stats.index and "Volatility" not in per_asset_stats.index:
+            per_asset_stats.rename(index={"Volatility [%]": "Volatility"}, inplace=True)
         per_asset_stats = per_asset_stats.apply(
             lambda x: (
                 int(nan_to_num(x))
@@ -258,6 +292,10 @@ def run_portfolio_backtest(
             )
         )
         agg_stats = per_asset_stats.copy().astype(object)
+        if "Volatility [%]" in agg_stats:
+            if "Volatility" not in agg_stats:
+                agg_stats["Volatility"] = agg_stats["Volatility [%]"]
+            agg_stats = agg_stats.drop(labels=["Volatility [%]"], errors="ignore")
         if "Total Trades" in per_asset_stats.index:
             agg_stats["Total Trades"] = int(per_asset_stats.loc["Total Trades"])
 
@@ -267,7 +305,38 @@ def run_portfolio_backtest(
             elif isinstance(val, (float, np.floating)):
                 agg_stats[key] = float(nan_to_num(val))
 
-    return portfolio, agg_portfolio, agg_stats, per_asset_stats
+    total_trades = int(agg_stats.get("Total Trades", 0))
+    vol = float(agg_stats.get("Volatility", 0.0)) if agg_stats.get("Volatility") is not None else 0.0
+    global _volatility_warning_emitted
+    if total_trades > 0 and vol == 0.0 and not _volatility_warning_emitted:
+        logging.warning(
+            "Volatility is zero despite %s trades; check timeframe configuration",
+            total_trades,
+        )
+        _volatility_warning_emitted = True
+
+    return portfolio, agg_equity, agg_stats, per_asset_stats
+
+
+_volatility_warning_emitted = False
+
+
+def _timeframe_to_freq(tf: str):
+    tf = str(tf).strip().lower()
+    if tf.endswith("m"):
+        return f"{tf[:-1]}T"
+    if tf.endswith("h"):
+        return f"{tf[:-1]}H"
+    if tf in {"1d", "1day"}:
+        return "1D"
+    if tf in {"1w", "1wk", "1week"}:
+        return "1W"
+    if tf in {"1mo", "1mth", "1month"}:
+        return "1M"
+    try:
+        return pd.to_timedelta(tf)
+    except Exception as e:
+        raise ValueError(f"Unrecognised timeframe '{tf}'") from e
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
@@ -292,7 +361,12 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
 
         param_key = path[-1]
 
-        current_level[param_key] = gene_info["type"](gene_value)
+        try:
+            current_level[param_key] = gene_info["type"](gene_value)
+        except Exception as e:
+            name = gene_info.get("name", param_key)
+            raise ValueError(
+                f"Failed to cast gene '{name}' with value {gene_value}") from e
 
     return injected_rules
 
