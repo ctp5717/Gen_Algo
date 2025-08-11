@@ -312,6 +312,19 @@ class FitnessEvaluator:
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
 
             total_trades = _count_trades(entries)
+            if total_trades == 0:
+                _log_penalty_metrics(
+                    {
+                        "sortino": np.nan,
+                        "profit_factor": np.nan,
+                        "max_drawdown": np.nan,
+                        "volatility": np.nan,
+                    },
+                    total_trades,
+                    "no_trades",
+                    np.nan,
+                )
+                return -1.0
             if total_trades < config.FITNESS_WEIGHTS["min_trades"]:
                 _log_penalty_metrics(
                     {
@@ -374,6 +387,8 @@ class FitnessEvaluator:
                 profit_factor = _metric_get(agg_stats, "Profit Factor", 0.0)
                 max_drawdown = _metric_get(agg_stats, "Max Drawdown [%]", 100.0)
                 volatility = _metric_get(agg_stats, "Volatility", 0.0)
+
+                sortino = min(sortino, 5.0)
 
             drawdown_score = np.clip(1 - safe_div(max_drawdown, 100.0, 1.0), 0.0, 1.0)
 
