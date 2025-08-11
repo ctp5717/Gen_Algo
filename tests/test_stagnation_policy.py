@@ -48,4 +48,3 @@ def test_expand_policy_expands_ranges(monkeypatch):
     assert ga.init_called == 1
     assert ga.gene_space[0]["low"] < 0
     assert ga.gene_space[0]["high"] > 10
-
