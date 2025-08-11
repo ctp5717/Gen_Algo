@@ -3,11 +3,11 @@
 import config
 
 
-def make_stagnation_callback():
-    """Return a callback that restarts the GA when fitness stagnates at ``-999``.
+class StagnationCallback:
+    """Callable object used to restart the GA when fitness stagnates.
 
-    The returned callable tracks consecutive generations where the best fitness
-    equals ``-999``. Once the number of stagnant generations reaches
+    The object tracks consecutive generations where the best fitness equals
+    ``-999``. Once the number of stagnant generations reaches
     ``config.GA_STAGNATION_THRESHOLD``, the policy specified by
     ``config.GA_RESTART_POLICY`` is applied:
 
@@ -15,17 +15,23 @@ def make_stagnation_callback():
     - ``"expand"``: each gene's ``low`` and ``high`` bounds are widened by
       ``config.GA_GENE_RANGE_EXPANSION`` (as a fraction of the current range)
       before randomising the population.
+
+    The class is defined at module level so that instances are picklable. This
+    is important because ``pygad`` evaluates fitness functions in worker
+    processes and thus needs to pickle the GA instance, including any
+    callbacks.
     """
 
-    counter = {"count": 0}
+    def __init__(self):
+        self.count = 0
 
-    def _callback(ga_instance):
+    def __call__(self, ga_instance):
         best_fitness = ga_instance.best_solution(
             pop_fitness=ga_instance.last_generation_fitness
         )[1]
         if best_fitness == -999:
-            counter["count"] += 1
-            if counter["count"] >= getattr(config, "GA_STAGNATION_THRESHOLD", 0):
+            self.count += 1
+            if self.count >= getattr(config, "GA_STAGNATION_THRESHOLD", 0):
                 policy = getattr(config, "GA_RESTART_POLICY", "restart").lower()
                 if policy == "expand":
                     expansion = getattr(config, "GA_GENE_RANGE_EXPANSION", 0.5)
@@ -36,11 +42,15 @@ def make_stagnation_callback():
                             gene["high"] += span * expansion
                 if hasattr(ga_instance, "initialize_population"):
                     ga_instance.initialize_population()
-                counter["count"] = 0
+                self.count = 0
                 print(
                     "\nPopulation restarted due to stagnant fitness (-999)."
                 )
         else:
-            counter["count"] = 0
+            self.count = 0
 
-    return _callback
+
+def make_stagnation_callback():
+    """Return a picklable stagnation callback object."""
+
+    return StagnationCallback()
