@@ -56,3 +56,31 @@ def test_stagnation_callback_picklable():
     """Regression test ensuring the callback can be pickled for multiprocessing."""
     cb = ga_utils.make_stagnation_callback()
     pickle.dumps(cb)
+
+
+def test_callback_compatible_with_pygad():
+    """The returned callback should be directly usable with ``pygad.GA``.
+
+    A regression test for the issue where ``StagnationCallback`` instances were
+    passed to ``on_generation`` causing ``AttributeError`` due to missing
+    ``__code__``. ``make_stagnation_callback`` now returns a bound method which
+    ``pygad`` accepts.
+    """
+
+    import pygad
+
+    cb = ga_utils.make_stagnation_callback()
+
+    ga = pygad.GA(
+        num_generations=1,
+        num_parents_mating=1,
+        sol_per_pop=2,
+        num_genes=1,
+        gene_space=[{"low": 0, "high": 1}],
+        gene_type=int,
+        fitness_func=lambda ga, sol, idx: 0,
+        on_generation=cb,
+    )
+
+    ga.run()
+    assert ga.generations_completed == 1

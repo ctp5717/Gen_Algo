@@ -51,6 +51,17 @@ class StagnationCallback:
 
 
 def make_stagnation_callback():
-    """Return a picklable stagnation callback object."""
+    """Return a picklable stagnation callback function.
 
-    return StagnationCallback()
+    ``pygad.GA`` expects lifecycle callbacks like ``on_generation`` to either be
+    a plain function or a bound method. Previously this helper returned an
+    instance of :class:`StagnationCallback`. While the instance is callable, it
+    does not expose a ``__code__`` attribute which ``pygad`` requires during
+    initialization, leading to an ``AttributeError``.  By returning the bound
+    ``__call__`` method instead, the callback satisfies ``pygad``'s interface
+    (it is recognised as a method with the correct signature) while still
+    maintaining internal state and remaining picklable.
+    """
+
+    # Return the bound ``__call__`` method so ``pygad`` treats it as a method.
+    return StagnationCallback().__call__
