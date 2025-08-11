@@ -152,6 +152,49 @@ def run_portfolio_backtest(
         else:
             agg_stats["Max Consecutive Losses"] = 0
 
+        # Ensure per-asset Volatility
+        if hasattr(portfolio, "returns"):
+            try:
+                vols = [
+                    _sanitize(portfolio.returns(column=col).std())
+                    for col in close_prices.columns
+                ]
+                per_asset_stats.loc["Volatility"] = vols
+            except Exception:
+                per_asset_stats = per_asset_stats.drop("Volatility", errors="ignore")
+        else:
+            per_asset_stats = per_asset_stats.drop("Volatility", errors="ignore")
+
+        # Ensure per-asset Max Consecutive Losses
+        if hasattr(portfolio, "trades"):
+            try:
+                if 'trades_df' not in locals():
+                    trades_df = portfolio.trades.records_readable.copy()
+                if not trades_df.empty:
+                    losses_per_asset = []
+                    for col in close_prices.columns:
+                        col_trades = trades_df[trades_df["Column"] == col]
+                        losses = col_trades["PnL"] < 0
+                        max_consec = (
+                            losses.groupby((losses != losses.shift()).cumsum()).cumsum().max()
+                        )
+                        losses_per_asset.append(
+                            int(max_consec) if pd.notna(max_consec) else 0
+                        )
+                    per_asset_stats.loc["Max Consecutive Losses"] = losses_per_asset
+                else:
+                    per_asset_stats.loc["Max Consecutive Losses"] = [
+                        0 for _ in close_prices.columns
+                    ]
+            except Exception:
+                per_asset_stats = per_asset_stats.drop(
+                    "Max Consecutive Losses", errors="ignore"
+                )
+        else:
+            per_asset_stats = per_asset_stats.drop(
+                "Max Consecutive Losses", errors="ignore"
+            )
+
         if "Total Trades" in per_asset_stats.index:
             agg_stats["Total Trades"] = int(
                 np.nan_to_num(
