@@ -65,8 +65,19 @@ def test_run_champion_analysis_multigroup(monkeypatch):
     agg_series = pd.Series([1, 2, 3, 4, 5], index=data.index)
     agg_series.plot = lambda *a, **k: DummyFig()
 
-    agg_stats = pd.Series({'Total Return [%]': 0.0})
-    per_asset_stats = pd.DataFrame({'AAA': agg_stats, 'BBB': agg_stats})
+    agg_stats = pd.Series(
+        {'Total Return [%]': 0.0, 'Volatility': 0.0, 'Max Consecutive Losses': 0}
+    )
+    per_asset_stats = pd.DataFrame(
+        {
+            'AAA': pd.Series(
+                {'Total Return [%]': 0.0, 'Volatility': 0.1, 'Max Consecutive Losses': 1}
+            ),
+            'BBB': pd.Series(
+                {'Total Return [%]': 0.0, 'Volatility': 0.2, 'Max Consecutive Losses': 2}
+            ),
+        }
+    )
 
     monkeypatch.setattr(
         analysis.fitness,
@@ -77,3 +88,7 @@ def test_run_champion_analysis_multigroup(monkeypatch):
     monkeypatch.setattr(analysis, 'plt', types.SimpleNamespace(ion=lambda: None))
 
     analysis.run_champion_analysis([], {})
+    assert set(per_asset_stats.index) == {
+        'Total Return [%]', 'Volatility', 'Max Consecutive Losses'
+    }
+    assert not per_asset_stats.isna().any().any()
