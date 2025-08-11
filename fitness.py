@@ -111,15 +111,14 @@ def run_portfolio_backtest(
             per_asset_stats = (
                 stats_df if isinstance(stats_df, pd.DataFrame) else pd.DataFrame(stats_df)
             )
-        per_asset_stats = per_asset_stats.applymap(
-            lambda x: (
-                int(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
-                if isinstance(x, (int, np.integer))
-                else float(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
-                if isinstance(x, (float, np.floating))
-                else x
-            )
-        )
+        def _sanitize(x):
+            if isinstance(x, (int, np.integer)):
+                return int(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+            if isinstance(x, (float, np.floating)):
+                return float(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+            return x
+
+        per_asset_stats = per_asset_stats.map(_sanitize)
 
         try:
             agg_stats = portfolio.stats(silence_warnings=True)
