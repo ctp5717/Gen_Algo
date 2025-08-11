@@ -39,6 +39,24 @@ def _count_trades(entries: pd.DataFrame) -> int:
     return int(entries.sum())
 
 
+def _log_penalty_metrics(
+    metrics: dict[str, float | int | None],
+    total_trades: int,
+    reason: str,
+    drawdown_score: float | None,
+) -> None:
+    """Log each metric with a structured warning for easier debugging."""
+    for name, value in metrics.items():
+        logging.warning(
+            "fitness_penalty metric=%s value=%s total_trades=%s drawdown_score=%s reason=%s",
+            name,
+            value,
+            total_trades,
+            drawdown_score,
+            reason,
+        )
+
+
 def run_portfolio_backtest(
     ohlc_data: pd.DataFrame,
     entries: pd.DataFrame,
@@ -280,31 +298,46 @@ class FitnessEvaluator:
 
     def __call__(self, ga_instance, solution, sol_idx):
         try:
+            sortino = profit_factor = max_drawdown = volatility = drawdown_score = np.nan
+            total_trades = 0
+
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
 
-            if _count_trades(entries) < config.FITNESS_WEIGHTS['min_trades']:
+            total_trades = _count_trades(entries)
+            if total_trades < config.FITNESS_WEIGHTS["min_trades"]:
+                _log_penalty_metrics(
+                    {
+                        "sortino": np.nan,
+                        "profit_factor": np.nan,
+                        "max_drawdown": np.nan,
+                        "volatility": np.nan,
+                    },
+                    total_trades,
+                    "below_min_trades",
+                    np.nan,
+                )
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---
-            exit_rules = rules.get('exit_rules', {})
-            sl_rule = exit_rules.get('stop_loss', {})
-            tsl_rule = exit_rules.get('trailing_stop', {})
-            tp_rule = exit_rules.get('take_profit', {})
+            exit_rules = rules.get("exit_rules", {})
+            sl_rule = exit_rules.get("stop_loss", {})
+            tsl_rule = exit_rules.get("trailing_stop", {})
+            tp_rule = exit_rules.get("take_profit", {})
 
             sl_stop = (
-                sl_rule.get('params', {}).get('value')
-                if sl_rule.get('is_active', False)
+                sl_rule.get("params", {}).get("value")
+                if sl_rule.get("is_active", False)
                 else None
             )
             sl_trail = (
-                tsl_rule.get('params', {}).get('value')
-                if tsl_rule.get('is_active', False)
+                tsl_rule.get("params", {}).get("value")
+                if tsl_rule.get("is_active", False)
                 else None
             )
             tp_stop = (
-                tp_rule.get('params', {}).get('value')
-                if tp_rule.get('is_active', False)
+                tp_rule.get("params", {}).get("value")
+                if tp_rule.get("is_active", False)
                 else None
             )
 
@@ -335,13 +368,24 @@ class FitnessEvaluator:
                 max_drawdown = _metric_get(agg_stats, "Max Drawdown [%]", 100.0)
                 volatility = _metric_get(agg_stats, "Volatility", 0.0)
 
-            # Volatility of zero indicates no movement in returns; penalize heavily
+            drawdown_score = np.clip(1 - safe_div(max_drawdown, 100.0, 1.0), 0.0, 1.0)
+
             if volatility <= 0:
-                logging.warning("Returning -999 due to zero or negative volatility")
+                reason = "no_trades" if total_trades == 0 else "zero_or_negative_volatility"
+                _log_penalty_metrics(
+                    {
+                        "sortino": sortino,
+                        "profit_factor": profit_factor,
+                        "max_drawdown": max_drawdown,
+                        "volatility": volatility,
+                    },
+                    total_trades,
+                    reason,
+                    drawdown_score,
+                )
                 return -999.0
 
             profit_factor = min(profit_factor, 5.0)
-            drawdown_score = np.clip(1 - safe_div(max_drawdown, 100.0, 1.0), 0.0, 1.0)
 
             metrics = [sortino, profit_factor, max_drawdown, volatility, drawdown_score]
             if not all(np.isfinite(m) for m in metrics):
@@ -363,6 +407,17 @@ class FitnessEvaluator:
             return fitness_score
 
         except Exception as e:
+            _log_penalty_metrics(
+                {
+                    "sortino": sortino,
+                    "profit_factor": profit_factor,
+                    "max_drawdown": max_drawdown,
+                    "volatility": volatility,
+                },
+                total_trades,
+                "exception",
+                drawdown_score,
+            )
             logging.warning("Error in fitness evaluation: %s. Returning 0.0.", e)
             print(f"Error in fitness evaluation: {e}")
             return 0.0
