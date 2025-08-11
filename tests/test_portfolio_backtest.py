@@ -38,8 +38,26 @@ def _fake_from_signals(close, *args, **kwargs):
 
 def _make_ohlc(close_a, close_b):
     idx = close_a.index
-    data_a = pd.DataFrame({"Open": close_a, "High": close_a, "Low": close_a, "Close": close_a, "Volume": 1}, index=idx)
-    data_b = pd.DataFrame({"Open": close_b, "High": close_b, "Low": close_b, "Close": close_b, "Volume": 1}, index=idx)
+    data_a = pd.DataFrame(
+        {
+            "Open": close_a,
+            "High": close_a,
+            "Low": close_a,
+            "Close": close_a,
+            "Volume": 1,
+        },
+        index=idx,
+    )
+    data_b = pd.DataFrame(
+        {
+            "Open": close_b,
+            "High": close_b,
+            "Low": close_b,
+            "Close": close_b,
+            "Volume": 1,
+        },
+        index=idx,
+    )
     return pd.concat({"A": data_a, "B": data_b}, axis=1)
 
 
