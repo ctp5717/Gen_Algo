@@ -12,6 +12,7 @@ import data_loader
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
+import ga_utils
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -148,6 +149,7 @@ def run_walk_forward_validation(initial_champions=None):
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
+            on_generation=ga_utils.make_stagnation_callback(),
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
