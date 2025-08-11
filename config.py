@@ -74,7 +74,7 @@ PORTFOLIO_OPTIMIZATION_ENABLED = True
 # Define a basket of tickers when portfolio optimisation is enabled.  Leaving
 # this list empty will result in an error if ``PORTFOLIO_OPTIMIZATION_ENABLED``
 # is set to True.
-ASSET_BASKET: list[str] = ['ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'LINK-USD']  # e.g. ['BTC-USD', 'ETH-USD']
+ASSET_BASKET: list[str] = ['ETH-USD', 'SOL-USD', 'XRP-USD', 'AVAX-USD', 'DOGE-USD', 'LINK-USD', 'UNI-USD', 'TRX-USD']  # e.g. ['BTC-USD', 'ETH-USD']
 
 # Optional custom weights corresponding to ASSET_BASKET.  If ``None`` each
 # asset is equally weighted during portfolio backtests.  The weights will be
@@ -83,7 +83,7 @@ PORTFOLIO_WEIGHTS: list[float] | None = None  # e.g. [0.6, 0.4]
 
 # Asset to use for the express tuning phase.  When the basket is provided this
 # should typically be one of its members.
-TUNING_ASSET = CRYPTO_UNIVERSE["Bitcoin"]
+TUNING_ASSET = CRYPTO_UNIVERSE["Solana"]
 
 if PORTFOLIO_OPTIMIZATION_ENABLED and not ASSET_BASKET:
     raise ValueError("ASSET_BASKET cannot be empty when portfolio optimisation is enabled")
