@@ -178,6 +178,8 @@ def test_run_portfolio_backtest_aggregates_equity_and_trades(monkeypatch):
     assert agg_stats['Total Trades'] == 2 and isinstance(
         agg_stats['Total Trades'], (int, np.integer)
     )
+    assert per_asset_stats.loc['Win Rate [%]'].tolist() == [0.0, 0.0]
+    assert all(isinstance(v, float) for v in per_asset_stats.loc['Win Rate [%]'])
     assert not per_asset_stats.isna().any().any()
     assert not agg_stats.isna().any()
 
