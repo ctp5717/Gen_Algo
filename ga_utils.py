@@ -4,22 +4,15 @@ import config
 
 
 class StagnationCallback:
-    """Callable object used to restart the GA when fitness stagnates.
+    """Callable used by ``pygad`` to handle stagnant fitness values.
 
-    The object tracks consecutive generations where the best fitness equals
-    ``-999``. Once the number of stagnant generations reaches
-    ``config.GA_STAGNATION_THRESHOLD``, the policy specified by
-    ``config.GA_RESTART_POLICY`` is applied:
-
-    - ``"restart"``: the population is simply randomised.
-    - ``"expand"``: each gene's ``low`` and ``high`` bounds are widened by
-      ``config.GA_GENE_RANGE_EXPANSION`` (as a fraction of the current range)
-      before randomising the population.
-
-    The class is defined at module level so that instances are picklable. This
-    is important because ``pygad`` evaluates fitness functions in worker
-    processes and thus needs to pickle the GA instance, including any
-    callbacks.
+    Whenever the best fitness of a generation equals ``-999`` the callback
+    increments an internal counter.  After ``GA_STAGNATION_THRESHOLD``
+    consecutive stagnant generations the mutation strength of the running GA
+    instance is increased to encourage exploration.  If ``GA_RESTART_POLICY`` is
+    set to ``"expand"`` each gene's search range is widened before the mutation
+    escalation is applied.  This avoids calling internal ``pygad`` methods whose
+    signatures frequently change between releases.
     """
 
     def __init__(self):
@@ -31,7 +24,8 @@ class StagnationCallback:
         )[1]
         if best_fitness == -999:
             self.count += 1
-            if self.count >= getattr(config, "GA_STAGNATION_THRESHOLD", 0):
+            threshold = getattr(config, "GA_STAGNATION_THRESHOLD", 0)
+            if self.count >= threshold:
                 policy = getattr(config, "GA_RESTART_POLICY", "restart").lower()
                 if policy == "expand":
                     expansion = getattr(config, "GA_GENE_RANGE_EXPANSION", 0.5)
@@ -40,11 +34,16 @@ class StagnationCallback:
                             span = gene["high"] - gene["low"]
                             gene["low"] -= span * expansion
                             gene["high"] += span * expansion
-                if hasattr(ga_instance, "initialize_population"):
-                    ga_instance.initialize_population()
+
+                factor = getattr(config, "GA_MUTATION_ESCALATION_FACTOR", 2.0)
+                current = getattr(ga_instance, "mutation_num_genes", 1)
+                ga_instance.mutation_num_genes = min(
+                    ga_instance.num_genes,
+                    max(1, int(current * factor)),
+                )
                 self.count = 0
                 print(
-                    "\nPopulation restarted due to stagnant fitness (-999)."
+                    "\nMutation strength increased due to stagnant fitness (-999)."
                 )
         else:
             self.count = 0

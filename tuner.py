@@ -3,6 +3,7 @@ import numpy as np
 import pygad
 import vectorbt as vbt
 import pandas as pd
+import logging
 
 import config
 import data_loader
@@ -89,7 +90,9 @@ def find_best_hyperparameters(gene_space, gene_map, gene_types):
     results = []
 
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
-        print(f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}")
+        print(
+            f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}"
+        )
         on_gen = ga_utils.make_stagnation_callback()
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
@@ -103,16 +106,23 @@ def find_best_hyperparameters(gene_space, gene_map, gene_types):
             parallel_processing=["process", num_cores],
             on_generation=on_gen,
         )
-        ga.run()
-        best_solution, _, _ = ga.best_solution()
-        score = _evaluate_on_validation(best_solution, gene_map)
-        results.append({"params": params, "score": score})
-        print(f"Validation score: {score}")
+        try:
+            ga.run()
+            best_solution, _, _ = ga.best_solution()
+            score = _evaluate_on_validation(best_solution, gene_map)
+            results.append({"params": params, "score": score})
+            print(f"Validation score: {score}")
+        except Exception as e:
+            logging.warning("Hyperparameter tuning failed for %s: %s", params, e)
+            continue
 
     print("\n-- Tuning Summary --")
     for r in results:
         print(f"{r['params']} => {r['score']}")
 
     best = max(results, key=lambda x: x["score"]) if results else {"params": None}
+    if best["params"] is None:
+        print("Tuning failed for all configs; using default hyperparameters.")
+        return config.HYPERPARAMETER_SEARCH_SPACE[0]
     print(f"Best hyperparameters found: {best['params']}")
     return best["params"]

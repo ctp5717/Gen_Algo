@@ -115,7 +115,7 @@ def test_run_portfolio_backtest_weights(monkeypatch):
         fake_from_signals,
     )
 
-    _, agg_pf, agg_stats, per_asset = fitness.run_portfolio_backtest(ohlc, entries)
+    _, agg_equity, agg_stats, per_asset = fitness.run_portfolio_backtest(ohlc, entries)
     assert 'weights' not in captured
     assert isinstance(agg_stats, pd.Series)
     assert list(per_asset.columns) == ['A', 'B']
@@ -323,3 +323,29 @@ def test_fitness_standard_scenario(monkeypatch):
     score = evaluator(None, [], 0)
     expected = 1.0 + 2.0 + (1 - 10 / 100)
     assert score == pytest.approx(expected)
+
+
+def test_fitness_evaluator_passes_config_weights(monkeypatch):
+    ohlc = pd.DataFrame(
+        {('A', 'Close'): [1], ('B', 'Close'): [1]}, index=pd.date_range('2020', periods=1)
+    )
+    ohlc.columns = pd.MultiIndex.from_tuples(ohlc.columns)
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.DataFrame([[True, True]], index=ohlc.index, columns=['A', 'B']),
+    )
+    captured = {}
+
+    def fake_run_bt(*a, **k):
+        captured['weights'] = k.get('weights')
+        stats = pd.Series({'Total Trades': 1, 'Volatility': 1.0})
+        return None, None, stats, pd.DataFrame({'A': [1], 'B': [1]}, index=['Total Trades'])
+
+    monkeypatch.setattr(fitness, 'run_portfolio_backtest', fake_run_bt)
+    monkeypatch.setattr(fitness.config, 'FITNESS_WEIGHTS', {'min_trades': 0}, raising=False)
+    monkeypatch.setattr(fitness.config, 'PORTFOLIO_WEIGHTS', [0.6, 0.4], raising=False)
+
+    evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
+    evaluator(None, [], 0)
+    assert captured['weights'] == [0.6, 0.4]
