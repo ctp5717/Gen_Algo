@@ -13,6 +13,21 @@ import config
 import logging
 
 
+def nan_to_num(x, default: float = 0.0):
+    """Sanitize numeric values by replacing NaN/inf with a default."""
+    return np.nan_to_num(x, nan=default, posinf=default, neginf=default)
+
+
+def safe_div(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """Safely divide two numbers, returning ``default`` on error or zero denom."""
+    try:
+        if denominator == 0 or (isinstance(denominator, float) and np.isnan(denominator)):
+            return default
+        return numerator / denominator
+    except Exception:
+        return default
+
+
 def _count_trades(entries: pd.DataFrame) -> int:
     """Return the total number of entry signals.
 
@@ -83,7 +98,8 @@ def run_portfolio_backtest(
             weights_arr = np.asarray(weights, dtype=float)
             if weights_arr.size != close_prices.shape[1]:
                 raise ValueError("weights length must match number of assets")
-            weights_arr = weights_arr / weights_arr.sum()
+            total_w = weights_arr.sum()
+            weights_arr = np.array([safe_div(w, total_w) for w in weights_arr])
 
     portfolio = vbt.Portfolio.from_signals(
         close=close_prices,
@@ -114,9 +130,9 @@ def run_portfolio_backtest(
             )
         def _sanitize(x):
             if isinstance(x, (int, np.integer)):
-                return int(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+                return int(nan_to_num(x))
             if isinstance(x, (float, np.floating)):
-                return float(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+                return float(nan_to_num(x))
             return x
 
         per_asset_stats = per_asset_stats.map(_sanitize)
@@ -133,7 +149,7 @@ def run_portfolio_backtest(
 
         if hasattr(portfolio, "returns"):
             weighted_returns = (portfolio.returns() * weights_arr).sum(axis=1)
-            agg_stats["Volatility"] = float(weighted_returns.std())
+            agg_stats["Volatility"] = float(nan_to_num(weighted_returns.std()))
         else:
             agg_stats["Volatility"] = np.nan
 
@@ -197,27 +213,21 @@ def run_portfolio_backtest(
 
         if "Total Trades" in per_asset_stats.index:
             agg_stats["Total Trades"] = int(
-                np.nan_to_num(
-                    per_asset_stats.loc["Total Trades"], nan=0.0, posinf=0.0, neginf=0.0
-                ).sum()
+                nan_to_num(per_asset_stats.loc["Total Trades"]).sum()
             )
 
         for key, val in agg_stats.items():
             if isinstance(val, (int, np.integer)):
                 agg_stats[key] = int(val)
             elif isinstance(val, (float, np.floating)):
-                agg_stats[key] = float(
-                    np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
-                )
+                agg_stats[key] = float(nan_to_num(val))
     else:
         per_asset_stats = portfolio.stats()
         per_asset_stats = per_asset_stats.apply(
             lambda x: (
-                int(np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0))
+                int(nan_to_num(x))
                 if isinstance(x, (int, np.integer))
-                else float(
-                    np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-                )
+                else float(nan_to_num(x))
                 if isinstance(x, (float, np.floating))
                 else x
             )
@@ -230,9 +240,7 @@ def run_portfolio_backtest(
             if isinstance(val, (int, np.integer)):
                 agg_stats[key] = int(val)
             elif isinstance(val, (float, np.floating)):
-                agg_stats[key] = float(
-                    np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
-                )
+                agg_stats[key] = float(nan_to_num(val))
 
     return portfolio, agg_portfolio, agg_stats, per_asset_stats
 
@@ -309,52 +317,52 @@ class FitnessEvaluator:
                 weights=getattr(config, "PORTFOLIO_WEIGHTS", None),
             )
 
-            if isinstance(agg_stats, pd.DataFrame):
-                # Should not happen but keep fallback
-                sortino = agg_stats.loc.get('Sortino Ratio', [np.nan])[0]
-                profit_factor = agg_stats.loc.get('Profit Factor', [np.nan])[0]
-                max_drawdown = agg_stats.loc.get('Max Drawdown [%]', [np.nan])[0]
-                volatility = agg_stats.loc.get('Volatility', [np.nan])[0]
-            else:
-                sortino = agg_stats.get('Sortino Ratio', np.nan)
-                profit_factor = agg_stats.get('Profit Factor', np.nan)
-                max_drawdown = agg_stats.get('Max Drawdown [%]', np.nan)
-                volatility = agg_stats.get('Volatility', np.nan)
+            def _metric_get(stats, key: str, default: float):
+                if isinstance(stats, pd.DataFrame):
+                    return float(nan_to_num(stats.loc.get(key, [default])[0], default))
+                return float(nan_to_num(stats.get(key, default), default))
 
-            if np.isinf(sortino):
+            total_trades = int(_metric_get(agg_stats, "Total Trades", 1))
+
+            if total_trades == 0:
+                profit_factor = 0.99
                 sortino = 0.0
-            if np.isinf(profit_factor) or profit_factor > 5:
-                profit_factor = 5.0
-            if np.isinf(max_drawdown):
                 max_drawdown = 100.0
+                volatility = 0.0
+            else:
+                sortino = _metric_get(agg_stats, "Sortino Ratio", 0.0)
+                profit_factor = _metric_get(agg_stats, "Profit Factor", 0.0)
+                max_drawdown = _metric_get(agg_stats, "Max Drawdown [%]", 100.0)
+                volatility = _metric_get(agg_stats, "Volatility", 0.0)
 
-            metrics = [sortino, profit_factor, max_drawdown, volatility]
-            if any(not np.isfinite(m) for m in metrics):
-                logging.warning(
-                    "Returning -999 due to non-finite metric(s): %s", metrics
-                )
+            # Volatility of zero indicates no movement in returns; penalize heavily
+            if volatility <= 0:
+                logging.warning("Returning -999 due to zero or negative volatility")
                 return -999.0
 
-            if volatility == 0:
-                logging.warning("Returning -999 due to zero volatility")
-                return -999.0
+            profit_factor = min(profit_factor, 5.0)
+            drawdown_score = np.clip(1 - safe_div(max_drawdown, 100.0, 1.0), 0.0, 1.0)
 
-            drawdown_score = 1 - (max_drawdown / 100.0)
+            metrics = [sortino, profit_factor, max_drawdown, volatility, drawdown_score]
+            if not all(np.isfinite(m) for m in metrics):
+                logging.warning("Non-finite metric encountered: %s", metrics)
+                metrics = [float(nan_to_num(m)) for m in metrics]
+                sortino, profit_factor, max_drawdown, volatility, drawdown_score = metrics
+
             weights = config.FITNESS_WEIGHTS
-
             fitness_score = (
-                (sortino * weights['sortino_ratio']) +
-                (profit_factor * weights['profit_factor']) +
-                (drawdown_score * weights['max_drawdown'])
+                sortino * weights["sortino_ratio"]
+                + profit_factor * weights["profit_factor"]
+                + drawdown_score * weights["max_drawdown"]
             )
 
             if not np.isfinite(fitness_score):
-                logging.warning("Returning -999 due to non-finite fitness score")
-                return -999.0
+                logging.warning("Non-finite fitness score encountered: %s", fitness_score)
+                fitness_score = float(nan_to_num(fitness_score))
 
             return fitness_score
 
         except Exception as e:
-            logging.warning("Error in fitness evaluation: %s. Returning -999.", e)
+            logging.warning("Error in fitness evaluation: %s. Returning 0.0.", e)
             print(f"Error in fitness evaluation: {e}")
-            return -999.0
+            return 0.0
