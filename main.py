@@ -112,19 +112,30 @@ def main():
     )
     
     ga_instance.run()
-    
+
     # Print a newline character to move off the progress line.
     print("\n" + "-" * 35)
     print("Optimization finished.")
 
     best_solution, best_solution_fitness, _ = ga_instance.best_solution()
     print(f"\nBest Solution's Fitness (Training Period): {best_solution_fitness:.4f}")
-    print("Optimal Parameters Found:")
-    for i, gene_value in enumerate(best_solution):
-        gene_name = gene_map[i]['name']
-        gene_type = gene_map[i]['type']
-        if gene_type == int: print(f"  - {gene_name}: {int(gene_value)}")
-        else: print(f"  - {gene_name}: {gene_value:.4f}")
+    if best_solution_fitness == -999:
+        print("Warning: Best solution returned invalid fitness (-999). Skipping champion analysis.")
+    else:
+        print("Optimal Parameters Found:")
+        for i, gene_value in enumerate(best_solution):
+            gene_name = gene_map[i]['name']
+            gene_type = gene_map[i]['type']
+            if gene_type == int:
+                print(f"  - {gene_name}: {int(gene_value)}")
+            else:
+                print(f"  - {gene_name}: {gene_value:.4f}")
+        try:
+            analysis.run_champion_analysis(best_solution, gene_map)
+        except Exception as e:
+            print(f"\nAn error occurred during the analysis phase: {e}")
+            traceback.print_exc()
+
     print("\nDisplaying GA fitness evolution plot...")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", "No artists with labels", UserWarning)
@@ -140,12 +151,6 @@ def main():
                 leg = ax.get_legend()
                 if leg:
                     leg.remove()
-
-    try:
-        analysis.run_champion_analysis(best_solution, gene_map)
-    except Exception as e:
-        print(f"\nAn error occurred during the analysis phase: {e}")
-        traceback.print_exc()
 
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     wf_enabled = wf_settings.get(
