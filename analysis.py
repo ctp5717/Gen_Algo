@@ -15,7 +15,8 @@ import strategy_engine as engine
 import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
 
-def run_champion_analysis(best_solution: list, gene_map: dict):
+
+def run_champion_analysis(best_solution: list, gene_map: dict, verbose: bool = False):
     """
     Runs a full backtest and analysis on the champion solution using validation data.
     """
@@ -121,6 +122,8 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             weight_map = {col: w for col, w in zip(cols, weights_arr)}
             trades_df = trades_df.copy()
             trades_df["weighted_pnl"] = trades_df["PnL"] * trades_df["Column"].map(weight_map)
+            if verbose:
+                print(trades_df.columns.tolist())
             exit_candidates = ["Exit", "Exit Time", "Exit Price", "exit_time"]
             exit_col = None
             for candidate in exit_candidates:
