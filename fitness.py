@@ -10,6 +10,7 @@ import numpy as np
 import vectorbt as vbt
 import strategy_engine as engine
 import config
+import logging
 
 
 def _count_trades(entries: pd.DataFrame) -> int:
@@ -285,7 +286,14 @@ class FitnessEvaluator:
                 max_drawdown = 100.0
 
             metrics = [sortino, profit_factor, max_drawdown, volatility]
-            if any(not np.isfinite(m) for m in metrics) or volatility == 0:
+            if any(not np.isfinite(m) for m in metrics):
+                logging.warning(
+                    "Returning -999 due to non-finite metric(s): %s", metrics
+                )
+                return -999.0
+
+            if volatility == 0:
+                logging.warning("Returning -999 due to zero volatility")
                 return -999.0
 
             drawdown_score = 1 - (max_drawdown / 100.0)
@@ -297,8 +305,13 @@ class FitnessEvaluator:
                 (drawdown_score * weights['max_drawdown'])
             )
 
-            return fitness_score if np.isfinite(fitness_score) else -999.0
+            if not np.isfinite(fitness_score):
+                logging.warning("Returning -999 due to non-finite fitness score")
+                return -999.0
+
+            return fitness_score
 
         except Exception as e:
+            logging.warning("Error in fitness evaluation: %s. Returning -999.", e)
             print(f"Error in fitness evaluation: {e}")
             return -999.0
