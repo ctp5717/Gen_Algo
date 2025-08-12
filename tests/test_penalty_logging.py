@@ -45,7 +45,10 @@ def test_penalty_logging_multiprocess(monkeypatch):
     queue: multiprocessing.Queue = multiprocessing.Queue()
     p1 = multiprocessing.Process(target=_worker, args=(queue,))
     p2 = multiprocessing.Process(target=_worker, args=(queue,))
-    p1.start(); p2.start(); p1.join(); p2.join()
+    p1.start()
+    p2.start()
+    p1.join()
+    p2.join()
     records = []
     while not queue.empty():
         records.append(queue.get().getMessage())
