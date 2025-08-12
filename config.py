@@ -39,9 +39,9 @@ TIMEFRAME = "15m"
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # Portfolio optimization switches (NEW)
-PORTFOLIO_OPTIMIZATION_ENABLED = False  # set True to enable portfolio mode
-ASSET_BASKET = ["BTC-USD", "ETH-USD", "SOL-USD"]  # used when portfolio mode is on
-TUNING_ASSET = "BTC-USD"  # fast tuning runs on this single asset first
+PORTFOLIO_OPTIMIZATION_ENABLED = True  # set True to enable portfolio mode
+ASSET_BASKET = ["ETH-USD", "SOL-USD", "XRP-USD", "AVAX-USD", "DOGE-USD", "LINK-USD", "UNI-USD", "TRX-USD"]  # used when portfolio mode is on
+TUNING_ASSET = "SOL-USD"  # fast tuning runs on this single asset first
 
 # --- DYNAMIC DATE & RISK CALCULATION ---
 MAX_HOLD_DAYS = 14
