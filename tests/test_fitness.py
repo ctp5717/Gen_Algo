@@ -100,6 +100,9 @@ def test_run_portfolio_backtest_weights(monkeypatch):
                 index=ohlc.index,
             )
 
+        def total(self):
+            return self
+
     orig_from_signals = fitness.vbt.Portfolio.from_signals
 
     def fake_from_signals(*a, **k):
@@ -166,6 +169,9 @@ def test_run_portfolio_backtest_aggregates_equity_and_trades(monkeypatch):
                     return pd.DataFrame({'PnL': [10, -5], 'Column': ['A', 'B']})
 
             return T()
+
+        def total(self):
+            return self
 
     monkeypatch.setattr(
         fitness.vbt.Portfolio, 'from_signals', lambda *a, **k: DummyPortfolio()

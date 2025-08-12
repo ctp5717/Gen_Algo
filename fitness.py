@@ -19,6 +19,7 @@ import vectorbt as vbt
 import strategy_engine as engine
 import config
 import logging
+import multiprocessing
 
 
 def nan_to_num(x, default: float = 0.0):
@@ -47,7 +48,24 @@ def _count_trades(entries: pd.DataFrame) -> int:
     return int(entries.sum())
 
 
-_penalty_counts: dict[tuple[str, str], int] = {}
+_mp_manager = None
+_penalty_counts: dict | None = None
+_penalty_lock = None
+
+
+def _ensure_mp_mgr() -> None:
+    """Initialise multiprocessing shared state in the parent process only."""
+    global _mp_manager, _penalty_counts, _penalty_lock
+    if _penalty_counts is not None:
+        return
+    if multiprocessing.parent_process() is None:
+        _mp_manager = multiprocessing.Manager()
+        _penalty_counts = _mp_manager.dict()  # type: ignore[assignment]
+        _penalty_lock = _mp_manager.Lock()
+    else:
+        # Fallback for worker processes: no cross-process de-duplication
+        _penalty_counts = {}
+        _penalty_lock = multiprocessing.Lock()
 
 
 def _log_penalty_metrics(
@@ -57,11 +75,14 @@ def _log_penalty_metrics(
     drawdown_score: float | None,
 ) -> None:
     """Log penalty metrics, de-duplicating repeated messages."""
+    _ensure_mp_mgr()
     verbose = getattr(config, "VERBOSE_FITNESS_LOGS", False)
     for name, value in metrics.items():
         key = (name, reason)
-        _penalty_counts[key] = _penalty_counts.get(key, 0) + 1
-        if verbose or _penalty_counts[key] == 1:
+        with _penalty_lock:  # type: ignore[union-attr]
+            _penalty_counts[key] = _penalty_counts.get(key, 0) + 1  # type: ignore[index]
+            count = _penalty_counts[key]  # type: ignore[index]
+        if verbose or count == 1:
             logging.warning(
                 "fitness_penalty metric=%s value=%s total_trades=%s drawdown_score=%s reason=%s",
                 name,
@@ -73,9 +94,23 @@ def _log_penalty_metrics(
 
 
 def _flush_penalty_summary() -> None:
-    if getattr(config, "VERBOSE_FITNESS_LOGS", False):
+    global _mp_manager, _penalty_counts
+    if _penalty_counts is None:
         return
-    for (metric, reason), count in _penalty_counts.items():
+    if getattr(config, "VERBOSE_FITNESS_LOGS", False):
+        try:
+            if _mp_manager is not None:
+                _mp_manager.shutdown()
+        except Exception:
+            pass
+        _penalty_counts = None
+        _mp_manager = None
+        return
+    try:
+        items = list(_penalty_counts.items())
+    except Exception:
+        items = []
+    for (metric, reason), count in items:
         if count > 1:
             logging.warning(
                 "suppressed %s duplicate fitness_penalty warnings metric=%s reason=%s",
@@ -83,6 +118,13 @@ def _flush_penalty_summary() -> None:
                 metric,
                 reason,
             )
+    try:
+        if _mp_manager is not None:
+            _mp_manager.shutdown()
+    except Exception:
+        pass
+    _penalty_counts = None
+    _mp_manager = None
 
 
 atexit.register(_flush_penalty_summary)
@@ -150,7 +192,11 @@ def run_portfolio_backtest(
             if np.any(weights_arr < 0):
                 raise ValueError("weights must be non-negative")
             total_w = weights_arr.sum()
-            weights_arr = np.array([safe_div(w, total_w) for w in weights_arr])
+            if total_w <= 0:
+                raise ValueError("weights must sum to a positive value")
+            weights_arr = weights_arr / total_w
+
+    freq = _timeframe_to_freq(config.TIMEFRAME)
 
     portfolio = vbt.Portfolio.from_signals(
         close=close_prices,
@@ -161,10 +207,11 @@ def run_portfolio_backtest(
         sl_trail=sl_trail,
         fees=0.001,
         group_by=group_by,
-        freq=_timeframe_to_freq(config.TIMEFRAME),
+        freq=freq,
     )
 
-    agg_equity = portfolio.value()
+    agg_equity = None
+
     if isinstance(close_prices, pd.DataFrame):
         if weights_arr is None:
             weights_arr = np.full(close_prices.shape[1], 1 / close_prices.shape[1])
@@ -190,25 +237,41 @@ def run_portfolio_backtest(
         if "Volatility [%]" in per_asset_stats.index and "Volatility" not in per_asset_stats.index:
             per_asset_stats.rename(index={"Volatility [%]": "Volatility"}, inplace=True)
 
-        try:
-            agg_stats = portfolio.stats(silence_warnings=True)
-        except TypeError:
-            stats_res = portfolio.stats()
-            agg_stats = stats_res if isinstance(stats_res, pd.Series) else stats_res.iloc[:, 0]
-        if isinstance(agg_stats, pd.Series) and "Volatility [%]" in agg_stats:
-            if "Volatility" not in agg_stats:
-                agg_stats["Volatility"] = agg_stats["Volatility [%]"]
-            agg_stats = agg_stats.drop(labels=["Volatility [%]"], errors="ignore")
-        agg_stats = agg_stats.astype(object)
+        agg_stats_dict: dict[str, object] = {}
+        if "Total Trades" in per_asset_stats.index:
+            agg_stats_dict["Total Trades"] = int(
+                nan_to_num(per_asset_stats.loc["Total Trades"]).sum()
+            )
+        else:
+            agg_stats_dict["Total Trades"] = 0
 
         weighted_value = (portfolio.value() * weights_arr).sum(axis=1)
         agg_equity = weighted_value
 
         if hasattr(portfolio, "returns"):
             weighted_returns = (portfolio.returns() * weights_arr).sum(axis=1)
-            agg_stats["Volatility"] = float(nan_to_num(weighted_returns.std()))
+            ann = _annualization_factor(freq)
+            agg_stats_dict["Volatility"] = float(
+                nan_to_num(weighted_returns.std() * np.sqrt(ann))
+            )
+            rets = weighted_returns
+            agg_stats_dict["Sharpe Ratio"] = float(
+                nan_to_num(rets.mean() * np.sqrt(ann) / rets.std())
+            )
+            downside = rets[rets < 0]
+            agg_stats_dict["Sortino Ratio"] = float(
+                nan_to_num(rets.mean() * np.sqrt(ann) / downside.std())
+            )
         else:
-            agg_stats["Volatility"] = np.nan
+            weighted_returns = pd.Series([0])
+            agg_stats_dict["Volatility"] = np.nan
+
+        agg_stats_dict["Total Return [%]"] = float(
+            (agg_equity.iloc[-1] / agg_equity.iloc[0] - 1) * 100.0
+        )
+        roll_max = agg_equity.cummax()
+        drawdown = (agg_equity / roll_max) - 1.0
+        agg_stats_dict["Max Drawdown [%]"] = float(nan_to_num(drawdown.min() * 100.0))
 
         if hasattr(portfolio, "trades"):
             trades_df = portfolio.trades.records_readable.copy()
@@ -219,11 +282,26 @@ def run_portfolio_backtest(
                 max_consec = (
                     losses.groupby((losses != losses.shift()).cumsum()).cumsum().max()
                 )
-                agg_stats["Max Consecutive Losses"] = int(max_consec) if pd.notna(max_consec) else 0
+                agg_stats_dict["Max Consecutive Losses"] = int(max_consec) if pd.notna(max_consec) else 0
+                wins = trades_df["weighted_pnl"] > 0
+                agg_stats_dict["Win Rate [%]"] = float(
+                    safe_div(wins.sum(), len(trades_df), 0.0) * 100.0
+                )
+                pos_pnl = trades_df.loc[wins, "weighted_pnl"].sum()
+                neg_pnl = trades_df.loc[~wins, "weighted_pnl"].sum()
+                agg_stats_dict["Profit Factor"] = float(
+                    nan_to_num(safe_div(pos_pnl, abs(neg_pnl), 0.0))
+                )
             else:
-                agg_stats["Max Consecutive Losses"] = 0
+                agg_stats_dict["Max Consecutive Losses"] = 0
+                agg_stats_dict["Win Rate [%]"] = 0.0
+                agg_stats_dict["Profit Factor"] = 0.0
         else:
-            agg_stats["Max Consecutive Losses"] = 0
+            agg_stats_dict["Max Consecutive Losses"] = 0
+            agg_stats_dict["Win Rate [%]"] = 0.0
+            agg_stats_dict["Profit Factor"] = 0.0
+
+        agg_stats = pd.Series(agg_stats_dict, dtype=object)
 
         # Ensure per-asset Volatility
         if hasattr(portfolio, "returns"):
@@ -268,17 +346,14 @@ def run_portfolio_backtest(
                 "Max Consecutive Losses", errors="ignore"
             )
 
-        if "Total Trades" in per_asset_stats.index:
-            agg_stats["Total Trades"] = int(
-                nan_to_num(per_asset_stats.loc["Total Trades"]).sum()
-            )
-
         for key, val in agg_stats.items():
             if isinstance(val, (int, np.integer)):
                 agg_stats[key] = int(val)
             elif isinstance(val, (float, np.floating)):
                 agg_stats[key] = float(nan_to_num(val))
+        agg_stats["Total Trades"] = int(agg_stats.get("Total Trades", 0))
     else:
+        agg_equity = portfolio.value()
         per_asset_stats = portfolio.stats()
         if "Volatility [%]" in per_asset_stats.index and "Volatility" not in per_asset_stats.index:
             per_asset_stats.rename(index={"Volatility [%]": "Volatility"}, inplace=True)
@@ -324,7 +399,7 @@ _volatility_warning_emitted = False
 def _timeframe_to_freq(tf: str):
     tf = str(tf).strip().lower()
     if tf.endswith("m"):
-        return f"{tf[:-1]}T"
+        return f"{tf[:-1]}min"
     if tf.endswith("h"):
         return f"{tf[:-1]}H"
     if tf in {"1d", "1day"}:
@@ -337,6 +412,25 @@ def _timeframe_to_freq(tf: str):
         return pd.to_timedelta(tf)
     except Exception as e:
         raise ValueError(f"Unrecognised timeframe '{tf}'") from e
+
+
+def _annualization_factor(freq) -> float:
+    """Return the number of periods per year for a given frequency."""
+    if isinstance(freq, pd.Timedelta):
+        minutes = freq / pd.Timedelta("1min")
+        return safe_div(365 * 24 * 60, minutes, 252)
+    f = str(freq).lower()
+    if f.endswith("min"):
+        return safe_div(365 * 24 * 60, float(f[:-3]), 252)
+    if f.endswith("h"):
+        return safe_div(365 * 24, float(f[:-1]), 252)
+    if f == "1d":
+        return 252
+    if f == "1w":
+        return 52
+    if f == "1m":
+        return 12
+    return 252
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
@@ -499,7 +593,6 @@ class FitnessEvaluator:
             if not np.isfinite(fitness_score):
                 logging.warning("Non-finite fitness score encountered: %s", fitness_score)
                 fitness_score = float(nan_to_num(fitness_score))
-
             return fitness_score
 
         except Exception as e:
@@ -517,3 +610,16 @@ class FitnessEvaluator:
             logging.warning("Error in fitness evaluation: %s. Returning 0.0.", e)
             print(f"Error in fitness evaluation: {e}")
             return 0.0
+
+
+def reset_fitness_run() -> None:
+    """Reset module-level run state so tests or subsequent runs start clean."""
+    global _volatility_warning_emitted
+    global _penalty_counts
+    _volatility_warning_emitted = False
+    try:
+        if _penalty_counts is not None:
+            _penalty_counts.clear()
+    except Exception:
+        _penalty_counts = None
+    _ensure_mp_mgr()

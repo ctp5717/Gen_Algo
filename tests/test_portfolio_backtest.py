@@ -2,6 +2,8 @@ import sys
 import types
 from pathlib import Path
 import pandas as pd
+import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,6 +24,9 @@ class DummyPortfolio:
 
     def value(self):
         return self._close
+
+    def total(self):
+        return self
 
     def returns(self, column=None):
         data = self._close if column is None else self._close[column]
@@ -85,8 +90,85 @@ def test_volatility_non_zero(monkeypatch):
 
 
 def test_timeframe_to_freq():
-    assert fitness._timeframe_to_freq("15m") == "15T"
+    assert fitness._timeframe_to_freq("15m") == "15min"
     assert fitness._timeframe_to_freq("1h") == "1H"
     assert fitness._timeframe_to_freq("1d") == "1D"
     assert fitness._timeframe_to_freq("1wk") == "1W"
     assert fitness._timeframe_to_freq("1mo") == "1M"
+
+
+def test_timeframe_to_freq_no_deprecation():
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        freq = fitness._timeframe_to_freq("15m")
+        # Force pandas to parse the frequency to trigger any potential warning
+        pd.Timedelta(freq)
+
+    assert not any("deprecated" in str(warn.message).lower() for warn in w)
+
+
+def test_agg_stats_contains_standard_keys(monkeypatch):
+    ohlc = pd.DataFrame(
+        {
+            ("A", "Close"): [1, 2, 3],
+            ("B", "Close"): [4, 5, 4],
+        },
+        index=pd.date_range("2020-01-01", periods=3),
+    )
+    ohlc.columns = pd.MultiIndex.from_tuples(ohlc.columns)
+    entries = pd.DataFrame(
+        [[True, True], [False, True], [False, False]],
+        index=ohlc.index,
+        columns=["A", "B"],
+    )
+
+    class DummyPortfolio:
+        def stats(self, column=None, silence_warnings=None):
+            return pd.Series({"Total Trades": 1, "Win Rate [%]": np.nan})
+
+        def value(self):
+            return pd.DataFrame({"A": [100, 110, 105], "B": [200, 190, 195]}, index=ohlc.index)
+
+        def returns(self):
+            return pd.DataFrame(
+                {"A": [0.1, -0.0454545, 0.0], "B": [-0.05, 0.0263158, 0.0]},
+                index=ohlc.index,
+            )
+
+        @property
+        def trades(self):
+            class T:
+                @property
+                def records_readable(self):
+                    return pd.DataFrame({"PnL": [10, -5], "Column": ["A", "B"]})
+
+            return T()
+
+        def total(self):
+            return self
+
+    monkeypatch.setattr(fitness.vbt.Portfolio, "from_signals", lambda *a, **k: DummyPortfolio())
+    _, _, agg_stats, _ = fitness.run_portfolio_backtest(ohlc, entries, weights=[0.6, 0.4])
+
+    keys = [
+        "Total Return [%]",
+        "Max Drawdown [%]",
+        "Sharpe Ratio",
+        "Sortino Ratio",
+        "Volatility",
+        "Total Trades",
+        "Win Rate [%]",
+        "Profit Factor",
+    ]
+    for k in keys:
+        assert k in agg_stats.index
+
+
+def test_weights_zero_sum_raises(monkeypatch):
+    monkeypatch.setattr(fitness.vbt.Portfolio, "from_signals", _fake_from_signals)
+    dates = pd.date_range("2020", periods=2, freq="D")
+    ohlc = _make_ohlc(pd.Series([1, 2], dates), pd.Series([1, 2], dates))
+    entries = _make_entries(dates)
+    with pytest.raises(ValueError):
+        fitness.run_portfolio_backtest(ohlc, entries, weights=[0.0, 0.0])
