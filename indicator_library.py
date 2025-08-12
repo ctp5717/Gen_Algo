@@ -1,4 +1,12 @@
 import pandas as pd
+import numpy as np
+
+# pandas-ta expects ``numpy.NaN`` which was removed in newer versions of numpy.
+# Manually alias ``NaN`` to ``np.nan`` before importing pandas_ta so that
+# ``from numpy import NaN`` used inside pandas_ta succeeds.
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan
+
 import pandas_ta as ta  # type: ignore
 
 def calculate_ema(df: pd.DataFrame, period: int = 20) -> pd.Series:
