@@ -135,10 +135,10 @@ WALK_FORWARD_SETTINGS = {
 
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
-GA_POPULATION_SIZE = 100
-GA_NUM_GENERATIONS = 30
-GA_PARENTS_MATING = 30
-GA_MUTATION_NUM_GENES = 2
+GA_POPULATION_SIZE = 50
+GA_NUM_GENERATIONS = 20
+GA_PARENTS_MATING = 20
+GA_MUTATION_NUM_GENES = 1
 
 # For serious, overnight "Discovery" runs, comment out the block above
 # and uncomment the block below.
@@ -181,27 +181,36 @@ CHAMPION_SELECTION_SETTINGS = {
 # function which evaluates a single strategy across all assets while enforcing
 # a live-like cap on concurrent positions.
 ASSET_GROUP = [
-    ("Bitcoin", "BTC-USD"),
     ("Ethereum", "ETH-USD"),
     ("Solana", "SOL-USD"),
     ("Cardano", "ADA-USD"),
     ("XRP", "XRP-USD"),
     ("Dogecoin", "DOGE-USD"),
-    ("Litecoin", "LTC-USD"),
-    ("Chainlink", "LINK-USD"),
-    ("Polygon", "MATIC-USD"),
-    ("Polkadot", "DOT-USD"),
-    ("Avalanche", "AVAX-USD"),
-    ("TRON", "TRX-USD"),
-    ("Uniswap", "UNI-USD"),
-    ("Filecoin", "FIL-USD"),
-    ("Stellar", "XLM-USD"),
-    ("Near_Protocol", "NEAR-USD"),
-    ("Internet_Computer", "ICP-USD"),
-    ("Optimism", "OP-USD"),
-    ("The_Graph", "GRT-USD"),
-    ("Shiba_Inu", "SHIB-USD"),
 ]
+
+# Asset Template
+# ASSET_GROUP = [
+#    ("Bitcoin", "BTC-USD"),
+#    ("Ethereum", "ETH-USD"),
+#    ("Solana", "SOL-USD"),
+#    ("Cardano", "ADA-USD"),
+#    ("XRP", "XRP-USD"),
+#    ("Dogecoin", "DOGE-USD"),
+#    ("Litecoin", "LTC-USD"),
+#    ("Chainlink", "LINK-USD"),
+#    ("Polygon", "MATIC-USD"),
+#    ("Polkadot", "DOT-USD"),
+#    ("Avalanche", "AVAX-USD"),
+#    ("TRON", "TRX-USD"),
+#    ("Uniswap", "UNI-USD"),
+#    ("Filecoin", "FIL-USD"),
+#    ("Stellar", "XLM-USD"),
+#    ("Near_Protocol", "NEAR-USD"),
+#    ("Internet_Computer", "ICP-USD"),
+#    ("Optimism", "OP-USD"),
+#    ("The_Graph", "GRT-USD"),
+#    ("Shiba_Inu", "SHIB-USD"),
+#]
 
 SCANNER = {
     # Intended live cap on open positions. Override via --max-concurrent-trades
@@ -213,9 +222,9 @@ SCANNER = {
     # Optional scaling applied to scores to reduce micro-cap bias. One of:
     # None | 'atr' | 'dollar_volume'
     "score_scaling": None,
-    "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy
+    "monte_carlo_runs": 1,       # >1 enables Monte Carlo replay for random policy
     "seed": 0,                  # seed for random tie-breaks and sampling
-    "verbose": False,           # print diagnostics from the scanner
+    "verbose": True,           # print diagnostics from the scanner
 }
 
 # Trading costs
