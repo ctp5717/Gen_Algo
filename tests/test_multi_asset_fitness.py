@@ -29,6 +29,18 @@ def patch_engine(monkeypatch, pattern):
     monkeypatch.setattr('strategy_engine.process_strategy_rules', fake_process)
 
 
+def fake_eval_parallel(self, solution, seed, assets):
+    """Lightweight stand-in for `_evaluate_once` used in multiprocessing tests."""
+    return (
+        float(seed),
+        {},
+        pd.Series(dtype=float),
+        pd.Series(dtype=float),
+        {},
+        pd.Series(dtype=float),
+    )
+
+
 def test_asset_dispersion_penalty(monkeypatch):
     data = make_data()
     patch_engine(monkeypatch, [True, False, True, False, True])
@@ -114,6 +126,49 @@ def test_monte_carlo_median_with_random_tie_break(monkeypatch):
     config.SCANNER['tie_break_policy'] = orig_policy
     config.SCANNER['monte_carlo_runs'] = orig_runs
     config.SCANNER['seed'] = orig_seed
+
+
+def test_multiprocessing_backend(monkeypatch):
+    """Parallel backend should aggregate the same score as sequential runs."""
+    data = make_data()
+    monkeypatch.setattr(
+        MultiAssetFitnessEvaluator, '_evaluate_once', fake_eval_parallel, raising=False
+    )
+
+    class DummyPool:
+        def __init__(self, processes=None):
+            self.processes = processes
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def starmap(self, func, args):
+            return [func(*a) for a in args]
+
+    # Patch the Pool used inside the module to avoid spawning real processes
+    monkeypatch.setattr('multi_asset_fitness.mp.Pool', DummyPool)
+
+    orig_runs = config.SCANNER['monte_carlo_runs']
+    orig_parallel = config.PARALLEL.copy()
+
+    config.SCANNER['monte_carlo_runs'] = 4
+    config.PARALLEL['backend'] = 'multiprocessing'
+    config.PARALLEL['workers'] = 2
+
+    ga = DummyGA()
+    evaluator = MultiAssetFitnessEvaluator(data, {}, {})
+    parallel_score = evaluator(ga, [], 0)
+
+    config.PARALLEL['backend'] = None
+    sequential_score = evaluator(ga, [], 0)
+
+    assert parallel_score == sequential_score
+
+    config.SCANNER['monte_carlo_runs'] = orig_runs
+    config.PARALLEL.update(orig_parallel)
 
 
 def test_minibatch_uses_subset(monkeypatch):
