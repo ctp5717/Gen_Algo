@@ -78,9 +78,11 @@ def test_capacity_zero_rejects_all():
     assert diag["accepted"] == 0
     assert diag["total_candidates"] == 3
     assert diag["accepted"] + diag["rejected"] == diag["total_candidates"]
+    assert diag["avg_n_open"] == 0
+    assert diag["max_n_open"] == 0
     assert diag["per_asset"] == {
-        "A": {"accepted": 0, "rejected": 1},
-        "B": {"accepted": 0, "rejected": 2},
+        "A": {"candidates": 1, "accepted": 0, "rejected": 1},
+        "B": {"candidates": 2, "accepted": 0, "rejected": 2},
     }
 
 
@@ -100,5 +102,37 @@ def test_per_asset_tallies():
     assert diag["accepted"] == 1
     assert diag["rejected"] == 1
     assert diag["total_candidates"] == 2
-    assert diag["per_asset"]["A"] == {"accepted": 1, "rejected": 0}
-    assert diag["per_asset"]["B"] == {"accepted": 0, "rejected": 1}
+    assert diag["per_asset"]["A"] == {
+        "candidates": 1,
+        "accepted": 1,
+        "rejected": 0,
+    }
+    assert diag["per_asset"]["B"] == {
+        "candidates": 1,
+        "accepted": 0,
+        "rejected": 1,
+    }
+
+
+def test_collision_histogram():
+    entries = pd.concat(
+        {"A": _make_series([1, 0]), "B": _make_series([1, 0])}, axis=1
+    ).astype(bool)
+    exits = pd.concat(
+        {"A": _make_series([0, 1]), "B": _make_series([0, 1])}, axis=1
+    ).astype(bool)
+    _, _, diag = scanner_sim.gate_entries(
+        entries, exits, max_concurrent=1, collect_collision_histogram=True
+    )
+    assert diag["collisions_by_asset"] == {"A": 1, "B": 1}
+
+
+def test_plot_helper_runs():
+    entries = pd.concat(
+        {"A": _make_series([1]), "B": _make_series([0])}, axis=1
+    ).astype(bool)
+    exits = pd.concat(
+        {"A": _make_series([0]), "B": _make_series([0])}, axis=1
+    ).astype(bool)
+    _, _, diag = scanner_sim.gate_entries(entries, exits, max_concurrent=1)
+    scanner_sim.plot_admitted_trade_skew(diag)
