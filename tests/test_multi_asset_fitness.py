@@ -282,7 +282,12 @@ def test_shifted_entries_and_next_bar_returns(monkeypatch):
 
     # Returns should start one bar after execution
     time_exit = used_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-    pf = orig_from_signals(close=data['a']['Close'], entries=used_entries, exits=time_exit, freq='D')
+    pf = orig_from_signals(
+        close=data['a']['Close'],
+        entries=used_entries,
+        exits=time_exit,
+        freq='D',
+    )
     non_zero = pf.returns().loc[pf.returns() != 0]
     assert non_zero.index[0] == idx[2]
 
