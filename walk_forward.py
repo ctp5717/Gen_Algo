@@ -16,7 +16,7 @@ from gene_parser import parse_genes_from_config
 import fitness
 from multi_asset_fitness import MultiAssetFitnessEvaluator
 import scanner_sim
-from scoring import SCORE_FUNCTIONS
+from scoring import SCORE_FUNCTIONS, apply_score_scaling
 from log_utils import get_run_logger, log_run_parameters
 
 
@@ -202,9 +202,11 @@ def run_walk_forward_validation(initial_champions=None):
             entries[name] = asset_entries
             exits[name] = asset_exits
             if config.SCANNER.get("tie_break_policy") == "score":
-                scores[name] = (
-                    score_func(data).reindex(asset_entries.index).fillna(0.0)
-                )
+                score_series = score_func(data).reindex(asset_entries.index).fillna(0.0)
+                scale_method = config.SCANNER.get("score_scaling")
+                if scale_method:
+                    score_series = apply_score_scaling(score_series, data, scale_method)
+                scores[name] = score_series.fillna(0.0)
         entries_df = pd.concat(entries, axis=1)
         exits_df = pd.concat(exits, axis=1)
         scores_df = pd.concat(scores, axis=1) if scores else None

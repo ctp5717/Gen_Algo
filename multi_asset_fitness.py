@@ -13,7 +13,7 @@ import config
 import strategy_engine as engine
 from fitness import _inject_genes_into_rules
 import scanner_sim
-from scoring import SCORE_FUNCTIONS
+from scoring import SCORE_FUNCTIONS, apply_score_scaling
 
 try:  # Optional dependency for JIT acceleration
     import numba as nb
@@ -160,7 +160,11 @@ class MultiAssetFitnessEvaluator:
             entries[name] = asset_entries
             exits[name] = asset_exits.reindex(asset_entries.index, fill_value=False)
             if config.SCANNER.get("tie_break_policy") == "score":
-                scores[name] = score_func(data).reindex(asset_entries.index).fillna(0.0)
+                score_series = score_func(data).reindex(asset_entries.index).fillna(0.0)
+                scale_method = config.SCANNER.get("score_scaling")
+                if scale_method:
+                    score_series = apply_score_scaling(score_series, data, scale_method)
+                scores[name] = score_series.fillna(0.0)
 
         self.last_assets = list(assets)
         entries_df = pd.concat(entries, axis=1)
