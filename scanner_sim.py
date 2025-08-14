@@ -1,5 +1,5 @@
 import random
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import pandas as pd
 
@@ -11,7 +11,7 @@ def gate_entries(
     tie_break_policy: str = "fifo",
     seed: int | None = None,
     scores: pd.DataFrame | None = None,
-) -> Tuple[pd.DataFrame, pd.Series, Dict[str, float]]:
+) -> Tuple[pd.DataFrame, pd.Series, Dict[str, Any]]:
     """Gate entry signals across multiple assets with a position cap.
 
     Parameters
@@ -59,6 +59,10 @@ def gate_entries(
     open_count_list = []
     collisions = 0
     rejected = 0
+    total_candidates = 0
+    per_asset: Dict[str, Dict[str, int]] = {
+        a: {"accepted": 0, "rejected": 0} for a in asset_order
+    }
 
     for ts in idx:
         # Close positions first
@@ -70,40 +74,58 @@ def gate_entries(
         candidates = [a for a in asset_order if entries.at[ts, a] and a not in open_positions]
         open_slots = max_concurrent - len(open_positions)
 
-        accepted = []
-        if candidates and open_slots > 0:
-            if len(candidates) > open_slots:
+        total_candidates += len(candidates)
+        accepted: list[str] = []
+        if candidates:
+            if open_slots <= 0:
                 collisions += 1
-                if tie_break_policy == "fifo":
-                    ordered = candidates
-                elif tie_break_policy == "random":
-                    ordered = candidates[:]
-                    rng.shuffle(ordered)
-                elif tie_break_policy == "score":
-                    if scores is None:
-                        raise ValueError("scores required for score tie-break policy")
-                    ordered = sorted(
-                        candidates,
-                        key=lambda a: (-scores.at[ts, a], asset_order.index(a)),
-                    )
-                else:
-                    raise ValueError(f"Unknown tie-break policy: {tie_break_policy}")
-                accepted = ordered[:open_slots]
-                rejected += len(candidates) - len(accepted)
+                rejected += len(candidates)
+                for a in candidates:
+                    per_asset[a]["rejected"] += 1
             else:
-                accepted = candidates
+                if len(candidates) > open_slots:
+                    collisions += 1
+                    if tie_break_policy == "fifo":
+                        ordered = candidates
+                    elif tie_break_policy == "random":
+                        ordered = candidates[:]
+                        rng.shuffle(ordered)
+                    elif tie_break_policy == "score":
+                        if scores is None:
+                            raise ValueError("scores required for score tie-break policy")
+                        ordered = sorted(
+                            candidates,
+                            key=lambda a: (-scores.at[ts, a], asset_order.index(a)),
+                        )
+                    else:
+                        raise ValueError(f"Unknown tie-break policy: {tie_break_policy}")
+                    accepted = ordered[:open_slots]
+                    rejected_assets = [a for a in candidates if a not in accepted]
+                    rejected += len(rejected_assets)
+                    for a in rejected_assets:
+                        per_asset[a]["rejected"] += 1
+                else:
+                    accepted = candidates
 
-            for a in accepted:
-                gated.at[ts, a] = True
-                open_positions.add(a)
+                for a in accepted:
+                    gated.at[ts, a] = True
+                    open_positions.add(a)
+                    per_asset[a]["accepted"] += 1
 
         open_count_list.append(len(open_positions))
 
     open_count = pd.Series(open_count_list, index=idx)
-    total_candidates = entries.sum().sum()
+    accepted_total = sum(v["accepted"] for v in per_asset.values())
+    total_rejected = rejected
+    assert accepted_total + total_rejected == total_candidates
     diagnostics = {
         "collisions": collisions,
-        "rejected": rejected,
-        "acceptance_rate": float(gated.sum().sum() / total_candidates) if total_candidates else 0.0,
+        "total_candidates": total_candidates,
+        "accepted": accepted_total,
+        "rejected": total_rejected,
+        "acceptance_rate": float(accepted_total / total_candidates)
+        if total_candidates
+        else 0.0,
+        "per_asset": per_asset,
     }
     return gated, open_count, diagnostics
