@@ -143,10 +143,25 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
             if ticker.endswith('USD') and not ticker.endswith('USDT'):
                 ticker = ticker[:-3] + 'USDT'
         df = get_data(ticker, start_date, end_date, interval)
-        if not df.empty:
-            data[name] = df
-        else:
+        if df.empty:
             excluded.append(name)
+            continue
+
+        price = df["Close"].iloc[-1]
+        avg_dollar_vol = (df["Close"] * df["Volume"]).mean()
+        if price < config.MIN_PRICE or avg_dollar_vol < config.MIN_AVG_DOLLAR_VOLUME:
+            logger.info(
+                "Excluding %s: price %.2f < %.2f or avg $vol %.2f < %.2f",
+                name,
+                price,
+                config.MIN_PRICE,
+                avg_dollar_vol,
+                config.MIN_AVG_DOLLAR_VOLUME,
+            )
+            excluded.append(name)
+            continue
+
+        data[name] = df
 
     if not data:
         if excluded:

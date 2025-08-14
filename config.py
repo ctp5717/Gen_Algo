@@ -94,6 +94,11 @@ else:
 # validation phases. Assets with fewer bars will be excluded.
 MIN_BARS = 100
 
+# Minimum price and average dollar volume thresholds for asset inclusion.
+# Assets failing these filters during data loading will be excluded.
+MIN_PRICE = 0.0
+MIN_AVG_DOLLAR_VOLUME = 0.0
+
 # --- 3. FINAL CONFIGURATION OUTPUTS ---
 if DATA_SOURCE == 'binance':
     TICKER = TICKER.replace('-', '')
@@ -205,6 +210,9 @@ SCANNER = {
     "tie_break_policy": "fifo",
     # scoring function used when tie_break_policy == 'score'
     "score_func": "pct_change",
+    # Optional scaling applied to scores to reduce micro-cap bias. One of:
+    # None | 'atr' | 'dollar_volume'
+    "score_scaling": None,
     "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy
     "seed": 0,                  # seed for random tie-breaks and sampling
     "verbose": False,           # print diagnostics from the scanner
