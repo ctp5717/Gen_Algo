@@ -17,6 +17,7 @@ import fitness
 from multi_asset_fitness import MultiAssetFitnessEvaluator
 import scanner_sim
 from scoring import SCORE_FUNCTIONS
+from log_utils import get_run_logger, log_run_parameters
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -93,6 +94,8 @@ def run_walk_forward_validation(initial_champions=None):
     print("\n=== Running Walk-Forward Validation ===")
     num_cores = os.cpu_count()
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
+    logger = get_run_logger()
+    log_run_parameters(logger)
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
@@ -227,7 +230,7 @@ def run_walk_forward_validation(initial_champions=None):
                     close=data["Close"],
                     entries=asset_entries,
                     exits=asset_exits,
-                    fees=0.001,
+                    fees=config.FEES,
                     freq=config.TIMEFRAME,
                 )
                 returns_df[name] = pf.returns()

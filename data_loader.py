@@ -14,6 +14,7 @@ import pandas as pd
 import yfinance as yf
 from binance.client import Client
 import config
+from log_utils import get_run_logger
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
@@ -130,7 +131,9 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
     The returned frames share the intersection of timestamps so that any
     cross-asset operations operate on perfectly aligned data.
     """
+    logger = get_run_logger()
     data = {}
+    excluded = []
     for name, symbol in asset_group:
         ticker = symbol
         if config.DATA_SOURCE == 'binance':
@@ -140,8 +143,12 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
         df = get_data(ticker, start_date, end_date, interval)
         if not df.empty:
             data[name] = df
+        else:
+            excluded.append(name)
 
     if not data:
+        if excluded:
+            logger.info("Excluded symbols: %s", ", ".join(excluded))
         return {}
 
     # Align all frames on the intersection of timestamps for fairness
@@ -150,4 +157,11 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
         common_index = df.index if common_index is None else common_index.intersection(df.index)
 
     aligned = {name: df.loc[common_index].copy() for name, df in data.items()}
+
+    logger.info("Aligned asset universe (bar counts):")
+    for name, df in aligned.items():
+        logger.info("  %s: %d", name, len(df))
+    if excluded:
+        logger.info("Excluded symbols: %s", ", ".join(excluded))
+
     return aligned
