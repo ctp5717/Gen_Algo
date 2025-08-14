@@ -12,6 +12,7 @@ import fitness
 import strategy_engine as engine
 import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
+from multi_asset_fitness import MultiAssetFitnessEvaluator
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """
@@ -84,3 +85,48 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
     )
     fig.show()
+
+
+def run_champion_analysis_multi(best_solution: list, gene_map: dict):
+    """Run multi-asset analysis on the champion using validation data."""
+    print("\n\n--- Multi-Asset Champion Analysis on Unseen Data ---")
+    print(
+        "Loading validation data from "
+        f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
+    )
+    ohlc_dict = data_loader.load_group_data(
+        config.ASSET_GROUP,
+        config.VALIDATION_PERIOD["start"],
+        config.VALIDATION_PERIOD["end"],
+        config.TIMEFRAME,
+    )
+    if not ohlc_dict:
+        return
+
+    evaluator = MultiAssetFitnessEvaluator(ohlc_dict, config.STRATEGY_RULES, gene_map)
+    _, _, portfolio_returns, open_count, diag, trade_counts = evaluator._evaluate_once(
+        best_solution, seed=config.SCANNER.get("seed", 0), assets=evaluator.assets
+    )
+
+    sortino, profit_factor, max_dd = evaluator._calc_stats(portfolio_returns)
+    print("\n--- Validation Period Portfolio Stats ---")
+    print(f"Sortino Ratio: {sortino:.3f}")
+    print(f"Profit Factor: {profit_factor:.3f}")
+    print(f"Max Drawdown [%]: {max_dd:.2f}")
+    print(
+        f"Collisions: {diag['collisions']} | Rejected: {diag['rejected']} | "
+        f"Acceptance Rate: {diag['acceptance_rate']:.2f}"
+    )
+    print("Per-asset admitted trades:")
+    for asset, cnt in trade_counts.items():
+        print(f"  {asset}: {int(cnt)}")
+
+    equity = (1 + portfolio_returns).cumprod()
+    plt.ion()
+    fig1, ax1 = plt.subplots()
+    equity.plot(ax=ax1, title="Portfolio Equity Curve (Validation)")
+    fig2, ax2 = plt.subplots()
+    open_count.plot(ax=ax2, title="Open Positions Over Time")
+    fig3, ax3 = plt.subplots()
+    trade_counts.plot(kind="bar", ax=ax3, title="Per-Asset Admitted Trades")
+    fig1.show(); fig2.show(); fig3.show()
