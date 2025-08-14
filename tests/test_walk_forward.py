@@ -289,6 +289,146 @@ def test_walk_forward_returns_summary(monkeypatch):
         assert key in summary
 
 
+def test_walk_forward_reproducible_with_fixed_seed(monkeypatch):
+    import pandas as pd
+    import types
+    import random
+
+    idx = pd.date_range("2020-01-01", periods=2)
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=idx,
+    )
+
+    data_dict = {"A": df, "B": df}
+
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "load_group_data",
+        lambda *a, **k: data_dict,
+    )
+    monkeypatch.setattr(
+        walk_forward.config,
+        "ASSET_GROUP",
+        [("A", "A"), ("B", "B")],
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": idx[0],
+                "train_end": idx[1],
+                "test_start": idx[0],
+                "test_end": idx[1],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(
+        walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, [])
+    )
+
+    class DummyEvaluator:
+        def __init__(self, ohlc_dict, *a, **k):
+            self.assets = list(ohlc_dict.keys())
+
+        def __call__(self, *a, **k):
+            return 1.0
+
+        def _evaluate_once(self, solution, seed, assets):
+            rng = random.Random(seed)
+            return (
+                rng.random(),
+                {},
+                pd.Series(dtype=float),
+                pd.Series(dtype=float),
+                {},
+                pd.Series(dtype=float),
+            )
+
+        @staticmethod
+        def _calc_stats(returns):
+            return 0.0, 0.0, 0.0
+
+    monkeypatch.setattr(walk_forward, "MultiAssetFitnessEvaluator", DummyEvaluator)
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    def fake_process_strategy_rules(data, rules):
+        return pd.Series([True, True], index=idx)
+
+    monkeypatch.setattr(
+        walk_forward.engine,
+        "process_strategy_rules",
+        fake_process_strategy_rules,
+    )
+
+    class DummyPortfolio:
+        def __init__(self, *a, **k):
+            pass
+
+        def returns(self):
+            return pd.Series([0.0, 0.0], index=idx)
+
+        class Trades:
+            def stats(self):
+                return {"Win Rate [%]": 0.0, "Count": 0}
+
+        @property
+        def trades(self):
+            return DummyPortfolio.Trades()
+
+    monkeypatch.setattr(
+        walk_forward.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False
+    )
+
+    orig_scanner = walk_forward.config.SCANNER.copy()
+    walk_forward.config.SCANNER.update(
+        {"max_concurrent_trades": 1, "tie_break_policy": "random", "seed": 123}
+    )
+
+    summary1 = walk_forward.run_walk_forward_validation()
+    summary2 = walk_forward.run_walk_forward_validation()
+
+    for key in summary1:
+        if isinstance(summary1[key], pd.DataFrame):
+            assert summary1[key].equals(summary2[key])
+        else:
+            a = summary1[key]
+            b = summary2[key]
+            if isinstance(a, float) and isinstance(b, float) and (pd.isna(a) and pd.isna(b)):
+                continue
+            assert a == b
+
+    walk_forward.config.SCANNER.update(orig_scanner)
+
+
 def test_update_champion_pool_logic(monkeypatch, capsys):
     settings = {
         "survival_threshold": 0.5,
