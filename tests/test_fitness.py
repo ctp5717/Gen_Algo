@@ -82,3 +82,37 @@ def test_exit_rule_param_dict(monkeypatch):
     score = evaluator(None, [], 0)
     assert "sl_stop" not in captured
     assert score == 0.5
+
+
+def test_indicator_value_dict(monkeypatch, capsys):
+    """Non-numeric indicator comparison values are treated as inactive."""
+
+    ohlc = pd.DataFrame({"Close": [1.0, 2.0, 3.0]})
+
+    base_rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "is_active": True,
+                    "indicator": "rsi",
+                    "params": {"period": 14},
+                    # Value remains a gene dict, simulating failed injection
+                    "condition": {
+                        "type": "indicator_is_above_value",
+                        "value": {"gene": "x"},
+                    },
+                }
+            ]
+        }
+    }
+
+    evaluator = fitness.FitnessEvaluator(ohlc, base_rules, {})
+
+    # Stub RSI calculation and mapping to avoid external dependencies
+    series = pd.Series([50.0, 50.0, 50.0], index=ohlc.index)
+    monkeypatch.setitem(fitness.engine.INDICATOR_MAPPING, "rsi", lambda data, period: series)
+
+    score = evaluator(None, [], 0)
+    captured = capsys.readouterr()
+    assert "dict" not in captured.out.lower()
+    assert score == -1.0

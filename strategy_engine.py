@@ -21,6 +21,7 @@ Design Philosophy:
 """
 
 import pandas as pd
+import numpy as np
 import indicator_library as ind_lib # Import our toolbox of indicators
 
 # A mapping dictionary to dynamically call indicator functions.
@@ -69,6 +70,13 @@ def _generate_signal_from_value(indicator_series: pd.Series, condition: dict) ->
     """
     condition_type = condition.get('type')
     value = condition.get('value')
+
+    # Guard against unresolved gene dictionaries or other non-numeric values.
+    # If "value" is not a real number, the comparison would normally raise
+    # ``'dict' object has no attribute 'index'`` when pandas attempts to align
+    # indices.  Treat such cases as a False signal instead of erroring out.
+    if not isinstance(value, (int, float, np.number)):
+        return pd.Series(False, index=indicator_series.index)
 
     if condition_type == 'indicator_is_above_value':
         return indicator_series > value
