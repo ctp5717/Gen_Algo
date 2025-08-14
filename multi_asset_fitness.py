@@ -11,7 +11,7 @@ import vectorbt as vbt
 
 import config
 import strategy_engine as engine
-from fitness import _inject_genes_into_rules, _get_exit_param
+from fitness import _inject_genes_into_rules, _build_exit_kwargs
 import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
 
@@ -103,14 +103,10 @@ class MultiAssetFitnessEvaluator:
 
         # Extract exit rule parameters once since the strategy is shared across assets
         rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
-        exit_rules = rules.get("exit_rules", {})
-        sl_rule = exit_rules.get("stop_loss", {})
-        tsl_rule = exit_rules.get("trailing_stop", {})
-        tp_rule = exit_rules.get("take_profit", {})
-
-        sl_stop = _get_exit_param(sl_rule) if sl_rule.get("is_active", False) else None
-        sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get("is_active", False) else None
-        tp_stop = _get_exit_param(tp_rule) if tp_rule.get("is_active", False) else None
+        exit_kwargs = _build_exit_kwargs(rules.get("exit_rules", {}))
+        sl_stop = exit_kwargs.get("sl_stop")
+        sl_trail = exit_kwargs.get("sl_trail")
+        tp_stop = exit_kwargs.get("tp_stop")
 
         score_func_name = config.SCANNER.get("score_func", "pct_change")
         score_func = SCORE_FUNCTIONS.get(score_func_name, SCORE_FUNCTIONS["pct_change"])
@@ -132,12 +128,10 @@ class MultiAssetFitnessEvaluator:
                 close=data["Close"],
                 entries=shifted_entries,
                 exits=time_exit,
-                sl_stop=sl_stop,
-                tp_stop=tp_stop,
-                sl_trail=sl_trail,
                 fees=config.FEES,
                 slippage=getattr(config, "SLIPPAGE", 0.0),
                 freq=config.TIMEFRAME,
+                **exit_kwargs,
             )
             sell_orders = pf.orders.records_readable
             sell_orders = sell_orders[sell_orders["Side"] == "Sell"]
@@ -193,16 +187,19 @@ class MultiAssetFitnessEvaluator:
                 time_exit = shifted_entries.shift(
                     config.MAX_HOLD_PERIOD, fill_value=False
                 )
+                exit_kwargs = {k: v for k, v in {
+                    "sl_stop": sl_stop,
+                    "tp_stop": tp_stop,
+                    "sl_trail": sl_trail,
+                }.items() if v is not None}
                 pf = vbt.Portfolio.from_signals(
                     close=data["Close"],
                     entries=shifted_entries,
                     exits=time_exit,
-                    sl_stop=sl_stop,
-                    tp_stop=tp_stop,
-                    sl_trail=sl_trail,
                     fees=config.FEES,
                     slippage=getattr(config, "SLIPPAGE", 0.0),
                     freq=config.TIMEFRAME,
+                    **exit_kwargs,
                 )
                 returns_df[name] = pf.returns()
                 per_asset_sortino[name] = pf.stats()["Sortino Ratio"]

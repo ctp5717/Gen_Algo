@@ -7,7 +7,6 @@ import pandas as pd
 import config
 import data_loader
 import fitness
-from fitness import _get_exit_param
 import strategy_engine as engine
 
 
@@ -33,14 +32,7 @@ def _evaluate_on_validation(solution, gene_map):
     if entries.sum() < 1:
         return -np.inf
 
-    exit_rules = rules.get("exit_rules", {})
-    sl_rule = exit_rules.get("stop_loss", {})
-    tsl_rule = exit_rules.get("trailing_stop", {})
-    tp_rule = exit_rules.get("take_profit", {})
-
-    sl_stop = _get_exit_param(sl_rule) if sl_rule.get("is_active", False) else None
-    sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get("is_active", False) else None
-    tp_stop = _get_exit_param(tp_rule) if tp_rule.get("is_active", False) else None
+    exit_kwargs = fitness._build_exit_kwargs(rules.get("exit_rules", {}))
 
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)
@@ -49,11 +41,9 @@ def _evaluate_on_validation(solution, gene_map):
         close=val_data["Close"],
         entries=entries,
         exits=time_exit,
-        sl_stop=sl_stop,
-        tp_stop=tp_stop,
-        sl_trail=sl_trail,
         fees=config.FEES,
         freq=config.TIMEFRAME,
+        **exit_kwargs,
     )
     stats = portfolio.stats()
     score = stats.get("Sortino Ratio")

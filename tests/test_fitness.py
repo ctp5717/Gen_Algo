@@ -69,7 +69,7 @@ def test_exit_rule_param_dict(monkeypatch):
             }
 
     def fake_from_signals(**kwargs):
-        captured["sl_stop"] = kwargs.get("sl_stop")
+        captured.update(kwargs)
         return DummyPF()
 
     monkeypatch.setattr(
@@ -80,5 +80,5 @@ def test_exit_rule_param_dict(monkeypatch):
     )
 
     score = evaluator(None, [], 0)
-    assert captured["sl_stop"] is None
+    assert "sl_stop" not in captured
     assert score == 0.5

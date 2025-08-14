@@ -24,7 +24,36 @@ def _get_exit_param(rule: dict) -> float | None:
     """
 
     value = rule.get("params", {}).get("value")
-    return value if isinstance(value, (int, float, np.number)) else None
+    return float(value) if isinstance(value, (int, float, np.number)) else None
+
+
+def _build_exit_kwargs(exit_rules: dict) -> dict:
+    """Extract numeric exit parameters for :func:`vectorbt.Portfolio.from_signals`.
+
+    The backtester expects plain numbers for stop-loss, trailing stop and take-profit
+    thresholds.  When gene injection fails the configuration may still contain the
+    original gene dictionaries which would otherwise trigger errors like
+    ``'dict' object has no attribute 'index'`` inside vectorbt.  This helper filters
+    out any non-numeric values and only returns kwargs for the parameters that are
+    both active and numeric.
+    """
+
+    sl_rule = exit_rules.get("stop_loss", {})
+    tsl_rule = exit_rules.get("trailing_stop", {})
+    tp_rule = exit_rules.get("take_profit", {})
+
+    sl_stop = _get_exit_param(sl_rule) if sl_rule.get("is_active", False) else None
+    sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get("is_active", False) else None
+    tp_stop = _get_exit_param(tp_rule) if tp_rule.get("is_active", False) else None
+
+    kwargs = {}
+    if sl_stop is not None:
+        kwargs["sl_stop"] = sl_stop
+    if sl_trail is not None:
+        kwargs["sl_trail"] = sl_trail
+    if tp_stop is not None:
+        kwargs["tp_stop"] = tp_stop
+    return kwargs
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
@@ -68,16 +97,9 @@ class FitnessEvaluator:
             if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
                 return -1.0
 
-            # --- NEW: Logic to handle multiple, selectable exit types ---
-            exit_rules = rules.get('exit_rules', {})
-            sl_rule = exit_rules.get('stop_loss', {})
-            tsl_rule = exit_rules.get('trailing_stop', {})
-            tp_rule = exit_rules.get('take_profit', {})
+            # Build exit-rule kwargs, skipping any unresolved gene dictionaries
+            exit_kwargs = _build_exit_kwargs(rules.get("exit_rules", {}))
 
-            sl_stop = _get_exit_param(sl_rule) if sl_rule.get('is_active', False) else None
-            sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get('is_active', False) else None
-            tp_stop = _get_exit_param(tp_rule) if tp_rule.get('is_active', False) else None
-            
             time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
             time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
@@ -85,11 +107,9 @@ class FitnessEvaluator:
                 close=self.ohlc_data['Close'],
                 entries=entries,
                 exits=time_based_exit,
-                sl_stop=sl_stop,
-                tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
                 fees=config.FEES,
-                freq=config.TIMEFRAME
+                freq=config.TIMEFRAME,
+                **exit_kwargs,
             )
             
             stats = portfolio.stats()
