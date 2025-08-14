@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Dict, List
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -165,6 +166,16 @@ class MultiAssetFitnessEvaluator:
                 assets = list(rng.choice(self.assets, size=size, replace=False))
 
         runs = config.SCANNER.get("monte_carlo_runs", 1)
+        # Ensure a minimum number of runs for stochastic tie-breaks
+        if (
+            config.SCANNER.get("tie_break_policy") == "random"
+            and runs < 3
+        ):
+            warnings.warn(
+                "monte_carlo_runs increased to 3 for random tie-break policy",
+                RuntimeWarning,
+            )
+            runs = 3
         base_seed = config.SCANNER.get("seed", 0)
         run_scores: List[float] = []
         per_asset_runs: Dict[str, List[float]] = {}
@@ -182,7 +193,8 @@ class MultiAssetFitnessEvaluator:
                 self.last_diagnostics = diag
                 diag_saved = True
 
-        aggregated = float(np.median(run_scores)) if runs > 1 else run_scores[0]
+        aggregated = float(np.median(run_scores))
+        dispersion = float(np.std(run_scores))
         penalty_asset = 0.0
         penalty_mc = 0.0
         if per_asset_runs and config.ROBUSTNESS.get("lambda_asset_dispersion", 0.0) > 0:
@@ -190,14 +202,20 @@ class MultiAssetFitnessEvaluator:
             penalty_asset = config.ROBUSTNESS["lambda_asset_dispersion"] * np.std(
                 list(per_asset_avg.values())
             )
-        if runs > 1 and config.ROBUSTNESS.get("lambda_mc_dispersion", 0.0) > 0:
-            penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * np.std(run_scores)
+        if config.ROBUSTNESS.get("lambda_mc_dispersion", 0.0) > 0:
+            penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * dispersion
 
         result = float(aggregated - penalty_asset - penalty_mc)
+        if self.last_diagnostics is not None:
+            self.last_diagnostics.update(
+                {"mc_runs": runs, "mc_median": aggregated, "mc_dispersion": dispersion}
+            )
+
         if config.SCANNER.get("verbose") and self.last_diagnostics:
             diag = self.last_diagnostics
             print(
                 f"Collisions: {diag['collisions']} | Rejected: {diag['rejected']} | "
-                f"Acceptance Rate: {diag['acceptance_rate']:.2f}"
+                f"Acceptance Rate: {diag['acceptance_rate']:.2f} | "
+                f"MC Dispersion: {diag['mc_dispersion']:.4f}"
             )
         return result
