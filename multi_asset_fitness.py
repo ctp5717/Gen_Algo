@@ -38,27 +38,63 @@ class MultiAssetFitnessEvaluator:
 
     def _build_signals(
         self, solution, assets: List[str]
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None]:
-        entries = {}
-        exits = {}
-        scores = {}
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None, float | None, float | None, float | None]:
+        entries: Dict[str, pd.Series] = {}
+        exits: Dict[str, pd.Series] = {}
+        scores: Dict[str, pd.Series] = {}
+
+        # Extract exit rule parameters once since the strategy is shared across assets
+        rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
+        exit_rules = rules.get("exit_rules", {})
+        sl_rule = exit_rules.get("stop_loss", {})
+        tsl_rule = exit_rules.get("trailing_stop", {})
+        tp_rule = exit_rules.get("take_profit", {})
+
+        sl_stop = sl_rule.get("params", {}).get("value") if sl_rule.get("is_active", False) else None
+        sl_trail = (
+            tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
+        )
+        tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
+
         score_func_name = config.SCANNER.get("score_func", "pct_change")
         score_func = SCORE_FUNCTIONS.get(score_func_name, SCORE_FUNCTIONS["pct_change"])
+
         for name in assets:
             data = self.ohlc_dict[name]
-            rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             asset_entries = engine.process_strategy_rules(data, rules)
-            asset_exits = asset_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-            asset_exits = asset_exits.reindex(asset_entries.index, fill_value=False)
+
+            # Initial time-based exit for max-hold
+            time_exit = asset_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+            time_exit = time_exit.reindex(asset_entries.index, fill_value=False)
+
+            # Use vectorbt to simulate exits from all exit rules
+            pf = vbt.Portfolio.from_signals(
+                close=data["Close"],
+                entries=asset_entries,
+                exits=time_exit,
+                sl_stop=sl_stop,
+                tp_stop=tp_stop,
+                sl_trail=sl_trail,
+                fees=config.FEES,
+                slippage=getattr(config, "SLIPPAGE", 0.0),
+                freq=config.TIMEFRAME,
+            )
+            sell_orders = pf.orders.records_readable
+            sell_orders = sell_orders[sell_orders["Side"] == "Sell"]
+            asset_exits = pd.Series(False, index=data.index)
+            if not sell_orders.empty:
+                asset_exits.loc[sell_orders["Timestamp"]] = True
+
             entries[name] = asset_entries
-            exits[name] = asset_exits
+            exits[name] = asset_exits.reindex(asset_entries.index, fill_value=False)
             if config.SCANNER.get("tie_break_policy") == "score":
                 scores[name] = score_func(data).reindex(asset_entries.index).fillna(0.0)
+
         self.last_assets = list(assets)
         entries_df = pd.concat(entries, axis=1)
         exits_df = pd.concat(exits, axis=1)
         scores_df = pd.concat(scores, axis=1) if scores else None
-        return entries_df, exits_df, scores_df
+        return entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail
 
     def _evaluate_once(
         self, solution, seed: int | None, assets: List[str]
@@ -70,7 +106,7 @@ class MultiAssetFitnessEvaluator:
         Dict[str, float],
         pd.Series,
     ]:
-        entries_df, exits_df, scores_df = self._build_signals(solution, assets)
+        entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail = self._build_signals(solution, assets)
         gated, open_count, diag = scanner_sim.gate_entries(
             entries_df,
             exits_df,
@@ -85,13 +121,18 @@ class MultiAssetFitnessEvaluator:
         for name in assets:
             data = self.ohlc_dict[name]
             asset_entries = gated[name].reindex(data.index, fill_value=False)
-            asset_exits = exits_df[name].reindex(data.index, fill_value=False)
             if asset_entries.any():
+                time_exit = asset_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+                time_exit = time_exit.reindex(asset_entries.index, fill_value=False)
                 pf = vbt.Portfolio.from_signals(
                     close=data["Close"],
                     entries=asset_entries,
-                    exits=asset_exits,
+                    exits=time_exit,
+                    sl_stop=sl_stop,
+                    tp_stop=tp_stop,
+                    sl_trail=sl_trail,
                     fees=config.FEES,
+                    slippage=getattr(config, "SLIPPAGE", 0.0),
                     freq=config.TIMEFRAME,
                 )
                 returns_df[name] = pf.returns()

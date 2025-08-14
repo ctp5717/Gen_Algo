@@ -129,3 +129,60 @@ def test_asset_metrics_aggregated_across_runs(monkeypatch):
     assert pytest.approx(score, rel=1e-3) == 0.0
     config.SCANNER["monte_carlo_runs"] = orig_runs
     config.ROBUSTNESS["lambda_asset_dispersion"] = orig_lambda
+
+
+def test_exit_parity_with_single_asset(monkeypatch):
+    import vectorbt as vbt
+
+    idx = pd.date_range('2020', periods=5, freq='D')
+    data = {
+        'sl': pd.DataFrame({'Close': [100, 89, 88, 87, 86]}, index=idx),
+        'tp': pd.DataFrame({'Close': [100, 111, 112, 113, 114]}, index=idx),
+        'tsl': pd.DataFrame({'Close': [100, 105, 104, 103, 99]}, index=idx),
+    }
+
+    def fake_process(data, rules):
+        return pd.Series([True] + [False] * (len(data.index) - 1), index=data.index)
+
+    monkeypatch.setattr('strategy_engine.process_strategy_rules', fake_process)
+
+    exit_rules = {
+        'stop_loss': {'is_active': True, 'type': 'percentage', 'params': {'value': 0.1}},
+        'trailing_stop': {'is_active': True, 'type': 'percentage', 'params': {'value': 0.05}},
+        'take_profit': {'is_active': True, 'type': 'percentage', 'params': {'value': 0.1}},
+    }
+
+    base_rules = {'exit_rules': exit_rules}
+    evaluator = MultiAssetFitnessEvaluator(data, base_rules, {})
+
+    orig_hold = config.MAX_HOLD_PERIOD
+    orig_maxcon = config.SCANNER['max_concurrent_trades']
+    config.MAX_HOLD_PERIOD = 10
+    config.SCANNER['max_concurrent_trades'] = 3
+
+    entries_df, exits_df, _scores, sl_stop, tp_stop, sl_trail = evaluator._build_signals([], list(data.keys()))
+
+    for name, df in data.items():
+        entries = pd.Series([True] + [False] * (len(df.index) - 1), index=df.index)
+        time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+        time_exit = time_exit.reindex(df.index, fill_value=False)
+        pf = vbt.Portfolio.from_signals(
+            close=df['Close'],
+            entries=entries,
+            exits=time_exit,
+            sl_stop=sl_stop,
+            tp_stop=tp_stop,
+            sl_trail=sl_trail,
+            fees=config.FEES,
+            slippage=getattr(config, 'SLIPPAGE', 0.0),
+            freq=config.TIMEFRAME,
+        )
+        sells = pf.orders.records_readable
+        sells = sells[sells['Side'] == 'Sell']['Timestamp']
+        expected = pd.Series(False, index=df.index, name=name)
+        if len(sells):
+            expected.loc[sells] = True
+        pd.testing.assert_series_equal(exits_df[name], expected)
+
+    config.MAX_HOLD_PERIOD = orig_hold
+    config.SCANNER['max_concurrent_trades'] = orig_maxcon
