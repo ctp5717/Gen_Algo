@@ -199,8 +199,10 @@ ASSET_GROUP = [
 ]
 
 SCANNER = {
-    "max_concurrent_trades": 3,  # K in the specification
-    "tie_break_policy": "fifo",  # one of: fifo | random | score
+    # Intended live cap on open positions. Override via --max-concurrent-trades
+    "max_concurrent_trades": 3,
+    # Recommended live policy. One of: fifo | random | score
+    "tie_break_policy": "fifo",
     # scoring function used when tie_break_policy == 'score'
     "score_func": "pct_change",
     "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy

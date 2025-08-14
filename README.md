@@ -161,6 +161,7 @@ This module's purpose is to provide a final, unbiased report on the performance 
       * Set the `SELECTED_ASSET_NAME`, `TIMEFRAME`, and `DATA_SOURCE`.
       * Go to the `STRATEGY_RULES` dictionary. Use the `'is_active': True/False` flags to choose which indicator conditions to include in your strategy.
       * Adjust the `low` and `high` ranges for any genes you want to optimize.
+      * For multi-asset runs, `SCANNER['max_concurrent_trades']` caps open positions (recommended live setting: 3). Override this via `--max-concurrent-trades` when running `main.py`. Keep `tie_break_policy` set to `fifo` to match live trade allocation.
 
 2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
 
