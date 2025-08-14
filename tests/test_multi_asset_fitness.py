@@ -72,6 +72,50 @@ def test_mc_dispersion_penalty(monkeypatch):
     config.SCANNER['max_concurrent_trades'] = orig_maxcon
 
 
+def test_monte_carlo_median_with_random_tie_break(monkeypatch):
+    import statistics
+
+    data = make_data()
+    patch_engine(monkeypatch, [True] * 5)
+
+    orig_policy = config.SCANNER['tie_break_policy']
+    orig_runs = config.SCANNER['monte_carlo_runs']
+    orig_seed = config.SCANNER.get('seed', 0)
+
+    config.SCANNER['tie_break_policy'] = 'random'
+    config.SCANNER['monte_carlo_runs'] = 5
+    config.SCANNER['seed'] = 10
+
+    seeds: list[int] = []
+
+    def fake_eval(self, solution, seed, assets):
+        seeds.append(seed)
+        return (
+            float(seed),
+            {},
+            pd.Series(dtype=float),
+            pd.Series(dtype=float),
+            {},
+            pd.Series(dtype=float),
+        )
+
+    monkeypatch.setattr(
+        MultiAssetFitnessEvaluator, '_evaluate_once', fake_eval, raising=False
+    )
+
+    ga = DummyGA()
+    evaluator = MultiAssetFitnessEvaluator(data, {}, {})
+    score = evaluator(ga, [], 0)
+
+    expected_seeds = [config.SCANNER['seed'] + i for i in range(config.SCANNER['monte_carlo_runs'])]
+    assert seeds == expected_seeds
+    assert score == statistics.median(expected_seeds)
+
+    config.SCANNER['tie_break_policy'] = orig_policy
+    config.SCANNER['monte_carlo_runs'] = orig_runs
+    config.SCANNER['seed'] = orig_seed
+
+
 def test_minibatch_uses_subset(monkeypatch):
     data = make_data()
     patch_engine(monkeypatch, [True]*5)

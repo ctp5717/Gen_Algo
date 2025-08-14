@@ -86,6 +86,29 @@ def test_capacity_zero_rejects_all():
     }
 
 
+def test_zero_capacity_counts_single_timestamp():
+    entries = pd.concat(
+        {
+            "A": _make_series([1]),
+            "B": _make_series([1]),
+            "C": _make_series([1]),
+        },
+        axis=1,
+    ).astype(bool)
+    exits = pd.concat(
+        {
+            "A": _make_series([0]),
+            "B": _make_series([0]),
+            "C": _make_series([0]),
+        },
+        axis=1,
+    ).astype(bool)
+    _, _, diag = scanner_sim.gate_entries(entries, exits, max_concurrent=0)
+    assert diag["collisions"] == 1
+    assert diag["rejected"] == 3
+    assert diag["accepted"] == 0
+
+
 def test_per_asset_tallies():
     entries = pd.concat(
         {"A": _make_series([1, 0]), "B": _make_series([1, 0])}, axis=1
