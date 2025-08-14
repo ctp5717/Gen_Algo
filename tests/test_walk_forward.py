@@ -88,7 +88,14 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
-    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "load_group_data",
+        lambda *a, **k: {"A": df},
+    )
+    monkeypatch.setattr(
+        walk_forward.config, "ASSET_GROUP", [("A", "A")], raising=False
+    )
 
     monkeypatch.setattr(
         walk_forward,
@@ -104,13 +111,20 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     )
 
     class DummyEvaluator:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, ohlc_dict, *a, **k):
+            self.assets = list(ohlc_dict.keys())
 
         def __call__(self, *a, **k):
             return 1.0
 
-    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+        def _evaluate_once(self, *a, **k):
+            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float)
+
+        @staticmethod
+        def _calc_stats(returns):
+            return 0.0, 0.0, 0.0
+
+    monkeypatch.setattr(walk_forward, "MultiAssetFitnessEvaluator", DummyEvaluator)
 
     monkeypatch.setattr(
         walk_forward.engine,
@@ -118,12 +132,33 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         lambda *a, **k: pd.Series([True, False], index=df.index),
     )
 
+    def fake_gate(entries, exits, *args, **kwargs):
+        diag = {
+            "collisions": 0,
+            "total_candidates": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "acceptance_rate": 0.0,
+            "per_asset": {a: {"accepted": 0, "rejected": 0} for a in entries.columns},
+        }
+        return entries, pd.Series(0, index=entries.index), diag
+
+    monkeypatch.setattr(walk_forward.scanner_sim, "gate_entries", fake_gate)
+
     class DummyPortfolio:
         def __init__(self, *a, **k):
             pass
 
-        def stats(self):
-            return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
+        def returns(self):
+            return pd.Series([0, 0], index=df.index)
+
+        class Trades:
+            def stats(self):
+                return {"Win Rate [%]": 0.0, "Count": 0}
+
+        @property
+        def trades(self):
+            return DummyPortfolio.Trades()
 
     monkeypatch.setattr(
         walk_forward.vbt,
@@ -155,7 +190,14 @@ def test_walk_forward_returns_summary(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
-    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "load_group_data",
+        lambda *a, **k: {"A": df},
+    )
+    monkeypatch.setattr(
+        walk_forward.config, "ASSET_GROUP", [("A", "A")], raising=False
+    )
     monkeypatch.setattr(
         walk_forward,
         "_generate_periods",
@@ -173,13 +215,20 @@ def test_walk_forward_returns_summary(monkeypatch):
     monkeypatch.setattr(walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, []))
 
     class DummyEvaluator:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, ohlc_dict, *a, **k):
+            self.assets = list(ohlc_dict.keys())
 
         def __call__(self, *a, **k):
             return 1.0
 
-    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+        def _evaluate_once(self, *a, **k):
+            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float)
+
+        @staticmethod
+        def _calc_stats(returns):
+            return 0.0, 0.0, 0.0
+
+    monkeypatch.setattr(walk_forward, "MultiAssetFitnessEvaluator", DummyEvaluator)
 
     class DummyGA:
         def __init__(self, *args, **kwargs):
@@ -199,15 +248,30 @@ def test_walk_forward_returns_summary(monkeypatch):
         lambda *a, **k: pd.Series([True, False], index=df.index),
     )
 
+    def fake_gate(entries, exits, *args, **kwargs):
+        diag = {
+            "collisions": 0,
+            "total_candidates": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "acceptance_rate": 0.0,
+            "per_asset": {a: {"accepted": 0, "rejected": 0} for a in entries.columns},
+        }
+        return entries, pd.Series(0, index=entries.index), diag
+
+    monkeypatch.setattr(walk_forward.scanner_sim, "gate_entries", fake_gate)
+
     class DummyPortfolio:
-        def stats(self):
-            return {
-                "Total Return [%]": 1.0,
-                "Max Drawdown [%]": 0.0,
-                "Sharpe Ratio": 1.0,
-                "Sortino Ratio": 1.0,
-                "Win Rate [%]": 50.0,
-            }
+        def returns(self):
+            return pd.Series([0, 0], index=df.index)
+
+        class Trades:
+            def stats(self):
+                return {"Win Rate [%]": 50.0, "Count": 2}
+
+        @property
+        def trades(self):
+            return DummyPortfolio.Trades()
 
     monkeypatch.setattr(
         walk_forward.vbt,
