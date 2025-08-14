@@ -10,7 +10,9 @@ import pprint
 import tuner
 import traceback
 import time  # <-- NEW: Import the time module
-import matplotlib.pyplot as plt  # For non-blocking plot display
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # Use non-interactive backend
 
 # Import our custom modules
 import config
@@ -20,6 +22,7 @@ import multi_asset_fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 from log_utils import get_run_logger, log_run_parameters
+import artifact_utils
 
 
 # --- NEW: Callback function for progress tracking ---
@@ -134,10 +137,15 @@ def main():
         gene_type = gene_map[i]['type']
         if gene_type == int: print(f"  - {gene_name}: {int(gene_value)}")
         else: print(f"  - {gene_name}: {gene_value:.4f}")
-    print("\nDisplaying GA fitness evolution plot...")
-    # Enable interactive mode so the plot window does not block execution.
-    plt.ion()
+    print("\nSaving GA fitness evolution plot...")
     ga_instance.plot_fitness()
+    fig = plt.gcf()
+    artifacts_dir = artifact_utils.ARTIFACTS_DIR
+    artifacts_dir.mkdir(exist_ok=True)
+    fitness_path = artifacts_dir / "ga_fitness.png"
+    fig.savefig(fitness_path)
+    plt.close(fig)
+    artifact_utils.append_to_manifest(fitness_path)
 
     try:
         if len(getattr(config, "ASSET_GROUP", [])) > 1:
@@ -160,6 +168,8 @@ def main():
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")
             traceback.print_exc()
+
+    print(f"Artifacts manifest: {artifact_utils.MANIFEST_PATH}")
 
 if __name__ == "__main__":
     main()

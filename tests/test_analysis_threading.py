@@ -12,7 +12,7 @@ sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 import analysis  # noqa: E402
 
 
-def test_run_champion_analysis_non_blocking(monkeypatch):
+def test_run_champion_analysis_saves_plot(monkeypatch):
     df = pd.DataFrame({
         'Open': [1, 2],
         'High': [1, 2],
@@ -58,8 +58,8 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
 
         def plot(self, *a, **k):
             class DummyFig:
-                def show(self):
-                    calls.append('show')
+                def savefig(self, path):
+                    calls['saved'] = path
 
             return DummyFig()
 
@@ -70,15 +70,17 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         raising=False
     )
 
-    calls = []
-    ion_called = {}
+    calls = {}
 
+    monkeypatch.setattr(
+        analysis.artifact_utils,
+        'append_to_manifest',
+        lambda p: calls.setdefault('manifest', p)
+    )
     monkeypatch.setattr(
         analysis,
         'plt',
-        types.SimpleNamespace(
-            ion=lambda: ion_called.setdefault('ion', True),
-        ),
+        types.SimpleNamespace(close=lambda fig: calls.setdefault('closed', True))
     )
 
     analysis.run_champion_analysis(
@@ -86,5 +88,5 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         {0: {'name': 'x', 'path': [], 'type': float}},
     )
 
-    assert ion_called['ion']
-    assert calls == ['show']
+    assert 'manifest' in calls
+    assert calls.get('closed')

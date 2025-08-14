@@ -86,6 +86,10 @@ def test_main_runs(monkeypatch):
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
 
+    # Remove artifacts directory to isolate test
+    import shutil
+    shutil.rmtree(main.artifact_utils.ARTIFACTS_DIR, ignore_errors=True)
+
     # Execute main and ensure no exception is raised
     main.main()
 
@@ -170,6 +174,9 @@ def test_main_uses_tuner(monkeypatch):
         lambda *a, **k: tuned_params,
     )
 
+    import shutil
+    shutil.rmtree(main.artifact_utils.ARTIFACTS_DIR, ignore_errors=True)
+
     main.main()
 
     assert captured['sol_per_pop'] == 3
@@ -177,7 +184,7 @@ def test_main_uses_tuner(monkeypatch):
     assert captured['mutation_num_genes'] == 1
 
 
-def test_fitness_plot_non_blocking(monkeypatch):
+def test_fitness_plot_saved(monkeypatch):
     df = pd.DataFrame(
         {
             'Open': [1, 2],
@@ -243,17 +250,14 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
 
-    ion_called = {}
-
-    monkeypatch.setattr(
-        main,
-        'plt',
-        types.SimpleNamespace(
-            ion=lambda: ion_called.setdefault('ion', True)
-        ),
-    )
+    import json
+    import shutil
+    shutil.rmtree(main.artifact_utils.ARTIFACTS_DIR, ignore_errors=True)
 
     main.main()
 
-    assert ion_called['ion']
     assert events['plot_called']
+    manifest_path = main.artifact_utils.MANIFEST_PATH
+    assert manifest_path.exists()
+    data = json.loads(manifest_path.read_text())
+    assert any(p.endswith('ga_fitness.png') for p in data)
