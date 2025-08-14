@@ -11,6 +11,9 @@ def gate_entries(
     tie_break_policy: str = "fifo",
     seed: int | None = None,
     scores: pd.DataFrame | None = None,
+    *,
+    verbose: bool = False,
+    collect_collision_histogram: bool = False,
 ) -> Tuple[pd.DataFrame, pd.Series, Dict[str, Any]]:
     """Gate entry signals across multiple assets with a position cap.
 
@@ -56,13 +59,14 @@ def gate_entries(
 
     gated = pd.DataFrame(False, index=idx, columns=asset_order)
     open_positions = set()
-    open_count_list = []
+    open_count_list: list[int] = []
     collisions = 0
     rejected = 0
     total_candidates = 0
     per_asset: Dict[str, Dict[str, int]] = {
-        a: {"accepted": 0, "rejected": 0} for a in asset_order
+        a: {"candidates": 0, "accepted": 0, "rejected": 0} for a in asset_order
     }
+    collision_hist = {a: 0 for a in asset_order} if collect_collision_histogram else None
 
     for ts in idx:
         # Close positions first
@@ -75,16 +79,24 @@ def gate_entries(
         open_slots = max_concurrent - len(open_positions)
 
         total_candidates += len(candidates)
+        for a in candidates:
+            per_asset[a]["candidates"] += 1
         accepted: list[str] = []
         if candidates:
             if open_slots <= 0:
                 collisions += 1
                 rejected += len(candidates)
+                if collision_hist is not None:
+                    for a in candidates:
+                        collision_hist[a] += 1
                 for a in candidates:
                     per_asset[a]["rejected"] += 1
             else:
                 if len(candidates) > open_slots:
                     collisions += 1
+                    if collision_hist is not None:
+                        for a in candidates:
+                            collision_hist[a] += 1
                     if tie_break_policy == "fifo":
                         ordered = candidates
                     elif tie_break_policy == "random":
@@ -118,7 +130,9 @@ def gate_entries(
     accepted_total = sum(v["accepted"] for v in per_asset.values())
     total_rejected = rejected
     assert accepted_total + total_rejected == total_candidates
-    diagnostics = {
+    avg_n_open = float(open_count.mean())
+    max_n_open = int(open_count.max()) if len(open_count) else 0
+    diagnostics: Dict[str, Any] = {
         "collisions": collisions,
         "total_candidates": total_candidates,
         "accepted": accepted_total,
@@ -126,6 +140,30 @@ def gate_entries(
         "acceptance_rate": float(accepted_total / total_candidates)
         if total_candidates
         else 0.0,
+        "avg_n_open": avg_n_open,
+        "max_n_open": max_n_open,
         "per_asset": per_asset,
     }
+    if collision_hist is not None:
+        diagnostics["collisions_by_asset"] = collision_hist
+    if verbose:
+        print("Gating diagnostics:", diagnostics)
     return gated, open_count, diagnostics
+
+
+def plot_admitted_trade_skew(diagnostics: Dict[str, Any]) -> None:
+    """Visualize acceptance ratio per asset using a bar chart."""
+    import matplotlib.pyplot as plt
+
+    per_asset = diagnostics.get("per_asset", {})
+    assets = list(per_asset.keys())
+    candidates = [v.get("candidates", 0) for v in per_asset.values()]
+    accepted = [v.get("accepted", 0) for v in per_asset.values()]
+    rates = [a / c if c else 0 for a, c in zip(accepted, candidates)]
+
+    plt.figure(figsize=(8, 4))
+    plt.bar(assets, rates)
+    plt.ylabel("Acceptance Rate")
+    plt.title("Admitted-trade Skew by Asset")
+    plt.ylim(0, 1)
+    plt.show()
