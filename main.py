@@ -88,7 +88,7 @@ def main():
         )
     fitness_function = fitness_evaluator.__call__
 
-    if getattr(config, "AUTO_TUNE_ENABLED", False) and len(getattr(config, "ASSET_GROUP", [])) <= 1:
+    if getattr(config, "AUTO_TUNE_ENABLED", False):
         tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)
         sol_per_pop = tuned.get("sol_per_pop", config.GA_POPULATION_SIZE) if tuned else config.GA_POPULATION_SIZE
         num_parents_mating = tuned.get("num_parents_mating", config.GA_PARENTS_MATING) if tuned else config.GA_PARENTS_MATING
