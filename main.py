@@ -5,6 +5,7 @@ Main Application Orchestrator for the GA Trading Framework
 (This version includes a progress indicator for the GA run)
 """
 import os
+import argparse
 import pygad
 import pprint
 import tuner
@@ -23,6 +24,17 @@ import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 from log_utils import get_run_logger, log_run_parameters
 import artifact_utils
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="GA Trading Strategy Framework")
+    parser.add_argument(
+        "--max-concurrent-trades",
+        type=int,
+        help="Maximum open positions enforced by the scanner",
+    )
+    args, _ = parser.parse_known_args()
+    return args
 
 
 # --- NEW: Callback function for progress tracking ---
@@ -48,6 +60,9 @@ def on_generation(ga_instance):
 
 def main():
     """ The main execution function. """
+    args = parse_args()
+    if args.max_concurrent_trades is not None:
+        config.SCANNER["max_concurrent_trades"] = args.max_concurrent_trades
     print("--- GA Trading Strategy Framework ---")
     print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
     num_cores = os.cpu_count()
