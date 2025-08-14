@@ -27,6 +27,7 @@ To Add a New Indicator:
 
 import pandas as pd
 import numpy as np
+import warnings
 
 # -- Compatibility shim -------------------------------------------------------
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
@@ -36,6 +37,16 @@ import numpy as np
 # importing pandas_ta.
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
+
+# ``pandas_ta`` emits a deprecation warning on import due to its use of
+# ``pkg_resources``.  The library is scheduled to remove this dependency but in
+# the interim the warning is extremely noisy during optimisation where the
+# module may be imported many times.  Suppress it here to keep logs readable.
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API",
+    category=UserWarning,
+)
 
 import pandas_ta as ta
 

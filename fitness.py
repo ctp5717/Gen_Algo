@@ -11,6 +11,21 @@ import vectorbt as vbt
 import strategy_engine as engine
 import config
 
+
+def _get_exit_param(rule: dict) -> float | None:
+    """Return a numeric exit parameter or ``None`` if not available.
+
+    The configuration loader expresses optimisable parameters as nested
+    dictionaries (``{"gene": ..., "low": ...}``).  If such a dictionary is
+    passed through without gene injection, ``vectorbt`` later attempts to treat
+    it like a pandas object and fails with ``'dict' object has no attribute
+    'index'``.  To guard against this, gracefully fall back to ``None`` whenever
+    the value is not already numeric.
+    """
+
+    value = rule.get("params", {}).get("value")
+    return value if isinstance(value, (int, float, np.number)) else None
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
     Injects the gene values from a GA solution into a copy of the strategy rules.
@@ -59,9 +74,9 @@ class FitnessEvaluator:
             tsl_rule = exit_rules.get('trailing_stop', {})
             tp_rule = exit_rules.get('take_profit', {})
 
-            sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
-            sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
-            tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
+            sl_stop = _get_exit_param(sl_rule) if sl_rule.get('is_active', False) else None
+            sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get('is_active', False) else None
+            tp_stop = _get_exit_param(tp_rule) if tp_rule.get('is_active', False) else None
             
             time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
             time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)

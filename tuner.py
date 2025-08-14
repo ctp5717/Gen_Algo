@@ -7,6 +7,7 @@ import pandas as pd
 import config
 import data_loader
 import fitness
+from fitness import _get_exit_param
 import strategy_engine as engine
 
 
@@ -37,9 +38,9 @@ def _evaluate_on_validation(solution, gene_map):
     tsl_rule = exit_rules.get("trailing_stop", {})
     tp_rule = exit_rules.get("take_profit", {})
 
-    sl_stop = sl_rule.get("params", {}).get("value") if sl_rule.get("is_active", False) else None
-    sl_trail = tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
-    tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
+    sl_stop = _get_exit_param(sl_rule) if sl_rule.get("is_active", False) else None
+    sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get("is_active", False) else None
+    tp_stop = _get_exit_param(tp_rule) if tp_rule.get("is_active", False) else None
 
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)

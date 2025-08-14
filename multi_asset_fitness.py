@@ -11,7 +11,7 @@ import vectorbt as vbt
 
 import config
 import strategy_engine as engine
-from fitness import _inject_genes_into_rules
+from fitness import _inject_genes_into_rules, _get_exit_param
 import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
 
@@ -108,21 +108,9 @@ class MultiAssetFitnessEvaluator:
         tsl_rule = exit_rules.get("trailing_stop", {})
         tp_rule = exit_rules.get("take_profit", {})
 
-        sl_stop = (
-            sl_rule.get("params", {}).get("value")
-            if sl_rule.get("is_active", False)
-            else None
-        )
-        sl_trail = (
-            tsl_rule.get("params", {}).get("value")
-            if tsl_rule.get("is_active", False)
-            else None
-        )
-        tp_stop = (
-            tp_rule.get("params", {}).get("value")
-            if tp_rule.get("is_active", False)
-            else None
-        )
+        sl_stop = _get_exit_param(sl_rule) if sl_rule.get("is_active", False) else None
+        sl_trail = _get_exit_param(tsl_rule) if tsl_rule.get("is_active", False) else None
+        tp_stop = _get_exit_param(tp_rule) if tp_rule.get("is_active", False) else None
 
         score_func_name = config.SCANNER.get("score_func", "pct_change")
         score_func = SCORE_FUNCTIONS.get(score_func_name, SCORE_FUNCTIONS["pct_change"])
@@ -362,8 +350,8 @@ class MultiAssetFitnessEvaluator:
         if config.SCANNER.get("verbose") and self.last_diagnostics:
             diag = self.last_diagnostics
             print(
-                f"Collisions: {diag['collisions']} | Rejected: {diag['rejected']} | "
-                f"Acceptance Rate: {diag['acceptance_rate']:.2f} | "
-                f"MC Dispersion: {diag['mc_dispersion']:.4f}"
+                f"Collisions: {diag.get('collisions', 0)} | Rejected: {diag.get('rejected', 0)} | "
+                f"Acceptance Rate: {diag.get('acceptance_rate', 0):.2f} | "
+                f"MC Dispersion: {diag.get('mc_dispersion', 0.0):.4f}"
             )
         return result

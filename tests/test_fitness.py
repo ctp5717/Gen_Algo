@@ -29,3 +29,56 @@ def test_exception_logging(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "boom" in captured.out
     assert score == -999.0
+
+
+def test_exit_rule_param_dict(monkeypatch):
+    """Non-numeric exit rule parameters are ignored."""
+
+    # Build minimal OHLC data with enough rows to satisfy min_trades
+    n = fitness.config.FITNESS_WEIGHTS["min_trades"]
+    ohlc = pd.DataFrame({"Close": [1.0] * n})
+
+    # Configure a stop-loss whose value is still a gene dictionary
+    base_rules = {
+        "entry_rules": {"conditions": []},
+        "exit_rules": {
+            "stop_loss": {
+                "is_active": True,
+                "params": {"value": {"gene": "x", "low": 0.01, "high": 0.1}},
+            }
+        },
+    }
+
+    evaluator = fitness.FitnessEvaluator(ohlc, base_rules, {})
+
+    # Always generate an entry signal
+    monkeypatch.setattr(
+        fitness.engine,
+        "process_strategy_rules",
+        lambda data, rules: pd.Series(True, index=data.index),
+    )
+
+    captured = {}
+
+    class DummyPF:
+        def stats(self):
+            return {
+                "Sortino Ratio": 0.0,
+                "Profit Factor": 1.0,
+                "Max Drawdown [%]": 0.0,
+            }
+
+    def fake_from_signals(**kwargs):
+        captured["sl_stop"] = kwargs.get("sl_stop")
+        return DummyPF()
+
+    monkeypatch.setattr(
+        fitness.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=fake_from_signals),
+        raising=False,
+    )
+
+    score = evaluator(None, [], 0)
+    assert captured["sl_stop"] is None
+    assert score == 0.5
