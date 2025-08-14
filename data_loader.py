@@ -10,11 +10,13 @@ for the indicator and backtesting engines.)
 """
 
 import os
+import json
 import pandas as pd
 import yfinance as yf
 from binance.client import Client
 import config
 from log_utils import get_run_logger
+import artifact_utils
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
@@ -158,10 +160,35 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
 
     aligned = {name: df.loc[common_index].copy() for name, df in data.items()}
 
+    # Build ordered list of assets with their bar counts
+    counts = [{"asset": name, "bars": len(df)} for name, df in aligned.items()]
+    counts.sort(key=lambda x: x["asset"])
+
+    artifacts_dir = artifact_utils.ARTIFACTS_DIR
+    artifacts_dir.mkdir(exist_ok=True)
+    alignment_path = artifacts_dir / "aligned_assets.json"
+
+    if alignment_path.exists():
+        try:
+            saved = json.loads(alignment_path.read_text())
+            order = [item["asset"] for item in saved]
+            counts.sort(key=lambda x: order.index(x["asset"]) if x["asset"] in order else len(order))
+        except json.JSONDecodeError:
+            pass
+
+    alignment_path.write_text(json.dumps(counts, indent=2))
+    artifact_utils.append_to_manifest(alignment_path)
+
+    ordered_names = [item["asset"] for item in counts]
+    aligned = {name: aligned[name] for name in ordered_names}
+
+    print("Aligned asset universe (bar counts):")
     logger.info("Aligned asset universe (bar counts):")
-    for name, df in aligned.items():
-        logger.info("  %s: %d", name, len(df))
+    for item in counts:
+        print(f"  {item['asset']}: {item['bars']}")
+        logger.info("  %s: %d", item["asset"], item["bars"])
     if excluded:
+        print("Excluded symbols: %s" % ", ".join(excluded))
         logger.info("Excluded symbols: %s", ", ".join(excluded))
 
     return aligned
