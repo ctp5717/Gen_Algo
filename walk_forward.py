@@ -4,6 +4,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 import os
+import json
 import numpy as np
 import pygad
 import vectorbt as vbt
@@ -13,6 +14,9 @@ import data_loader
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
+from multi_asset_fitness import MultiAssetFitnessEvaluator
+import scanner_sim
+from scoring import SCORE_FUNCTIONS
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -94,18 +98,19 @@ def run_walk_forward_validation(initial_champions=None):
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
     end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
 
-    all_data = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=start_date,
-        end_date=end_date,
-        interval=config.TIMEFRAME,
+    all_data = data_loader.load_group_data(
+        config.ASSET_GROUP,
+        start_date,
+        end_date,
+        config.TIMEFRAME,
     )
-    if all_data.empty:
+    if not all_data:
         print("No data available for walk-forward validation.")
         return
 
-    start = all_data.index[0]
-    end = all_data.index[-1]
+    index = next(iter(all_data.values())).index
+    start = index[0]
+    end = index[-1]
     train_months = wf_settings.get(
         "training_period_length",
         getattr(config, "WALK_FORWARD_TRAINING_MONTHS", 12),
@@ -122,18 +127,29 @@ def run_walk_forward_validation(initial_champions=None):
 
     results = []
     champion_pool = list(initial_champions or [])
+    results_dir = os.path.join(os.path.dirname(__file__), "wf_results")
+    os.makedirs(results_dir, exist_ok=True)
 
     for idx, p in enumerate(periods, start=1):
         print(f"\n--- Window {idx} ---")
         print(f"Train: {p['train_start'].date()} -> {p['train_end'].date()}")
         print(f"Test : {p['test_start'].date()} -> {p['test_end'].date()}")
-        # fmt: off
-        train_data = all_data.loc[p['train_start']:p['train_end']]
-        test_data = all_data.loc[p['test_start']:p['test_end']]
-        # fmt: on
 
-        gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
-        evaluator = fitness.FitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map)
+        train_dict = {
+            name: df.loc[p["train_start"] : p["train_end"]]
+            for name, df in all_data.items()
+        }
+        test_dict = {
+            name: df.loc[p["test_start"] : p["test_end"]]
+            for name, df in all_data.items()
+        }
+
+        gene_space, gene_map, gene_types = parse_genes_from_config(
+            config.STRATEGY_RULES
+        )
+        evaluator = MultiAssetFitnessEvaluator(
+            train_dict, config.STRATEGY_RULES, gene_map
+        )
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
@@ -143,7 +159,7 @@ def run_walk_forward_validation(initial_champions=None):
             gene_type=gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
-            parallel_processing=['process', num_cores],
+            parallel_processing=["process", num_cores],
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
@@ -163,82 +179,126 @@ def run_walk_forward_validation(initial_champions=None):
             gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
         }
 
-        rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
-        entries = engine.process_strategy_rules(test_data, rules)
-        if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
-            print("No trades in test period.")
-            results.append({
-                'Window': idx,
-                'Total Return [%]': np.nan,
-                'Max Drawdown [%]': np.nan,
-                'Sharpe Ratio': np.nan,
-                'Sortino Ratio': np.nan,
-                'Win Rate [%]': np.nan,
-                'Params': None,
-            })
-            continue
-        exit_rules = rules.get('exit_rules', {})
-        sl_rule = exit_rules.get('stop_loss', {})
-        tsl_rule = exit_rules.get('trailing_stop', {})
-        tp_rule = exit_rules.get('take_profit', {})
+        # Build signals for test set
+        entries = {}
+        exits = {}
+        scores = {}
+        score_func_name = config.SCANNER.get("score_func", "pct_change")
+        score_func = SCORE_FUNCTIONS.get(
+            score_func_name, SCORE_FUNCTIONS["pct_change"]
+        )
+        rules = fitness._inject_genes_into_rules(
+            config.STRATEGY_RULES, gene_map, best_solution
+        )
+        for name, data in test_dict.items():
+            asset_entries = engine.process_strategy_rules(data, rules)
+            asset_exits = asset_entries.shift(
+                config.MAX_HOLD_PERIOD, fill_value=False
+            )
+            asset_exits = asset_exits.reindex(asset_entries.index, fill_value=False)
+            entries[name] = asset_entries
+            exits[name] = asset_exits
+            if config.SCANNER.get("tie_break_policy") == "score":
+                scores[name] = (
+                    score_func(data).reindex(asset_entries.index).fillna(0.0)
+                )
+        entries_df = pd.concat(entries, axis=1)
+        exits_df = pd.concat(exits, axis=1)
+        scores_df = pd.concat(scores, axis=1) if scores else None
 
-        sl_stop = (
-            sl_rule.get("params", {}).get("value")
-            if sl_rule.get("is_active", False)
-            else None
-        )
-        sl_trail = (
-            tsl_rule.get("params", {}).get("value")
-            if tsl_rule.get("is_active", False)
-            else None
-        )
-        tp_stop = (
-            tp_rule.get("params", {}).get("value")
-            if tp_rule.get("is_active", False)
-            else None
+        gated, open_count, diag = scanner_sim.gate_entries(
+            entries_df,
+            exits_df,
+            config.SCANNER.get("max_concurrent_trades", 1),
+            config.SCANNER.get("tie_break_policy", "fifo"),
+            seed=config.SCANNER.get("seed", 0),
+            scores=scores_df,
         )
 
-        time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_exit = time_exit.reindex(entries.index, fill_value=False)
+        returns_df = pd.DataFrame(0.0, index=gated.index, columns=gated.columns)
+        total_wins = 0
+        total_trades = 0
+        for name in gated.columns:
+            data = test_dict[name]
+            asset_entries = gated[name].reindex(data.index, fill_value=False)
+            asset_exits = exits_df[name].reindex(data.index, fill_value=False)
+            if asset_entries.any():
+                pf = vbt.Portfolio.from_signals(
+                    close=data["Close"],
+                    entries=asset_entries,
+                    exits=asset_exits,
+                    fees=0.001,
+                    freq=config.TIMEFRAME,
+                )
+                returns_df[name] = pf.returns()
+                t_stats = pf.trades.stats()
+                wins = t_stats.get("Win Rate [%]", 0.0) / 100 * t_stats.get(
+                    "Count", 0
+                )
+                total_wins += wins
+                total_trades += t_stats.get("Count", 0)
+            else:
+                returns_df[name] = 0.0
 
-        portfolio = vbt.Portfolio.from_signals(
-            close=test_data['Close'],
-            entries=entries,
-            exits=time_exit,
-            sl_stop=sl_stop,
-            tp_stop=tp_stop,
-            sl_trail=sl_trail,
-            fees=0.001,
-            freq=config.TIMEFRAME,
+        open_count_safe = open_count.reindex(returns_df.index).replace(0, np.nan)
+        portfolio_returns = (
+            returns_df.sum(axis=1) / open_count_safe
+        ).fillna(0.0)
+        sortino, _pf, max_dd = MultiAssetFitnessEvaluator._calc_stats(
+            portfolio_returns
         )
-        stats = portfolio.stats()
-        tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')
-        dd = stats['Max Drawdown [%]'] if isinstance(stats, dict) else stats.get('Max Drawdown [%]')
-        sharpe = stats.get('Sharpe Ratio') if isinstance(stats, dict) else stats.get('Sharpe Ratio')
-        sortino = stats.get('Sortino Ratio') if isinstance(stats, dict) else stats.get('Sortino Ratio')
-        win_rate = stats.get('Win Rate [%]') if isinstance(stats, dict) else stats.get('Win Rate [%]')
-        print(f"Test Return: {tr:.2f}% | Max DD: {dd:.2f}%")
+        total_return = (portfolio_returns + 1).prod() - 1
+        sharpe = (
+            portfolio_returns.mean() / portfolio_returns.std(ddof=0)
+            if portfolio_returns.std(ddof=0) != 0
+            else 0
+        )
+        win_rate = (
+            total_wins / total_trades * 100 if total_trades > 0 else 0
+        )
+
+        print(f"Test Return: {total_return * 100:.2f}% | Max DD: {max_dd:.2f}%")
         print("Winning Parameters:")
         for param_name, param_value in winning_params.items():
             print(f"  {param_name}: {param_value}")
 
         # Evaluate champion on validation data using composite fitness
-        val_evaluator = fitness.FitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map)
-        validation_score = val_evaluator(None, best_solution, 0)
+        val_evaluator = MultiAssetFitnessEvaluator(
+            test_dict, config.STRATEGY_RULES, gene_map
+        )
+        validation_score, *_ = val_evaluator._evaluate_once(
+            best_solution, config.SCANNER.get("seed", 0), val_evaluator.assets
+        )
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
         champion_pool = _update_champion_pool(
             champion_pool, best_solution, validation_score, gene_space, champion_settings
         )
 
-        results.append({
-            'Window': idx,
-            'Total Return [%]': tr,
-            'Max Drawdown [%]': dd,
-            'Sharpe Ratio': sharpe,
-            'Sortino Ratio': sortino,
-            'Win Rate [%]': win_rate,
-            'Params': winning_params,
-        })
+        with open(
+            os.path.join(results_dir, f"fold_{idx}_champion.json"), "w"
+        ) as f:
+            json.dump(
+                {"solution": [float(x) for x in best_solution], "params": winning_params},
+                f,
+                indent=2,
+            )
+        with open(
+            os.path.join(results_dir, f"fold_{idx}_diagnostics.json"), "w"
+        ) as f:
+            json.dump(diag, f, indent=2)
+
+        results.append(
+            {
+                "Window": idx,
+                "Total Return [%]": total_return * 100,
+                "Max Drawdown [%]": max_dd,
+                "Sharpe Ratio": sharpe,
+                "Sortino Ratio": sortino,
+                "Win Rate [%]": win_rate,
+                "Params": winning_params,
+                "Diagnostics": diag,
+            }
+        )
 
     if not results:
         print("\nNo walk-forward runs produced trades.")

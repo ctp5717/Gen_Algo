@@ -81,3 +81,4 @@ config.json
 
 # Data cache directories (if your project uses data caching)
 data_cache/
+wf_results/
