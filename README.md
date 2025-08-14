@@ -20,6 +20,7 @@ The core philosophy is a modular, "batteries-included" design that separates the
   * **Progress Tracking:** A live progress bar provides real-time feedback during optimization runs.
   * **Capacity-Constrained Multi-Asset Evaluation:** Optionally evolve a single strategy across a group of assets while a scanner simulation enforces a cap on concurrent positions.
   * **Robustness Penalties & Mini-Batching:** Penalise uneven performance across assets or Monte Carlo runs and optionally evaluate on random asset subsets for scale.
+  * **Optional Parallel Evaluation:** `config.PARALLEL` enables multiprocessing or Numba-JIT backends to speed up Monte Carlo runs. Disabled by default to keep runs reproducible.
   * **Deterministic Scanner Tie-Breaks:** Configurable scoring functions and a seed allow reproducible collision resolution and diagnostic logging.
 
 ### Project Architecture
@@ -39,6 +40,7 @@ This is the single most important file for the user. It is the central "control 
       as days converted into bars based on the selected `TIMEFRAME`.
     * **GA Tuning:** Holds all parameters for the Genetic Algorithm (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, etc.).
     * **Fitness Criteria:** Defines the `FITNESS_WEIGHTS` for the composite score, telling the AI what characteristics of a "good" strategy to prioritize.
+    * **Mini-Batching & Parallelism:** `MINIBATCH` can sample a random subset of assets each generation to trade accuracy for speed, while `PARALLEL` toggles multiprocessing or optional Numba acceleration. Both are disabled by default to preserve reproducible behaviour and reduce resource use.
 
 ---
 ### `data_loader.py` - The Data Handler

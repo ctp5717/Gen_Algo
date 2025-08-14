@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 import warnings
+import multiprocessing as mp
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,50 @@ import strategy_engine as engine
 from fitness import _inject_genes_into_rules
 import scanner_sim
 from scoring import SCORE_FUNCTIONS
+
+try:  # Optional dependency for JIT acceleration
+    import numba as nb
+except Exception:  # pragma: no cover - numba not installed
+    nb = None
+
+
+if nb is not None:
+    @nb.njit(cache=True, parallel=True)
+    def _calc_stats_numba(returns: np.ndarray) -> tuple[float, float, float]:
+        n = returns.shape[0]
+        equity = np.empty(n)
+        equity[0] = 1.0 + returns[0]
+        for i in range(1, n):
+            equity[i] = equity[i - 1] * (1.0 + returns[i])
+
+        running_max = np.empty(n)
+        running_max[0] = equity[0]
+        for i in range(1, n):
+            running_max[i] = equity[i] if equity[i] > running_max[i - 1] else running_max[i - 1]
+
+        drawdown = equity / running_max - 1.0
+        max_dd = -np.min(drawdown) * 100.0
+
+        pos = 0.0
+        neg = 0.0
+        for v in returns:
+            if v > 0:
+                pos += v
+            elif v < 0:
+                neg += v
+        profit_factor = pos / abs(neg) if neg != 0 else np.inf
+
+        downside_sum = 0.0
+        count = 0
+        for v in returns:
+            if v < 0:
+                downside_sum += v * v
+                count += 1
+        downside_std = np.sqrt(downside_sum / count) if count else 0.0
+
+        mean = np.mean(returns)
+        sortino = mean / downside_std if downside_std != 0 else np.nan
+        return sortino, profit_factor, max_dd
 
 
 class MultiAssetFitnessEvaluator:
@@ -208,7 +253,15 @@ class MultiAssetFitnessEvaluator:
 
     @staticmethod
     def _calc_stats(returns: pd.Series) -> tuple[float, float, float]:
-        """Compute Sortino, Profit Factor and Max Drawdown from returns."""
+        """Compute Sortino, Profit Factor and Max Drawdown from returns.
+
+        Falls back to the standard pandas implementation unless the config
+        requests a Numba backend and the library is available.
+        """
+        if config.PARALLEL.get("backend") == "numba" and nb is not None:
+            sortino, profit_factor, max_dd = _calc_stats_numba(returns.to_numpy())
+            return float(sortino), float(profit_factor), float(max_dd)
+
         equity = (1 + returns).cumprod()
         running_max = equity.cummax()
         drawdown = (equity / running_max) - 1.0
@@ -254,18 +307,35 @@ class MultiAssetFitnessEvaluator:
         run_scores: List[float] = []
         per_asset_runs: Dict[str, List[float]] = {}
         diag_saved = False
-        for i in range(runs):
-            score, metrics, _pr, oc, diag, trade_counts = self._evaluate_once(
-                solution, seed=base_seed + i, assets=assets
-            )
-            run_scores.append(score)
-            for a, m in metrics.items():
-                per_asset_runs.setdefault(a, []).append(m)
-            if not diag_saved and assets == self.assets:
-                self.last_open_count = oc
-                self.last_trade_counts = trade_counts
-                self.last_diagnostics = diag
-                diag_saved = True
+
+        if runs > 1 and config.PARALLEL.get("backend") == "multiprocessing":
+            args = [
+                (solution, base_seed + i, assets) for i in range(runs)
+            ]
+            with mp.Pool(processes=config.PARALLEL.get("workers") or None) as pool:
+                results = pool.starmap(self._evaluate_once, args)
+            for score, metrics, _pr, oc, diag, trade_counts in results:
+                run_scores.append(score)
+                for a, m in metrics.items():
+                    per_asset_runs.setdefault(a, []).append(m)
+                if not diag_saved and assets == self.assets:
+                    self.last_open_count = oc
+                    self.last_trade_counts = trade_counts
+                    self.last_diagnostics = diag
+                    diag_saved = True
+        else:
+            for i in range(runs):
+                score, metrics, _pr, oc, diag, trade_counts = self._evaluate_once(
+                    solution, seed=base_seed + i, assets=assets
+                )
+                run_scores.append(score)
+                for a, m in metrics.items():
+                    per_asset_runs.setdefault(a, []).append(m)
+                if not diag_saved and assets == self.assets:
+                    self.last_open_count = oc
+                    self.last_trade_counts = trade_counts
+                    self.last_diagnostics = diag
+                    diag_saved = True
 
         aggregated = float(np.median(run_scores))
         dispersion = float(np.std(run_scores))

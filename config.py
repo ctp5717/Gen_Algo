@@ -221,12 +221,26 @@ ROBUSTNESS = {
     "lambda_mc_dispersion": 0.0,
 }
 
-# Mini-batching settings are placeholders for future scalability work.
+# Mini-batching settings allow evaluating only a subset of assets each
+# generation.  Enabled is off by default so behaviour matches the original
+# single-pass evaluation.  When enabled, ``size`` controls how many assets are
+# sampled while the elite settings force full evaluations periodically to keep
+# top performers accurate.
 MINIBATCH = {
     "enabled": False,
     "size": 0,
     "elite_eval_period": 0,
     "elite_count": 0,
+}
+
+# Optional parallelisation for Monte Carlo runs or heavy statistics.  The
+# ``backend`` may be set to ``'multiprocessing'`` to distribute Monte Carlo
+# evaluations across worker processes or ``'numba'`` to use JIT-compiled
+# numerical routines.  Defaults keep parallelism disabled to preserve current
+# deterministic behaviour.
+PARALLEL = {
+    "backend": None,  # None | 'multiprocessing' | 'numba'
+    "workers": max(os.cpu_count() - 1, 1),
 }
 
 # --- 6. STRATEGY RULES DEFINITION ---
