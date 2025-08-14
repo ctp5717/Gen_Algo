@@ -117,6 +117,18 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
             print(f"Warning: Indicator '{indicator_name}' not found. Skipping rule.")
             continue
 
+        # Skip rules whose parameters are unresolved gene dictionaries or other
+        # non-numeric objects.  Passing such values into pandas-ta would
+        # propagate dicts through the indicator output and eventually result in
+        # errors like "'dict' object has no attribute 'index'" when pandas tries
+        # to align or compare them.  Treat these rules as inactive by emitting a
+        # False signal.
+        if any(not isinstance(v, (int, float, np.number)) for v in params.values()):
+            individual_signal = pd.Series(False, index=ohlc_data.index)
+            if combination_logic == 'AND':
+                final_entry_signal &= individual_signal
+            continue
+
         indicator_output = indicator_func(ohlc_data, **params)
         condition_type = condition_logic.get('type')
         
@@ -142,5 +154,5 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
 
         if combination_logic == 'AND':
             final_entry_signal &= individual_signal
-        
+
     return final_entry_signal

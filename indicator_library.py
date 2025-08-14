@@ -44,8 +44,9 @@ if not hasattr(np, "NaN"):
 # module may be imported many times.  Suppress it here to keep logs readable.
 warnings.filterwarnings(
     "ignore",
-    message="pkg_resources is deprecated as an API",
+    message=r"pkg_resources is deprecated as an API",
     category=UserWarning,
+    module=r"pandas_ta",
 )
 
 import pandas_ta as ta

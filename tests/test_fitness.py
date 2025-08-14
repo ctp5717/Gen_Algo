@@ -116,3 +116,36 @@ def test_indicator_value_dict(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "dict" not in captured.out.lower()
     assert score == -1.0
+
+
+def test_indicator_param_dict(monkeypatch, capsys):
+    """Indicators with non-numeric params are treated as inactive."""
+
+    ohlc = pd.DataFrame({"Close": [1.0, 2.0, 3.0]})
+
+    base_rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "is_active": True,
+                    "indicator": "ema",
+                    "params": {"period": {"gene": "x"}},
+                    "condition": {"type": "price_is_above_indicator"},
+                }
+            ]
+        }
+    }
+
+    evaluator = fitness.FitnessEvaluator(ohlc, base_rules, {})
+
+    # The indicator function should not be called because the period is
+    # non-numeric.  If it were, this dummy implementation would raise.
+    def boom(*args, **kwargs):
+        raise AssertionError("indicator should not be executed")
+
+    monkeypatch.setitem(fitness.engine.INDICATOR_MAPPING, "ema", boom)
+
+    score = evaluator(None, [], 0)
+    captured = capsys.readouterr()
+    assert "dict" not in captured.out.lower()
+    assert score == -1.0
