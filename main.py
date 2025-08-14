@@ -71,6 +71,37 @@ def main():
         )
         if not ohlc_data:
             return
+
+        print(
+            "Loading VALIDATION data from "
+            f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
+        )
+        val_data = data_loader.load_group_data(
+            config.ASSET_GROUP,
+            config.VALIDATION_PERIOD["start"],
+            config.VALIDATION_PERIOD["end"],
+            config.TIMEFRAME,
+        )
+        common_assets = set(ohlc_data).intersection(val_data)
+        excluded = []
+        for name in list(ohlc_data.keys()):
+            train_df = ohlc_data.get(name)
+            val_df = val_data.get(name)
+            if name not in common_assets or val_df is None or val_df.empty:
+                excluded.append(f"{name} (no validation data)")
+                ohlc_data.pop(name, None)
+                val_data.pop(name, None)
+            elif len(train_df) < config.MIN_BARS or len(val_df) < config.MIN_BARS:
+                excluded.append(f"{name} (<{config.MIN_BARS} bars)")
+                ohlc_data.pop(name, None)
+                val_data.pop(name, None)
+        if excluded:
+            logger.info("Excluded symbols: %s", ", ".join(excluded))
+        config.ASSET_GROUP = [
+            pair for pair in config.ASSET_GROUP if pair[0] in ohlc_data
+        ]
+        if not ohlc_data:
+            return
     else:
         ohlc_data = data_loader.get_data(
             ticker=config.TICKER,

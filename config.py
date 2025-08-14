@@ -90,6 +90,10 @@ if TIMEFRAME in ['1d', '1wk', '1mo']:
 else:
     training_start_date = training_end_date - relativedelta(months=training_months_intraday)
 
+# Minimum bar requirement for assets to be included in optimisation and
+# validation phases. Assets with fewer bars will be excluded.
+MIN_BARS = 100
+
 # --- 3. FINAL CONFIGURATION OUTPUTS ---
 if DATA_SOURCE == 'binance':
     TICKER = TICKER.replace('-', '')

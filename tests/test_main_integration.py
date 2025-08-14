@@ -85,6 +85,7 @@ def test_main_runs(monkeypatch):
     monkeypatch.setattr(main.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
+    monkeypatch.setattr(main.config, 'MIN_BARS', 1, raising=False)
 
     # Remove artifacts directory to isolate test
     import shutil
@@ -162,6 +163,7 @@ def test_main_uses_tuner(monkeypatch):
     monkeypatch.setattr(main.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
+    monkeypatch.setattr(main.config, 'MIN_BARS', 1, raising=False)
 
     tuned_params = {
         'sol_per_pop': 3,
@@ -249,7 +251,8 @@ def test_fitness_plot_saved(monkeypatch):
     monkeypatch.setattr(main.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
-
+    monkeypatch.setattr(main.config, 'MIN_BARS', 1, raising=False)
+    
     import json
     import shutil
     shutil.rmtree(main.artifact_utils.ARTIFACTS_DIR, ignore_errors=True)
