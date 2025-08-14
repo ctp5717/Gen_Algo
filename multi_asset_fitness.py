@@ -23,6 +23,12 @@ class MultiAssetFitnessEvaluator:
     configured maximum number of concurrent trades, and finally computes a
     portfolio-level fitness score using the same metric blend as the
     single-asset evaluator.
+
+    Notes
+    -----
+    Signals are generated using data available at time ``t`` and actual
+    positions are entered on bar ``t+1``.  All return calculations therefore
+    start from the next bar to avoid look-ahead bias.
     """
 
     def __init__(self, ohlc_dict: Dict[str, pd.DataFrame], base_rules: dict, gene_map: dict):
@@ -80,14 +86,18 @@ class MultiAssetFitnessEvaluator:
             data = self.ohlc_dict[name]
             asset_entries = engine.process_strategy_rules(data, rules)
 
-            # Initial time-based exit for max-hold
-            time_exit = asset_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-            time_exit = time_exit.reindex(asset_entries.index, fill_value=False)
+            # Shift signals forward so that trades occur on the next bar.
+            # ``asset_entries`` remains unshifted for gating (decisions at ``t``),
+            # while ``shifted_entries`` is used for exit simulation.
+            shifted_entries = asset_entries.shift(1, fill_value=False)
+
+            # Initial time-based exit for max-hold measured from execution time
+            time_exit = shifted_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
 
             # Use vectorbt to simulate exits from all exit rules
             pf = vbt.Portfolio.from_signals(
                 close=data["Close"],
-                entries=asset_entries,
+                entries=shifted_entries,
                 exits=time_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
@@ -141,11 +151,14 @@ class MultiAssetFitnessEvaluator:
             data = self.ohlc_dict[name]
             asset_entries = gated[name].reindex(data.index, fill_value=False)
             if asset_entries.any():
-                time_exit = asset_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-                time_exit = time_exit.reindex(asset_entries.index, fill_value=False)
+                # Execute trades on the next bar
+                shifted_entries = asset_entries.shift(1, fill_value=False)
+                time_exit = shifted_entries.shift(
+                    config.MAX_HOLD_PERIOD, fill_value=False
+                )
                 pf = vbt.Portfolio.from_signals(
                     close=data["Close"],
-                    entries=asset_entries,
+                    entries=shifted_entries,
                     exits=time_exit,
                     sl_stop=sl_stop,
                     tp_stop=tp_stop,
@@ -160,7 +173,8 @@ class MultiAssetFitnessEvaluator:
                 returns_df[name] = 0.0
                 per_asset_sortino[name] = 0.0
 
-        open_count_safe = open_count.reindex(returns_df.index).replace(0, np.nan)
+        # Returns are realized one bar after the position count used for gating
+        open_count_safe = open_count.shift(1).reindex(returns_df.index).replace(0, np.nan)
         portfolio_returns = (returns_df.sum(axis=1) / open_count_safe).fillna(0.0)
         trade_counts = gated.sum()
         sortino, profit_factor, max_dd = self._calc_stats(portfolio_returns)
