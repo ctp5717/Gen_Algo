@@ -172,11 +172,30 @@ CHAMPION_SELECTION_SETTINGS = {
 # function which evaluates a single strategy across all assets while enforcing
 # a live-like cap on concurrent positions.
 ASSET_GROUP = [
-    (SELECTED_ASSET_NAME, CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD"))
+    ("Bitcoin", "BTC-USD"),
+    ("Ethereum", "ETH-USD"),
+    ("Solana", "SOL-USD"),
+    ("Cardano", "ADA-USD"),
+    ("XRP", "XRP-USD"),
+    ("Dogecoin", "DOGE-USD"),
+    ("Litecoin", "LTC-USD"),
+    ("Chainlink", "LINK-USD"),
+    ("Polygon", "MATIC-USD"),
+    ("Polkadot", "DOT-USD"),
+    ("Avalanche", "AVAX-USD"),
+    ("TRON", "TRX-USD"),
+    ("Uniswap", "UNI-USD"),
+    ("Filecoin", "FIL-USD"),
+    ("Stellar", "XLM-USD"),
+    ("Near_Protocol", "NEAR-USD"),
+    ("Internet_Computer", "ICP-USD"),
+    ("Optimism", "OP-USD"),
+    ("The_Graph", "GRT-USD"),
+    ("Shiba_Inu", "SHIB-USD"),
 ]
 
 SCANNER = {
-    "max_concurrent_trades": 1,  # K in the specification
+    "max_concurrent_trades": 3,  # K in the specification
     "tie_break_policy": "fifo",  # one of: fifo | random | score
     # scoring function used when tie_break_policy == 'score'
     "score_func": "pct_change",
