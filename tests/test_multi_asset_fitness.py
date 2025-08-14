@@ -214,12 +214,12 @@ def test_exit_parity_with_single_asset(monkeypatch):
     ) = evaluator._build_signals([], list(data.keys()))
 
     for name, df in data.items():
-        entries = pd.Series([True] + [False] * (len(df.index) - 1), index=df.index)
-        time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_exit = time_exit.reindex(df.index, fill_value=False)
+        raw_entries = pd.Series([True] + [False] * (len(df.index) - 1), index=df.index)
+        shifted_entries = raw_entries.shift(1, fill_value=False)
+        time_exit = shifted_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         pf = vbt.Portfolio.from_signals(
             close=df['Close'],
-            entries=entries,
+            entries=shifted_entries,
             exits=time_exit,
             sl_stop=sl_stop,
             tp_stop=tp_stop,
@@ -237,3 +237,58 @@ def test_exit_parity_with_single_asset(monkeypatch):
 
     config.MAX_HOLD_PERIOD = orig_hold
     config.SCANNER['max_concurrent_trades'] = orig_maxcon
+
+
+def test_shifted_entries_and_next_bar_returns(monkeypatch):
+    """Entries use data from ``t`` but trades execute on ``t+1``.
+
+    The evaluator should shift signals forward one bar so the first trade
+    occurs on the bar following the signal.  Returns are therefore realised
+    starting from that next bar.
+    """
+
+    import vectorbt as vbt
+
+    idx = pd.date_range('2020', periods=4, freq='D')
+    data = {'a': pd.DataFrame({'Close': [100, 110, 120, 130]}, index=idx)}
+
+    def fake_process(df, rules):
+        # Signal on the first bar only (time ``t``)
+        return pd.Series([True, False, False, False], index=df.index)
+
+    monkeypatch.setattr('strategy_engine.process_strategy_rules', fake_process)
+
+    captured: list[pd.Series] = []
+    orig_from_signals = vbt.Portfolio.from_signals
+
+    def capture_entries(*args, **kwargs):
+        entries = kwargs.get('entries')
+        if entries is None and len(args) >= 2:
+            entries = args[1]
+        captured.append(entries.copy())
+        return orig_from_signals(*args, **kwargs)
+
+    monkeypatch.setattr(vbt.Portfolio, 'from_signals', capture_entries)
+
+    orig_hold = config.MAX_HOLD_PERIOD
+    config.MAX_HOLD_PERIOD = 1
+
+    evaluator = MultiAssetFitnessEvaluator(data, {}, {})
+    evaluator._evaluate_once([], seed=None, assets=['a'])
+
+    # Second call to ``from_signals`` is during portfolio evaluation
+    used_entries = captured[1]
+    assert used_entries.index[used_entries].tolist() == [idx[1]]
+
+    # Returns should start one bar after execution
+    time_exit = used_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+    pf = orig_from_signals(
+        close=data['a']['Close'],
+        entries=used_entries,
+        exits=time_exit,
+        freq='D',
+    )
+    non_zero = pf.returns().loc[pf.returns() != 0]
+    assert non_zero.index[0] == idx[2]
+
+    config.MAX_HOLD_PERIOD = orig_hold
