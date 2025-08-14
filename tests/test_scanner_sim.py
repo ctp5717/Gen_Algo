@@ -61,3 +61,44 @@ def test_no_reentry_while_open():
     ).astype(bool)
     gated, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1)
     assert not bool(gated.loc[gated.index[1], "A"])
+
+
+def test_capacity_zero_rejects_all():
+    entries = pd.concat(
+        {"A": _make_series([1, 0]), "B": _make_series([1, 1])}, axis=1
+    ).astype(bool)
+    exits = pd.concat(
+        {"A": _make_series([0, 0]), "B": _make_series([0, 0])}, axis=1
+    ).astype(bool)
+    gated, open_count, diag = scanner_sim.gate_entries(entries, exits, max_concurrent=0)
+    assert not gated.any().any()
+    assert (open_count == 0).all()
+    assert diag["collisions"] == 2
+    assert diag["rejected"] == 3
+    assert diag["accepted"] == 0
+    assert diag["total_candidates"] == 3
+    assert diag["accepted"] + diag["rejected"] == diag["total_candidates"]
+    assert diag["per_asset"] == {
+        "A": {"accepted": 0, "rejected": 1},
+        "B": {"accepted": 0, "rejected": 2},
+    }
+
+
+def test_per_asset_tallies():
+    entries = pd.concat(
+        {"A": _make_series([1, 0]), "B": _make_series([1, 0])}, axis=1
+    ).astype(bool)
+    exits = pd.concat(
+        {"A": _make_series([0, 1]), "B": _make_series([0, 1])}, axis=1
+    ).astype(bool)
+    gated, _, diag = scanner_sim.gate_entries(entries, exits, max_concurrent=1)
+    expected = pd.concat(
+        {"A": _make_series([1, 0]), "B": _make_series([0, 0])}, axis=1
+    ).astype(bool)
+    assert_frame_equal(gated, expected)
+    assert diag["collisions"] == 1
+    assert diag["accepted"] == 1
+    assert diag["rejected"] == 1
+    assert diag["total_candidates"] == 2
+    assert diag["per_asset"]["A"] == {"accepted": 1, "rejected": 0}
+    assert diag["per_asset"]["B"] == {"accepted": 0, "rejected": 1}
