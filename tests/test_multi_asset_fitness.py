@@ -6,6 +6,10 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 import config  # noqa: E402
+import sys, types
+
+# Stub heavy dependency
+sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 from multi_asset_fitness import MultiAssetFitnessEvaluator  # noqa: E402
 
 
@@ -106,7 +110,7 @@ def test_asset_metrics_aggregated_across_runs(monkeypatch):
         ]
         result = (
             1.0,
-            metrics_list[fake_eval.count],
+            metrics_list[fake_eval.count % len(metrics_list)],
             pd.Series(dtype=float),
             pd.Series(dtype=float),
             {"collisions": 0, "rejected": 0, "acceptance_rate": 1.0},

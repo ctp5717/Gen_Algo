@@ -11,7 +11,10 @@ import data_loader
 import fitness
 import strategy_engine as engine
 import traceback
-import matplotlib.pyplot as plt  # To display plots without blocking
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # Use non-interactive backend
+import artifact_utils
 from multi_asset_fitness import MultiAssetFitnessEvaluator
 from log_utils import get_run_logger, log_run_parameters
 
@@ -79,13 +82,15 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     ]
     print(stats[metrics_to_show].to_string())
 
-    print("\nDisplaying equity curve plot for the validation period...")
-    # Enable interactive mode so the plot window does not block execution.
-    plt.ion()
+    print("\nSaving equity curve plot for the validation period...")
     fig = portfolio.plot(
         title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
     )
-    fig.show()
+    artifact_utils.ARTIFACTS_DIR.mkdir(exist_ok=True)
+    path = artifact_utils.ARTIFACTS_DIR / "validation_equity.png"
+    fig.savefig(path)
+    plt.close(fig)
+    artifact_utils.append_to_manifest(path)
 
 
 def run_champion_analysis_multi(best_solution: list, gene_map: dict):
@@ -125,11 +130,19 @@ def run_champion_analysis_multi(best_solution: list, gene_map: dict):
         print(f"  {asset}: {int(cnt)}")
 
     equity = (1 + portfolio_returns).cumprod()
-    plt.ion()
     fig1, ax1 = plt.subplots()
     equity.plot(ax=ax1, title="Portfolio Equity Curve (Validation)")
     fig2, ax2 = plt.subplots()
     open_count.plot(ax=ax2, title="Open Positions Over Time")
     fig3, ax3 = plt.subplots()
     trade_counts.plot(kind="bar", ax=ax3, title="Per-Asset Admitted Trades")
-    fig1.show(); fig2.show(); fig3.show()
+    artifact_utils.ARTIFACTS_DIR.mkdir(exist_ok=True)
+    paths = [
+        artifact_utils.ARTIFACTS_DIR / "multi_equity.png",
+        artifact_utils.ARTIFACTS_DIR / "multi_open_positions.png",
+        artifact_utils.ARTIFACTS_DIR / "multi_trade_counts.png",
+    ]
+    for fig, path in zip([fig1, fig2, fig3], paths):
+        fig.savefig(path)
+        plt.close(fig)
+        artifact_utils.append_to_manifest(path)
