@@ -199,7 +199,7 @@ SCANNER = {
     "tie_break_policy": "fifo",  # one of: fifo | random | score
     # scoring function used when tie_break_policy == 'score'
     "score_func": "pct_change",
-    "monte_carlo_runs": 1,       # >1 enables Monte Carlo replay for random policy
+    "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy
     "seed": 0,                  # seed for random tie-breaks and sampling
     "verbose": False,           # print diagnostics from the scanner
 }
