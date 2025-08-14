@@ -73,7 +73,7 @@ class FitnessEvaluator:
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
                 sl_trail=sl_trail, # Pass the trailing stop value to the backtester
-                fees=0.001,
+                fees=config.FEES,
                 freq=config.TIMEFRAME
             )
             

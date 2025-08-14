@@ -13,6 +13,7 @@ import strategy_engine as engine
 import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
 from multi_asset_fitness import MultiAssetFitnessEvaluator
+from log_utils import get_run_logger, log_run_parameters
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """
@@ -60,7 +61,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             sl_stop=sl_stop,
             tp_stop=tp_stop,
             sl_trail=sl_trail, # Pass the trailing stop value to the backtester
-            fees=0.001,
+            fees=config.FEES,
             freq=config.TIMEFRAME
         )
 
@@ -90,6 +91,8 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
 def run_champion_analysis_multi(best_solution: list, gene_map: dict):
     """Run multi-asset analysis on the champion using validation data."""
     print("\n\n--- Multi-Asset Champion Analysis on Unseen Data ---")
+    logger = get_run_logger()
+    log_run_parameters(logger)
     print(
         "Loading validation data from "
         f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."

@@ -19,6 +19,7 @@ import fitness
 import multi_asset_fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
+from log_utils import get_run_logger, log_run_parameters
 
 
 # --- NEW: Callback function for progress tracking ---
@@ -48,6 +49,10 @@ def main():
     print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
+    print("-" * 35)
+
+    logger = get_run_logger()
+    log_run_parameters(logger)
     print("-" * 35)
 
     print(

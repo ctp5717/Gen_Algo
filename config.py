@@ -204,6 +204,10 @@ SCANNER = {
     "verbose": False,           # print diagnostics from the scanner
 }
 
+# Trading costs
+FEES = 0.001
+SLIPPAGE = 0.0
+
 # Optional robustness penalties – kept at zero by default so behaviour is
 # unchanged for existing single-asset runs.
 ROBUSTNESS = {

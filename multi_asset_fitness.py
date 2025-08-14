@@ -90,7 +90,7 @@ class MultiAssetFitnessEvaluator:
                     close=data["Close"],
                     entries=asset_entries,
                     exits=asset_exits,
-                    fees=0.001,
+                    fees=config.FEES,
                     freq=config.TIMEFRAME,
                 )
                 returns_df[name] = pf.returns()
