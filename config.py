@@ -135,17 +135,17 @@ WALK_FORWARD_SETTINGS = {
 
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
-GA_POPULATION_SIZE = 50
-GA_NUM_GENERATIONS = 25
-GA_PARENTS_MATING = 20
-GA_MUTATION_NUM_GENES = 1
+GA_POPULATION_SIZE = 100
+GA_NUM_GENERATIONS = 30
+GA_PARENTS_MATING = 30
+GA_MUTATION_NUM_GENES = 2
 
 # For serious, overnight "Discovery" runs, comment out the block above
 # and uncomment the block below.
 # GA_POPULATION_SIZE = 200
 # GA_NUM_GENERATIONS = 100
 # GA_PARENTS_MATING = 50
-# GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
+# GA_MUTATION_NUM_GENES = 4 # Mutate more genes with a more complex strategy
 
 # --- AUTO-TUNER SETTINGS ---
 AUTO_TUNE_ENABLED = True
