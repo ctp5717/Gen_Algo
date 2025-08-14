@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt  # For non-blocking plot display
 import config
 import data_loader
 import fitness
+import multi_asset_fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
@@ -53,25 +54,41 @@ def main():
         "Loading TRAINING data from "
         f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
     )
-    ohlc_data = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=config.TRAINING_PERIOD['start'],
-        end_date=config.TRAINING_PERIOD['end'],
-        interval=config.TIMEFRAME
-    )
-    if ohlc_data.empty: return
+    if len(getattr(config, "ASSET_GROUP", [])) > 1:
+        ohlc_data = data_loader.load_group_data(
+            config.ASSET_GROUP,
+            config.TRAINING_PERIOD['start'],
+            config.TRAINING_PERIOD['end'],
+            config.TIMEFRAME,
+        )
+        if not ohlc_data:
+            return
+    else:
+        ohlc_data = data_loader.get_data(
+            ticker=config.TICKER,
+            start_date=config.TRAINING_PERIOD['start'],
+            end_date=config.TRAINING_PERIOD['end'],
+            interval=config.TIMEFRAME
+        )
+        if ohlc_data.empty:
+            return
 
     print("Parsing strategy rules to identify genes for optimization...")
     gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
     if not gene_space: print("No genes found. Exiting."); return
     print(f"Found {len(gene_space)} genes to optimize:"); pprint.pprint(gene_map); print("-" * 35)
 
-    fitness_evaluator = fitness.FitnessEvaluator(
-        ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
-    )
+    if len(getattr(config, "ASSET_GROUP", [])) > 1:
+        fitness_evaluator = multi_asset_fitness.MultiAssetFitnessEvaluator(
+            ohlc_data, config.STRATEGY_RULES, gene_map
+        )
+    else:
+        fitness_evaluator = fitness.FitnessEvaluator(
+            ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
+        )
     fitness_function = fitness_evaluator.__call__
 
-    if getattr(config, "AUTO_TUNE_ENABLED", False):
+    if getattr(config, "AUTO_TUNE_ENABLED", False) and len(getattr(config, "ASSET_GROUP", [])) <= 1:
         tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)
         sol_per_pop = tuned.get("sol_per_pop", config.GA_POPULATION_SIZE) if tuned else config.GA_POPULATION_SIZE
         num_parents_mating = tuned.get("num_parents_mating", config.GA_PARENTS_MATING) if tuned else config.GA_PARENTS_MATING
@@ -118,7 +135,10 @@ def main():
     ga_instance.plot_fitness()
 
     try:
-        analysis.run_champion_analysis(best_solution, gene_map)
+        if len(getattr(config, "ASSET_GROUP", [])) > 1:
+            analysis.run_champion_analysis_multi(best_solution, gene_map)
+        else:
+            analysis.run_champion_analysis(best_solution, gene_map)
     except Exception as e:
         print(f"\nAn error occurred during the analysis phase: {e}")
         traceback.print_exc()

@@ -165,6 +165,41 @@ CHAMPION_SELECTION_SETTINGS = {
     "clone_mutation_rate": 0.20,
 }
 
+# --- 5b. MULTI-ASSET / SCANNER CONFIGURATION ---
+# By default the framework operates on a single asset.  To enable multi-asset
+# evaluation provide more than one (display_name, symbol) pair in ASSET_GROUP.
+# When more than one asset is present the GA will use the multi-asset fitness
+# function which evaluates a single strategy across all assets while enforcing
+# a live-like cap on concurrent positions.
+ASSET_GROUP = [
+    (SELECTED_ASSET_NAME, CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD"))
+]
+
+SCANNER = {
+    "max_concurrent_trades": 1,  # K in the specification
+    "tie_break_policy": "fifo",  # one of: fifo | random | score
+    # scoring function used when tie_break_policy == 'score'
+    "score_func": "pct_change",
+    "monte_carlo_runs": 1,       # >1 enables Monte Carlo replay for random policy
+    "seed": 0,                  # seed for random tie-breaks and sampling
+    "verbose": False,           # print diagnostics from the scanner
+}
+
+# Optional robustness penalties – kept at zero by default so behaviour is
+# unchanged for existing single-asset runs.
+ROBUSTNESS = {
+    "lambda_asset_dispersion": 0.0,
+    "lambda_mc_dispersion": 0.0,
+}
+
+# Mini-batching settings are placeholders for future scalability work.
+MINIBATCH = {
+    "enabled": False,
+    "size": 0,
+    "elite_eval_period": 0,
+    "elite_count": 0,
+}
+
 # --- 6. STRATEGY RULES DEFINITION ---
 # Here you can define a "master list" of all potential conditions.
 # Use the `is_active` flag to control which ones are used in a given run.

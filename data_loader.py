@@ -104,3 +104,50 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
     except Exception as e:
         print(f"An error occurred while downloading data for {ticker}: {e}")
         return pd.DataFrame()
+
+
+def load_group_data(asset_group, start_date: str, end_date: str, interval: str = '1d'):
+    """Load and align OHLCV data for a list of assets.
+
+    Parameters
+    ----------
+    asset_group : list of tuples
+        List of ``(display_name, symbol)`` pairs.
+    start_date : str
+        Inclusive start date in ``YYYY-MM-DD`` format.
+    end_date : str
+        Inclusive end date in ``YYYY-MM-DD`` format.
+    interval : str
+        Bar interval (e.g. '1d', '1h', '15m').
+
+    Returns
+    -------
+    dict
+        Mapping of ``display_name`` to aligned OHLCV ``DataFrame``.
+
+    Notes
+    -----
+    The returned frames share the intersection of timestamps so that any
+    cross-asset operations operate on perfectly aligned data.
+    """
+    data = {}
+    for name, symbol in asset_group:
+        ticker = symbol
+        if config.DATA_SOURCE == 'binance':
+            ticker = ticker.replace('-', '')
+            if ticker.endswith('USD') and not ticker.endswith('USDT'):
+                ticker = ticker[:-3] + 'USDT'
+        df = get_data(ticker, start_date, end_date, interval)
+        if not df.empty:
+            data[name] = df
+
+    if not data:
+        return {}
+
+    # Align all frames on the intersection of timestamps for fairness
+    common_index = None
+    for df in data.values():
+        common_index = df.index if common_index is None else common_index.intersection(df.index)
+
+    aligned = {name: df.loc[common_index].copy() for name, df in data.items()}
+    return aligned

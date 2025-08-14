@@ -18,6 +18,9 @@ The core philosophy is a modular, "batteries-included" design that separates the
   * **Composite Fitness Function:** The GA optimizes for a blended score of multiple metrics (Sortino Ratio, Profit Factor, Max Drawdown) to find more balanced strategies.
   * **Automated Validation:** After optimization, the "champion" strategy is automatically tested on a separate, unseen out-of-sample dataset.
   * **Progress Tracking:** A live progress bar provides real-time feedback during optimization runs.
+  * **Capacity-Constrained Multi-Asset Evaluation:** Optionally evolve a single strategy across a group of assets while a scanner simulation enforces a cap on concurrent positions.
+  * **Robustness Penalties & Mini-Batching:** Penalise uneven performance across assets or Monte Carlo runs and optionally evaluate on random asset subsets for scale.
+  * **Deterministic Scanner Tie-Breaks:** Configurable scoring functions and a seed allow reproducible collision resolution and diagnostic logging.
 
 ### Project Architecture
 
