@@ -1,12 +1,11 @@
 import os
 import sys
+import types
+import pandas as pd
+import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
 import config  # noqa: E402
-import sys, types
 
 # Stub heavy dependency
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
