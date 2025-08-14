@@ -160,7 +160,14 @@ def test_exit_parity_with_single_asset(monkeypatch):
     config.MAX_HOLD_PERIOD = 10
     config.SCANNER['max_concurrent_trades'] = 3
 
-    entries_df, exits_df, _scores, sl_stop, tp_stop, sl_trail = evaluator._build_signals([], list(data.keys()))
+    (
+        entries_df,
+        exits_df,
+        _scores,
+        sl_stop,
+        tp_stop,
+        sl_trail,
+    ) = evaluator._build_signals([], list(data.keys()))
 
     for name, df in data.items():
         entries = pd.Series([True] + [False] * (len(df.index) - 1), index=df.index)

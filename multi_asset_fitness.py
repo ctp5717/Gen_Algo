@@ -38,7 +38,14 @@ class MultiAssetFitnessEvaluator:
 
     def _build_signals(
         self, solution, assets: List[str]
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None, float | None, float | None, float | None]:
+    ) -> tuple[
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame | None,
+        float | None,
+        float | None,
+        float | None,
+    ]:
         entries: Dict[str, pd.Series] = {}
         exits: Dict[str, pd.Series] = {}
         scores: Dict[str, pd.Series] = {}
@@ -50,11 +57,21 @@ class MultiAssetFitnessEvaluator:
         tsl_rule = exit_rules.get("trailing_stop", {})
         tp_rule = exit_rules.get("take_profit", {})
 
-        sl_stop = sl_rule.get("params", {}).get("value") if sl_rule.get("is_active", False) else None
-        sl_trail = (
-            tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
+        sl_stop = (
+            sl_rule.get("params", {}).get("value")
+            if sl_rule.get("is_active", False)
+            else None
         )
-        tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
+        sl_trail = (
+            tsl_rule.get("params", {}).get("value")
+            if tsl_rule.get("is_active", False)
+            else None
+        )
+        tp_stop = (
+            tp_rule.get("params", {}).get("value")
+            if tp_rule.get("is_active", False)
+            else None
+        )
 
         score_func_name = config.SCANNER.get("score_func", "pct_change")
         score_func = SCORE_FUNCTIONS.get(score_func_name, SCORE_FUNCTIONS["pct_change"])
@@ -106,7 +123,9 @@ class MultiAssetFitnessEvaluator:
         Dict[str, float],
         pd.Series,
     ]:
-        entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail = self._build_signals(solution, assets)
+        entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail = self._build_signals(
+            solution, assets
+        )
         gated, open_count, diag = scanner_sim.gate_entries(
             entries_df,
             exits_df,
