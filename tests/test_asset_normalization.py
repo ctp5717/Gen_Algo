@@ -37,7 +37,11 @@ def test_asset_list_normalized(monkeypatch):
     gene_space = [{'low': 0, 'high': 1}]
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
     gene_types = [float]
-    monkeypatch.setattr(main, 'parse_genes_from_config', lambda *a, **k: (gene_space, gene_map, gene_types))
+
+    def parse_stub(*_args, **_kwargs):
+        return gene_space, gene_map, gene_types
+
+    monkeypatch.setattr(main, 'parse_genes_from_config', parse_stub)
 
     class DummyGA:
         def __init__(self, *a, **k):
@@ -67,8 +71,10 @@ def test_asset_list_normalized(monkeypatch):
     monkeypatch.setattr(main.config, 'GA_POPULATION_SIZE', 1, raising=False)
     monkeypatch.setattr(main.config, 'GA_PARENTS_MATING', 1, raising=False)
     monkeypatch.setattr(main.config, 'GA_MUTATION_NUM_GENES', 1, raising=False)
-    monkeypatch.setattr(main.config, 'TRAINING_PERIOD', {'start': 'train', 'end': 't_end'}, raising=False)
-    monkeypatch.setattr(main.config, 'VALIDATION_PERIOD', {'start': 'val', 'end': 'v_end'}, raising=False)
+    train_period = {'start': 'train', 'end': 't_end'}
+    val_period = {'start': 'val', 'end': 'v_end'}
+    monkeypatch.setattr(main.config, 'TRAINING_PERIOD', train_period, raising=False)
+    monkeypatch.setattr(main.config, 'VALIDATION_PERIOD', val_period, raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
     monkeypatch.setattr(main.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)

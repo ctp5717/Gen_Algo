@@ -252,7 +252,7 @@ def test_fitness_plot_saved(monkeypatch):
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
     monkeypatch.setattr(main.config, 'MIN_BARS', 1, raising=False)
-    
+
     import json
     import shutil
     shutil.rmtree(main.artifact_utils.ARTIFACTS_DIR, ignore_errors=True)
