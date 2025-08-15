@@ -4,6 +4,10 @@
 Main Application Orchestrator for the GA Trading Framework
 (This version includes a progress indicator for the GA run)
 """
+from utils.warnings_util import suppress_third_party_warnings
+
+suppress_third_party_warnings()
+
 import os
 import argparse
 import pygad

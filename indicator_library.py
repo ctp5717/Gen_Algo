@@ -27,6 +27,7 @@ To Add a New Indicator:
 
 import pandas as pd
 import numpy as np
+from utils.warnings_util import suppress_third_party_warnings
 
 # -- Compatibility shim -------------------------------------------------------
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
@@ -37,7 +38,16 @@ import numpy as np
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
-import pandas_ta as ta
+ta = None
+
+
+def _get_ta():
+    global ta
+    if ta is None:
+        suppress_third_party_warnings()
+        import pandas_ta as ta_module
+        ta = ta_module
+    return ta
 
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
@@ -52,7 +62,8 @@ def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("EMA 'period' parameter cannot be None.")
-    
+
+    _get_ta()
     # pandas-ta automatically finds the 'Close' column to perform the calculation
     ema_series = ohlc_data.ta.ema(length=period)
     
@@ -74,7 +85,8 @@ def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("ATR 'period' parameter cannot be None.")
-    
+
+    _get_ta()
     # pandas-ta uses the high, low, and close columns for the ATR calculation
     atr_series = ohlc_data.ta.atr(length=period)
     
@@ -89,7 +101,8 @@ def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("RSI 'period' parameter cannot be None.")
-    
+
+    _get_ta()
     rsi_series = ohlc_data.ta.rsi(length=period)
     
     if rsi_series is None:
@@ -106,7 +119,8 @@ def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -
     """
     if not all([fast, slow, signal]):
         raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
-    
+
+    _get_ta()
     # The .ta.macd() function returns a DataFrame with multiple columns
     macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
 
@@ -124,7 +138,8 @@ def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd
     """
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
-    
+
+    _get_ta()
     bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
 
     if bbands_df is None:

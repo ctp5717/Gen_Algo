@@ -14,6 +14,7 @@ import strategy_engine as engine
 from fitness import _inject_genes_into_rules
 import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
+from utils.warnings_util import suppress_third_party_warnings
 
 try:  # Optional dependency for JIT acceleration
     import numba as nb
@@ -182,6 +183,7 @@ class MultiAssetFitnessEvaluator:
         Dict[str, float],
         pd.Series,
     ]:
+        suppress_third_party_warnings()
         entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail = self._build_signals(
             solution, assets
         )
@@ -362,8 +364,8 @@ class MultiAssetFitnessEvaluator:
         if config.SCANNER.get("verbose") and self.last_diagnostics:
             diag = self.last_diagnostics
             print(
-                f"Collisions: {diag['collisions']} | Rejected: {diag['rejected']} | "
-                f"Acceptance Rate: {diag['acceptance_rate']:.2f} | "
-                f"MC Dispersion: {diag['mc_dispersion']:.4f}"
+                f"Collisions: {diag.get('collisions', 0)} | Rejected: {diag.get('rejected', 0)} | "
+                f"Acceptance Rate: {diag.get('acceptance_rate', 0.0):.2f} | "
+                f"MC Dispersion: {diag.get('mc_dispersion', 0.0):.4f}"
             )
         return result
