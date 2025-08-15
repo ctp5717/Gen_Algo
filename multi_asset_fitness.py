@@ -174,10 +174,16 @@ class MultiAssetFitnessEvaluator:
         close_df = pd.DataFrame(close_dict).sort_index()
         common_index = close_df.index
         entries_df = (
-            to_frame(entries, "entries", common_index).fillna(False).astype(bool).reindex(columns=assets)
+            to_frame(entries, "entries", common_index)
+            .fillna(False)
+            .astype(bool)
+            .reindex(columns=assets)
         )
         exits_df = (
-            to_frame(exits, "exits", common_index).fillna(False).astype(bool).reindex(columns=assets)
+            to_frame(exits, "exits", common_index)
+            .fillna(False)
+            .astype(bool)
+            .reindex(columns=assets)
         )
         scores_df = (
             to_frame(scores, "scores", common_index).fillna(0.0).reindex(columns=assets)
