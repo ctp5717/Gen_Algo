@@ -86,6 +86,17 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
 wf_logger = get_logger(__name__)
 
 
+# Global error tracker for GA callback during walk-forward validation
+_wf_error_tracker = None
+
+
+def _wf_on_generation(ga_instance):
+    """Flush evaluator errors at each GA generation."""
+    if _wf_error_tracker is not None:
+        g = ga_instance.generations_completed
+        _wf_error_tracker.flush_summary(wf_logger, f"Generation {g}")
+
+
 def run_walk_forward_validation(initial_champions=None):
     """Execute walk-forward validation across the available data.
 
@@ -157,12 +168,8 @@ def run_walk_forward_validation(initial_champions=None):
         evaluator = MultiAssetFitnessEvaluator(
             train_dict, config.STRATEGY_RULES, gene_map
         )
-        error_tracker = getattr(evaluator, "error_tracker", None)
-
-        def on_generation(ga_instance):
-            if error_tracker is not None:
-                g = ga_instance.generations_completed
-                error_tracker.flush_summary(wf_logger, f"Generation {g}")
+        global _wf_error_tracker
+        _wf_error_tracker = getattr(evaluator, "error_tracker", None)
 
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
@@ -174,7 +181,7 @@ def run_walk_forward_validation(initial_champions=None):
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=["process", num_cores],
-            on_generation=on_generation,
+            on_generation=_wf_on_generation,
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
@@ -187,6 +194,7 @@ def run_walk_forward_validation(initial_champions=None):
                 if hasattr(ga_instance, "initial_population"):
                     ga_instance.initial_population[:num_champs] = champs[:num_champs]
         ga_instance.run()
+        _wf_error_tracker = None
         best_solution, best_fitness, _ = ga_instance.best_solution()
         print(f"Best training fitness: {best_fitness:.4f}")
 
