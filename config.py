@@ -136,7 +136,7 @@ WALK_FORWARD_SETTINGS = {
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
 GA_POPULATION_SIZE = 50
-GA_NUM_GENERATIONS = 20
+GA_NUM_GENERATIONS = 25
 GA_PARENTS_MATING = 20
 GA_MUTATION_NUM_GENES = 1
 
@@ -181,12 +181,36 @@ CHAMPION_SELECTION_SETTINGS = {
 # function which evaluates a single strategy across all assets while enforcing
 # a live-like cap on concurrent positions.
 ASSET_GROUP = [
+    ("Bitcoin", "BTC-USD"),
     ("Ethereum", "ETH-USD"),
     ("Solana", "SOL-USD"),
     ("Cardano", "ADA-USD"),
     ("XRP", "XRP-USD"),
     ("Dogecoin", "DOGE-USD"),
+    ("Litecoin", "LTC-USD"),
+    ("Chainlink", "LINK-USD"),
+    ("Polygon", "MATIC-USD"),
+    ("Polkadot", "DOT-USD"),
+    ("Avalanche", "AVAX-USD"),
+    ("TRON", "TRX-USD"),
+    ("Uniswap", "UNI-USD"),
+    ("Filecoin", "FIL-USD"),
+    ("Stellar", "XLM-USD"),
+    ("Near_Protocol", "NEAR-USD"),
+    ("Internet_Computer", "ICP-USD"),
+    ("Optimism", "OP-USD"),
+    ("The_Graph", "GRT-USD"),
+    ("Shiba_Inu", "SHIB-USD"),
 ]
+
+# Small Asset Basket
+# ASSET_GROUP = [
+#    ("Ethereum", "ETH-USD"),
+#    ("Solana", "SOL-USD"),
+#    ("Cardano", "ADA-USD"),
+#    ("XRP", "XRP-USD"),
+#    ("Dogecoin", "DOGE-USD"),
+#]
 
 # Asset Template
 # ASSET_GROUP = [
@@ -216,15 +240,15 @@ SCANNER = {
     # Intended live cap on open positions. Override via --max-concurrent-trades
     "max_concurrent_trades": 3,
     # Recommended live policy. One of: fifo | random | score
-    "tie_break_policy": "fifo",
+    "tie_break_policy": "random",
     # scoring function used when tie_break_policy == 'score'
     "score_func": "pct_change",
     # Optional scaling applied to scores to reduce micro-cap bias. One of:
     # None | 'atr' | 'dollar_volume'
     "score_scaling": None,
-    "monte_carlo_runs": 1,       # >1 enables Monte Carlo replay for random policy
-    "seed": 0,                  # seed for random tie-breaks and sampling
-    "verbose": True,           # print diagnostics from the scanner
+    "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy
+    "seed": 123,                  # seed for random tie-breaks and sampling
+    "verbose": False,           # print diagnostics from the scanner
 }
 
 # Trading costs
@@ -234,8 +258,8 @@ SLIPPAGE = 0.0
 # Optional robustness penalties – kept at zero by default so behaviour is
 # unchanged for existing single-asset runs.
 ROBUSTNESS = {
-    "lambda_asset_dispersion": 0.0,
-    "lambda_mc_dispersion": 0.0,
+    "lambda_asset_dispersion": 0.1,
+    "lambda_mc_dispersion": 0.05,
 }
 
 # Mini-batching settings allow evaluating only a subset of assets each
@@ -244,10 +268,10 @@ ROBUSTNESS = {
 # sampled while the elite settings force full evaluations periodically to keep
 # top performers accurate.
 MINIBATCH = {
-    "enabled": False,
-    "size": 0,
-    "elite_eval_period": 0,
-    "elite_count": 0,
+    "enabled": True,
+    "size": 7,
+    "elite_eval_period": 5,
+    "elite_count": 10,
 }
 
 # Optional parallelisation for Monte Carlo runs or heavy statistics.  The
