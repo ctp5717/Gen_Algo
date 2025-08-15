@@ -355,23 +355,32 @@ class MultiAssetFitnessEvaluator:
 
     def __call__(self, ga_instance, solution, sol_idx):
         logger = get_logger(__name__)
+        generation = getattr(ga_instance, "generations_completed", 0)
         try:
             # Determine asset subset for mini-batching
             assets = self.assets
+            is_elite_eval = False
             if config.MINIBATCH.get("enabled"):
                 size = config.MINIBATCH.get("size", len(self.assets)) or len(self.assets)
                 size = min(size, len(self.assets))
-                generation = getattr(ga_instance, "generations_completed", 0)
                 if config.MINIBATCH.get("elite_eval_period", 0) > 0 and (
                     generation % config.MINIBATCH["elite_eval_period"] == 0
                     and sol_idx < config.MINIBATCH.get("elite_count", 0)
                 ):
                     assets = self.assets
+                    is_elite_eval = True
                 else:
                     rng = np.random.default_rng(
                         config.SCANNER.get("seed", 0) + generation + sol_idx
                     )
                     assets = list(rng.choice(self.assets, size=size, replace=False))
+
+            logger.info(
+                "Generation %d, solution %d, assets: %s",
+                generation,
+                sol_idx,
+                ",".join(map(str, assets)),
+            )
 
             runs = config.SCANNER.get("monte_carlo_runs", 1)
             # Ensure a minimum number of runs for stochastic tie-breaks
@@ -431,7 +440,8 @@ class MultiAssetFitnessEvaluator:
                 penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * dispersion
 
             logger.debug(
-                "run_scores=%s median=%.4f dispersion=%.4f asset_dispersion=%.4f mc_dispersion=%.4f",
+                "run_scores=%s median=%.4f dispersion=%.4f "
+                "asset_dispersion=%.4f mc_dispersion=%.4f",
                 run_scores,
                 aggregated,
                 dispersion,
@@ -440,6 +450,14 @@ class MultiAssetFitnessEvaluator:
             )
 
             result = float(aggregated - penalty_asset - penalty_mc)
+
+            if is_elite_eval:
+                logger.info(
+                    "Generation %d, elite solution %d rescored on full asset set with fitness %.4f",
+                    generation,
+                    sol_idx,
+                    result,
+                )
 
             self.last_diagnostics = self.last_diagnostics or {}
             self.last_diagnostics.update(
