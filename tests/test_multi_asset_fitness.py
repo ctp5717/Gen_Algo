@@ -2,6 +2,7 @@ import os
 import sys
 import types
 import pandas as pd
+import numpy as np
 import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -195,6 +196,55 @@ def test_collects_diagnostics(monkeypatch):
     assert "collisions" in evaluator.last_diagnostics
     assert evaluator.last_trade_counts is not None
 
+
+def test_monte_carlo_diagnostics_saved_and_logged(monkeypatch, caplog):
+    data = make_data()
+
+    scores = [1.0, 2.0, 3.0]
+    metrics = {"up": 1.0, "down": 2.0}
+
+    def fake_eval(self, solution, seed, assets):
+        idx = fake_eval.calls
+        fake_eval.calls += 1
+        return (
+            scores[idx],
+            metrics,
+            pd.Series(dtype=float),
+            pd.Series(dtype=float),
+            {},
+            pd.Series(dtype=float),
+        )
+
+    fake_eval.calls = 0
+
+    orig_runs = config.SCANNER["monte_carlo_runs"]
+    orig_lambda_asset = config.ROBUSTNESS["lambda_asset_dispersion"]
+    orig_lambda_mc = config.ROBUSTNESS["lambda_mc_dispersion"]
+
+    config.SCANNER["monte_carlo_runs"] = 3
+    config.ROBUSTNESS["lambda_asset_dispersion"] = 1.0
+    config.ROBUSTNESS["lambda_mc_dispersion"] = 1.0
+
+    monkeypatch.setattr(MultiAssetFitnessEvaluator, "_evaluate_once", fake_eval, raising=False)
+
+    ga = DummyGA()
+    evaluator = MultiAssetFitnessEvaluator(data, {}, {})
+
+    with caplog.at_level("DEBUG"):
+        evaluator(ga, [], 0)
+
+    diag = evaluator.last_diagnostics
+    assert diag["run_scores"] == scores
+    assert pytest.approx(diag["mc_median"]) == np.median(scores)
+    assert pytest.approx(diag["dispersion"]) == np.std(scores)
+    assert pytest.approx(diag["asset_dispersion"]) == 0.5
+    assert pytest.approx(diag["mc_dispersion"]) == np.std(scores)
+
+    assert "run_scores=[1.0, 2.0, 3.0]" in caplog.text
+
+    config.SCANNER["monte_carlo_runs"] = orig_runs
+    config.ROBUSTNESS["lambda_asset_dispersion"] = orig_lambda_asset
+    config.ROBUSTNESS["lambda_mc_dispersion"] = orig_lambda_mc
 
 def test_asset_metrics_aggregated_across_runs(monkeypatch):
     data = make_data()
