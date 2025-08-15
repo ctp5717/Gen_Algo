@@ -348,3 +348,38 @@ def test_shifted_entries_and_next_bar_returns(monkeypatch):
     assert non_zero.index[0] == idx[2]
 
     config.MAX_HOLD_PERIOD = orig_hold
+
+
+def test_single_asset_matches_single_eval(monkeypatch):
+    data = make_data()
+    patch_engine(monkeypatch, [True, False, True, False, True])
+    orig_hold = config.MAX_HOLD_PERIOD
+    config.MAX_HOLD_PERIOD = 1
+
+    evaluator = MultiAssetFitnessEvaluator({'up': data['up']}, {}, {})
+    _, _, portfolio_returns, _oc, _diag, trade_counts = evaluator._evaluate_once(
+        [], seed=0, assets=['up']
+    )
+
+    import vectorbt as vbt  # local import to avoid heavy dependency at module load
+
+    entries = pd.Series([True, False, True, False, True], index=data['up'].index)
+    shifted = entries.shift(1, fill_value=False)
+    time_exit = shifted.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+    pf = vbt.Portfolio.from_signals(
+        close=data['up']['Close'],
+        entries=shifted,
+        exits=time_exit,
+        fees=config.FEES,
+        slippage=getattr(config, 'SLIPPAGE', 0.0),
+        freq=config.TIMEFRAME,
+    )
+    expected_returns = pf.returns()
+    expected_trades = pf.trades.count()
+
+    pd.testing.assert_series_equal(
+        portfolio_returns, expected_returns, rtol=1e-6, atol=1e-8, check_names=False
+    )
+    assert trade_counts['up'] == expected_trades
+
+    config.MAX_HOLD_PERIOD = orig_hold

@@ -240,6 +240,7 @@ class MultiAssetFitnessEvaluator:
 
         returns_df = pd.DataFrame(0.0, index=gated.index, columns=gated.columns)
         per_asset_sortino: Dict[str, float] = {}
+        trade_counts_dict: Dict[str, float] = {}
         for name in assets:
             data = self.ohlc_dict[name]
             asset_entries = gated[name].reindex(data.index, fill_value=False)
@@ -262,14 +263,44 @@ class MultiAssetFitnessEvaluator:
                 )
                 returns_df[name] = pf.returns()
                 per_asset_sortino[name] = pf.stats()["Sortino Ratio"]
+                trade_counts_dict[name] = pf.trades.count()
             else:
                 returns_df[name] = 0.0
                 per_asset_sortino[name] = 0.0
+                trade_counts_dict[name] = 0.0
 
         # Returns are realized one bar after the position count used for gating
         open_count_safe = open_count.shift(1).reindex(returns_df.index).replace(0, np.nan)
         portfolio_returns = (returns_df.sum(axis=1) / open_count_safe).fillna(0.0)
-        trade_counts = gated.sum()
+        trade_counts = pd.Series(trade_counts_dict)
+
+        if len(assets) == 1:
+            name = assets[0]
+            data_sa = self.ohlc_dict[name]
+            sa_entries = entries_df[name]
+            shifted_sa = sa_entries.shift(1, fill_value=False)
+            time_exit_sa = shifted_sa.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+            pf_sa = vbt.Portfolio.from_signals(
+                close=data_sa["Close"],
+                entries=shifted_sa,
+                exits=time_exit_sa,
+                sl_stop=sl_stop,
+                tp_stop=tp_stop,
+                sl_trail=sl_trail,
+                fees=config.FEES,
+                slippage=getattr(config, "SLIPPAGE", 0.0),
+                freq=config.TIMEFRAME,
+            )
+            sa_returns = pf_sa.returns()
+            sa_trade_count = pf_sa.trades.count()
+            np.testing.assert_allclose(
+                portfolio_returns.values,
+                sa_returns.values,
+                rtol=1e-6,
+                atol=1e-8,
+            )
+            assert int(trade_counts[name]) == int(sa_trade_count)
+
         sortino, profit_factor, max_dd = self._calc_stats(portfolio_returns)
 
         if np.isinf(profit_factor) or profit_factor > 5:
