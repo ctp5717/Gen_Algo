@@ -16,6 +16,7 @@ import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
 from utils.warnings_util import suppress_third_party_warnings
 from utils.dataframe_util import to_frame
+from utils.logging_util import get_logger, OncePerGenerationErrors
 
 try:  # Optional dependency for JIT acceleration
     import numba as nb
@@ -62,6 +63,11 @@ if nb is not None:
         return sortino, profit_factor, max_dd
 
 
+get_logger(__name__)
+error_tracker = OncePerGenerationErrors()
+VERY_LOW_FITNESS = -999.0
+
+
 class MultiAssetFitnessEvaluator:
     """Evaluate a single strategy across multiple assets.
 
@@ -88,6 +94,7 @@ class MultiAssetFitnessEvaluator:
         self.last_open_count: pd.Series | None = None
         self.last_trade_counts: pd.Series | None = None
         self.last_diagnostics: Dict[str, float] | None = None
+        self.error_tracker = error_tracker
 
     def _build_signals(
         self, solution, assets: List[str]
@@ -309,91 +316,97 @@ class MultiAssetFitnessEvaluator:
         return sortino, profit_factor, max_dd
 
     def __call__(self, ga_instance, solution, sol_idx):
-        # Determine asset subset for mini-batching
-        assets = self.assets
-        if config.MINIBATCH.get("enabled"):
-            size = config.MINIBATCH.get("size", len(self.assets)) or len(self.assets)
-            size = min(size, len(self.assets))
-            generation = getattr(ga_instance, "generations_completed", 0)
-            if config.MINIBATCH.get("elite_eval_period", 0) > 0 and (
-                generation % config.MINIBATCH["elite_eval_period"] == 0
-                and sol_idx < config.MINIBATCH.get("elite_count", 0)
+        logger = get_logger(__name__)
+        try:
+            # Determine asset subset for mini-batching
+            assets = self.assets
+            if config.MINIBATCH.get("enabled"):
+                size = config.MINIBATCH.get("size", len(self.assets)) or len(self.assets)
+                size = min(size, len(self.assets))
+                generation = getattr(ga_instance, "generations_completed", 0)
+                if config.MINIBATCH.get("elite_eval_period", 0) > 0 and (
+                    generation % config.MINIBATCH["elite_eval_period"] == 0
+                    and sol_idx < config.MINIBATCH.get("elite_count", 0)
+                ):
+                    assets = self.assets
+                else:
+                    rng = np.random.default_rng(
+                        config.SCANNER.get("seed", 0) + generation + sol_idx
+                    )
+                    assets = list(rng.choice(self.assets, size=size, replace=False))
+
+            runs = config.SCANNER.get("monte_carlo_runs", 1)
+            # Ensure a minimum number of runs for stochastic tie-breaks
+            if (
+                config.SCANNER.get("tie_break_policy") == "random"
+                and runs < 3
             ):
-                assets = self.assets
+                warnings.warn(
+                    "monte_carlo_runs increased to 3 for random tie-break policy",
+                    RuntimeWarning,
+                )
+                runs = 3
+            base_seed = config.SCANNER.get("seed", 0)
+            run_scores: List[float] = []
+            per_asset_runs: Dict[str, List[float]] = {}
+            diag_saved = False
+
+            if runs > 1 and config.PARALLEL.get("backend") == "multiprocessing":
+                args = [
+                    (solution, base_seed + i, assets) for i in range(runs)
+                ]
+                with mp.Pool(processes=config.PARALLEL.get("workers") or None) as pool:
+                    results = pool.starmap(self._evaluate_once, args)
+                for score, metrics, _pr, oc, diag, trade_counts in results:
+                    run_scores.append(score)
+                    for a, m in metrics.items():
+                        per_asset_runs.setdefault(a, []).append(m)
+                    if not diag_saved and assets == self.assets:
+                        self.last_open_count = oc
+                        self.last_trade_counts = trade_counts
+                        self.last_diagnostics = diag
+                        diag_saved = True
             else:
-                rng = np.random.default_rng(
-                    config.SCANNER.get("seed", 0) + generation + sol_idx
+                for i in range(runs):
+                    score, metrics, _pr, oc, diag, trade_counts = self._evaluate_once(
+                        solution, seed=base_seed + i, assets=assets
+                    )
+                    run_scores.append(score)
+                    for a, m in metrics.items():
+                        per_asset_runs.setdefault(a, []).append(m)
+                    if not diag_saved and assets == self.assets:
+                        self.last_open_count = oc
+                        self.last_trade_counts = trade_counts
+                        self.last_diagnostics = diag
+                        diag_saved = True
+
+            aggregated = float(np.median(run_scores))
+            dispersion = float(np.std(run_scores))
+            penalty_asset = 0.0
+            penalty_mc = 0.0
+            if per_asset_runs and config.ROBUSTNESS.get("lambda_asset_dispersion", 0.0) > 0:
+                per_asset_avg = {a: np.mean(v) for a, v in per_asset_runs.items()}
+                penalty_asset = config.ROBUSTNESS["lambda_asset_dispersion"] * np.std(
+                    list(per_asset_avg.values())
                 )
-                assets = list(rng.choice(self.assets, size=size, replace=False))
+            if config.ROBUSTNESS.get("lambda_mc_dispersion", 0.0) > 0:
+                penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * dispersion
 
-        runs = config.SCANNER.get("monte_carlo_runs", 1)
-        # Ensure a minimum number of runs for stochastic tie-breaks
-        if (
-            config.SCANNER.get("tie_break_policy") == "random"
-            and runs < 3
-        ):
-            warnings.warn(
-                "monte_carlo_runs increased to 3 for random tie-break policy",
-                RuntimeWarning,
-            )
-            runs = 3
-        base_seed = config.SCANNER.get("seed", 0)
-        run_scores: List[float] = []
-        per_asset_runs: Dict[str, List[float]] = {}
-        diag_saved = False
-
-        if runs > 1 and config.PARALLEL.get("backend") == "multiprocessing":
-            args = [
-                (solution, base_seed + i, assets) for i in range(runs)
-            ]
-            with mp.Pool(processes=config.PARALLEL.get("workers") or None) as pool:
-                results = pool.starmap(self._evaluate_once, args)
-            for score, metrics, _pr, oc, diag, trade_counts in results:
-                run_scores.append(score)
-                for a, m in metrics.items():
-                    per_asset_runs.setdefault(a, []).append(m)
-                if not diag_saved and assets == self.assets:
-                    self.last_open_count = oc
-                    self.last_trade_counts = trade_counts
-                    self.last_diagnostics = diag
-                    diag_saved = True
-        else:
-            for i in range(runs):
-                score, metrics, _pr, oc, diag, trade_counts = self._evaluate_once(
-                    solution, seed=base_seed + i, assets=assets
+            result = float(aggregated - penalty_asset - penalty_mc)
+            if self.last_diagnostics is not None:
+                self.last_diagnostics.update(
+                    {"mc_runs": runs, "mc_median": aggregated, "mc_dispersion": dispersion}
                 )
-                run_scores.append(score)
-                for a, m in metrics.items():
-                    per_asset_runs.setdefault(a, []).append(m)
-                if not diag_saved and assets == self.assets:
-                    self.last_open_count = oc
-                    self.last_trade_counts = trade_counts
-                    self.last_diagnostics = diag
-                    diag_saved = True
 
-        aggregated = float(np.median(run_scores))
-        dispersion = float(np.std(run_scores))
-        penalty_asset = 0.0
-        penalty_mc = 0.0
-        if per_asset_runs and config.ROBUSTNESS.get("lambda_asset_dispersion", 0.0) > 0:
-            per_asset_avg = {a: np.mean(v) for a, v in per_asset_runs.items()}
-            penalty_asset = config.ROBUSTNESS["lambda_asset_dispersion"] * np.std(
-                list(per_asset_avg.values())
-            )
-        if config.ROBUSTNESS.get("lambda_mc_dispersion", 0.0) > 0:
-            penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * dispersion
-
-        result = float(aggregated - penalty_asset - penalty_mc)
-        if self.last_diagnostics is not None:
-            self.last_diagnostics.update(
-                {"mc_runs": runs, "mc_median": aggregated, "mc_dispersion": dispersion}
-            )
-
-        if config.SCANNER.get("verbose") and self.last_diagnostics:
-            diag = self.last_diagnostics
-            print(
-                f"Collisions: {diag.get('collisions', 0)} | Rejected: {diag.get('rejected', 0)} | "
-                f"Acceptance Rate: {diag.get('acceptance_rate', 0.0):.2f} | "
-                f"MC Dispersion: {diag.get('mc_dispersion', 0.0):.4f}"
-            )
-        return result
+            if config.SCANNER.get("verbose") and self.last_diagnostics:
+                diag = self.last_diagnostics
+                print(
+                    f"Collisions: {diag.get('collisions', 0)} | "
+                    f"Rejected: {diag.get('rejected', 0)} | "
+                    f"Acceptance Rate: {diag.get('acceptance_rate', 0.0):.2f} | "
+                    f"MC Dispersion: {diag.get('mc_dispersion', 0.0):.4f}"
+                )
+            return result
+        except Exception as e:
+            error_tracker.log_exception(logger, "Fitness evaluation failed", e)
+            return VERY_LOW_FITNESS
