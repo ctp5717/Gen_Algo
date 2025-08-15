@@ -260,6 +260,7 @@ def test_exit_parity_with_single_asset(monkeypatch):
     config.SCANNER['max_concurrent_trades'] = 3
 
     (
+        _close_df,
         entries_df,
         exits_df,
         _scores,

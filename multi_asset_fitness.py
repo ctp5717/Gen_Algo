@@ -15,6 +15,7 @@ from fitness import _inject_genes_into_rules
 import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
 from utils.warnings_util import suppress_third_party_warnings
+from utils.dataframe_util import to_frame
 
 try:  # Optional dependency for JIT acceleration
     import numba as nb
@@ -93,6 +94,7 @@ class MultiAssetFitnessEvaluator:
     ) -> tuple[
         pd.DataFrame,
         pd.DataFrame,
+        pd.DataFrame,
         pd.DataFrame | None,
         float | None,
         float | None,
@@ -101,6 +103,7 @@ class MultiAssetFitnessEvaluator:
         entries: Dict[str, pd.Series] = {}
         exits: Dict[str, pd.Series] = {}
         scores: Dict[str, pd.Series] = {}
+        close_dict: Dict[str, pd.Series] = {}
 
         # Extract exit rule parameters once since the strategy is shared across assets
         rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
@@ -130,6 +133,7 @@ class MultiAssetFitnessEvaluator:
 
         for name in assets:
             data = self.ohlc_dict[name]
+            close_dict[name] = data["Close"]
             asset_entries = engine.process_strategy_rules(data, rules)
 
             # Shift signals forward so that trades occur on the next bar.
@@ -167,11 +171,22 @@ class MultiAssetFitnessEvaluator:
                     score_series = apply_score_scaling(score_series, data, scale_method)
                 scores[name] = score_series.fillna(0.0)
 
+        close_df = pd.DataFrame(close_dict).sort_index()
+        common_index = close_df.index
+        entries_df = (
+            to_frame(entries, "entries", common_index).fillna(False).astype(bool).reindex(columns=assets)
+        )
+        exits_df = (
+            to_frame(exits, "exits", common_index).fillna(False).astype(bool).reindex(columns=assets)
+        )
+        scores_df = (
+            to_frame(scores, "scores", common_index).fillna(0.0).reindex(columns=assets)
+            if scores
+            else None
+        )
+        close_df = close_df.reindex(columns=assets)
         self.last_assets = list(assets)
-        entries_df = pd.concat(entries, axis=1)
-        exits_df = pd.concat(exits, axis=1)
-        scores_df = pd.concat(scores, axis=1) if scores else None
-        return entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail
+        return close_df, entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail
 
     def _evaluate_once(
         self, solution, seed: int | None, assets: List[str]
@@ -184,9 +199,15 @@ class MultiAssetFitnessEvaluator:
         pd.Series,
     ]:
         suppress_third_party_warnings()
-        entries_df, exits_df, scores_df, sl_stop, tp_stop, sl_trail = self._build_signals(
-            solution, assets
-        )
+        (
+            close_df,
+            entries_df,
+            exits_df,
+            scores_df,
+            sl_stop,
+            tp_stop,
+            sl_trail,
+        ) = self._build_signals(solution, assets)
         gated, open_count, diag = scanner_sim.gate_entries(
             entries_df,
             exits_df,
@@ -194,6 +215,7 @@ class MultiAssetFitnessEvaluator:
             config.SCANNER.get("tie_break_policy", "fifo"),
             seed=seed,
             scores=scores_df,
+            price_index=close_df.index,
         )
 
         returns_df = pd.DataFrame(0.0, index=gated.index, columns=gated.columns)

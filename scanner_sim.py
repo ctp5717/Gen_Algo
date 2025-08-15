@@ -1,16 +1,19 @@
 import random
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Mapping
 
 import pandas as pd
 
+from utils.dataframe_util import to_frame
+
 
 def gate_entries(
-    entries: pd.DataFrame,
-    exits: pd.DataFrame,
+    entries: pd.DataFrame | pd.Series | Mapping,
+    exits: pd.DataFrame | pd.Series | Mapping | None,
     max_concurrent: int,
     tie_break_policy: str = "fifo",
     seed: int | None = None,
-    scores: pd.DataFrame | None = None,
+    scores: pd.DataFrame | pd.Series | Mapping | None = None,
+    price_index: pd.Index | None = None,
     *,
     verbose: bool = False,
     collect_collision_histogram: bool = False,
@@ -19,19 +22,22 @@ def gate_entries(
 
     Parameters
     ----------
-    entries : DataFrame
-        Boolean entry signals. Columns represent assets.
-    exits : DataFrame
-        Boolean exit signals aligned with ``entries``.
+    entries : DataFrame or Series or dict-like
+        Entry signals. Columns represent assets when using a DataFrame or
+        dict-like mapping.
+    exits : DataFrame or Series or dict-like, optional
+        Exit signals aligned with ``entries``.
     max_concurrent : int
         Maximum number of open positions allowed at once.
     tie_break_policy : {'fifo', 'random', 'score'}
         Policy used when more signals arrive than available slots.
     seed : int, optional
         Seed for the ``random`` policy to ensure reproducibility.
-    scores : DataFrame, optional
+    scores : DataFrame or Series or dict-like, optional
         Numerical scores used when ``tie_break_policy='score'``. Higher scores
         are preferred.
+    price_index : Index, optional
+        Expected index of ``entries``.  Raises ``ValueError`` if not aligned.
 
     Returns
     -------
@@ -42,18 +48,29 @@ def gate_entries(
     diagnostics : dict
         Summary statistics of the gating process.
     """
-    if set(entries.columns) != set(exits.columns):
-        raise ValueError("Entries and exits must have matching columns")
-    if scores is not None and set(scores.columns) != set(entries.columns):
-        raise ValueError("Scores must have same columns as entries")
-
-    # Ensure indexes are aligned
-    idx = entries.index.union(exits.index)
-    entries = entries.reindex(idx, fill_value=False)
-    exits = exits.reindex(idx, fill_value=False)
+    entries = to_frame(entries, "entries").fillna(False).astype(bool)
+    if exits is not None:
+        exits = to_frame(exits, "exits", entries.index).fillna(False).astype(bool)
+    else:
+        exits = pd.DataFrame(False, index=entries.index, columns=entries.columns)
     if scores is not None:
-        scores = scores.reindex(idx).fillna(0.0)
+        scores = to_frame(scores, "scores", entries.index, fill_value=0.0).fillna(0.0)
 
+    if set(entries.columns) != set(exits.columns):
+        if entries.shape[1] == 1 and exits.shape[1] == 1:
+            exits.columns = entries.columns
+        else:
+            raise ValueError("Entries and exits must have matching columns")
+    if scores is not None and set(scores.columns) != set(entries.columns):
+        if scores.shape[1] == 1 and entries.shape[1] == 1:
+            scores.columns = entries.columns
+        else:
+            raise ValueError("Scores must have same columns as entries")
+
+    if price_index is not None and not entries.index.equals(price_index):
+        raise ValueError("Entries index must match price index")
+
+    idx = entries.index
     asset_order = list(entries.columns)
     rng = random.Random(seed)
 
