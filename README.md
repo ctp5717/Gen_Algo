@@ -134,10 +134,13 @@ This module's purpose is to provide a final, unbiased report on the performance 
     yfinance
     python-binance
     pandas-ta
-    setuptools
+    setuptools<81
     python-dateutil
     matplotlib
     ```
+
+    The temporary pin on `setuptools` avoids a noisy `pkg_resources` deprecation
+    warning emitted by `pandas_ta`.
 
     **Installation Command:**
 
@@ -169,6 +172,14 @@ This module's purpose is to provide a final, unbiased report on the performance 
 
     ```bash
     python3 main.py
+    ```
+
+    To silence third-party deprecation messages, you can set
+    `PYTHONWARNINGS="ignore:pkg_resources is deprecated:UserWarning"` when running
+    the script:
+
+    ```bash
+    PYTHONWARNINGS="ignore:pkg_resources is deprecated:UserWarning" python3 main.py
     ```
 
 3.  **Analyze the Results:** The script will first run the optimization, printing a live progress bar. At the end, it will display a plot of the GA's learning curve, print the optimal parameters, and then automatically run the final analysis on the unseen validation data, printing a full statistical report and displaying the final equity curve.

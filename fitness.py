@@ -10,6 +10,7 @@ import numpy as np
 import vectorbt as vbt
 import strategy_engine as engine
 import config
+from utils.warnings_util import suppress_third_party_warnings
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
@@ -46,6 +47,7 @@ class FitnessEvaluator:
         self.gene_map = gene_map
 
     def __call__(self, ga_instance, solution, sol_idx):
+        suppress_third_party_warnings()
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
