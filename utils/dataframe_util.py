@@ -32,8 +32,6 @@ def to_frame(obj, name: str, common_index=None, fill_value=False):
     return df
 
 
-
-
 def assert_monotonic_datetime_index(df: pd.DataFrame, name: str = "DataFrame") -> Optional[tzinfo]:
     """Ensure ``df`` has a monotonic ``DatetimeIndex``.
 
