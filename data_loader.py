@@ -73,6 +73,8 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
+            if not data.index.is_monotonic_increasing:
+                raise ValueError("Loaded data index must be monotonic increasing.")
             print("Cache loaded successfully.")
             return data
         except Exception as e:
@@ -96,7 +98,10 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
 
         # Standardize column names
         data.columns = [col.capitalize() for col in data.columns]
-        
+
+        if not data.index.is_monotonic_increasing:
+            raise ValueError("Downloaded data index must be monotonic increasing.")
+
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
@@ -136,6 +141,7 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
     logger = get_run_logger()
     data = {}
     excluded = []
+    tz = None
     for name, symbol in asset_group:
         ticker = symbol
         if config.DATA_SOURCE == 'binance':
@@ -161,6 +167,14 @@ def load_group_data(asset_group, start_date: str, end_date: str, interval: str =
             excluded.append(name)
             continue
 
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise TypeError(f"{name} data index must be DatetimeIndex")
+        if not df.index.is_monotonic_increasing:
+            raise ValueError(f"{name} data index must be monotonic increasing")
+        if tz is None:
+            tz = df.index.tz
+        elif df.index.tz != tz:
+            raise ValueError("All DataFrames must share the same timezone")
         data[name] = df
 
     if not data:

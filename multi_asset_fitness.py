@@ -15,7 +15,7 @@ from fitness import _inject_genes_into_rules
 import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
 from utils.warnings_util import suppress_third_party_warnings
-from utils.dataframe_util import to_frame
+from utils.dataframe_util import to_frame, assert_monotonic_datetime_index
 from utils.logging_util import get_logger, OncePerGenerationErrors
 
 try:  # Optional dependency for JIT acceleration
@@ -85,6 +85,13 @@ class MultiAssetFitnessEvaluator:
     """
 
     def __init__(self, ohlc_dict: Dict[str, pd.DataFrame], base_rules: dict, gene_map: dict):
+        tz = None
+        for name, df in ohlc_dict.items():
+            tz_cur = assert_monotonic_datetime_index(df, name)
+            if tz is None:
+                tz = tz_cur
+            elif tz_cur != tz:
+                raise ValueError("All DataFrames must share the same timezone")
         self.ohlc_dict = ohlc_dict
         self.base_rules = base_rules
         self.gene_map = gene_map

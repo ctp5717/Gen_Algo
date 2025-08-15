@@ -66,7 +66,8 @@ logger = get_logger(__name__)
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
-    fitness_evaluator = fitness.FitnessEvaluator(ohlc_data, config.STRATEGY_RULES, gene_map)
+    data = ohlc_data if isinstance(ohlc_data, pd.DataFrame) else next(iter(ohlc_data.values()))
+    fitness_evaluator = fitness.FitnessEvaluator(data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
     error_tracker = getattr(fitness_evaluator, "error_tracker", None)
     num_cores = os.cpu_count()

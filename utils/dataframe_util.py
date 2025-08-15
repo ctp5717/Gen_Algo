@@ -1,5 +1,7 @@
 import pandas as pd
 from collections.abc import Mapping
+from datetime import tzinfo
+from typing import Optional
 
 
 def to_frame(obj, name: str, common_index=None, fill_value=False):
@@ -28,3 +30,27 @@ def to_frame(obj, name: str, common_index=None, fill_value=False):
     if common_index is not None:
         df = df.reindex(common_index, fill_value=fill_value)
     return df
+
+
+
+
+def assert_monotonic_datetime_index(df: pd.DataFrame, name: str = "DataFrame") -> Optional[tzinfo]:
+    """Ensure ``df`` has a monotonic ``DatetimeIndex``.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Frame to validate.
+    name : str, default "DataFrame"
+        Human readable name used in error messages.
+
+    Returns
+    -------
+    tz : tzinfo or None
+        The timezone of the index for cross-checking across multiple frames.
+    """
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise TypeError(f"{name} must have a DatetimeIndex")
+    if not df.index.is_monotonic_increasing:
+        raise ValueError(f"{name} index must be monotonic increasing")
+    return df.index.tz
