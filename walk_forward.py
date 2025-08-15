@@ -242,7 +242,10 @@ def run_walk_forward_validation(initial_champions=None):
 
         returns_df = pd.DataFrame(0.0, index=gated.index, columns=gated.columns)
         total_wins = 0
+        total_losses = 0
         total_trades = 0
+        gross_profit = 0.0
+        gross_loss = 0.0
         for name in gated.columns:
             data = test_dict[name]
             asset_entries = gated[name].reindex(data.index, fill_value=False)
@@ -256,12 +259,21 @@ def run_walk_forward_validation(initial_champions=None):
                     freq=config.TIMEFRAME,
                 )
                 returns_df[name] = pf.returns()
-                t_stats = pf.trades.stats()
-                wins = t_stats.get("Win Rate [%]", 0.0) / 100 * t_stats.get(
-                    "Count", 0
-                )
+                trades = pf.trades
+                if hasattr(trades, "winning") and hasattr(trades, "losing"):
+                    wins = trades.winning.count()
+                    losses = trades.losing.count()
+                    total_trades += trades.count()
+                    gross_profit += trades.winning.pnl.sum()
+                    gross_loss += trades.losing.pnl.sum()
+                else:
+                    stats = trades.stats() if hasattr(trades, "stats") else {}
+                    total_trades += stats.get("Count", 0)
+                    win_rate_pct = stats.get("Win Rate [%]", 0.0)
+                    wins = win_rate_pct / 100 * stats.get("Count", 0)
+                    losses = stats.get("Count", 0) - wins
                 total_wins += wins
-                total_trades += t_stats.get("Count", 0)
+                total_losses += losses
             else:
                 returns_df[name] = 0.0
 
@@ -278,11 +290,18 @@ def run_walk_forward_validation(initial_champions=None):
             if portfolio_returns.std(ddof=0) != 0
             else 0
         )
-        win_rate = (
-            total_wins / total_trades * 100 if total_trades > 0 else 0
+        win_rate = total_wins / total_trades * 100 if total_trades > 0 else 0
+        loss_rate = total_losses / total_trades * 100 if total_trades > 0 else 0
+        profit_factor = (
+            gross_profit / abs(gross_loss) if gross_loss != 0 else np.inf
         )
 
-        print(f"Test Return: {total_return * 100:.2f}% | Max DD: {max_dd:.2f}%")
+        print(
+            f"Test Return: {total_return * 100:.2f}% | Max DD: {max_dd:.2f}%"
+        )
+        print(
+            f"Win Rate: {win_rate:.2f}% | Loss Rate: {loss_rate:.2f}% | Profit Factor: {profit_factor:.2f}"
+        )
         print("Winning Parameters:")
         for param_name, param_value in winning_params.items():
             print(f"  {param_name}: {param_value}")
@@ -320,6 +339,8 @@ def run_walk_forward_validation(initial_champions=None):
                 "Sharpe Ratio": sharpe,
                 "Sortino Ratio": sortino,
                 "Win Rate [%]": win_rate,
+                "Loss Rate [%]": loss_rate,
+                "Profit Factor": profit_factor,
                 "Params": winning_params,
                 "Diagnostics": diag,
             }
@@ -335,6 +356,8 @@ def run_walk_forward_validation(initial_champions=None):
     avg_sharpe = results_df['Sharpe Ratio'].mean()
     avg_sortino = results_df['Sortino Ratio'].mean()
     avg_win = results_df['Win Rate [%]'].mean()
+    avg_loss = results_df['Loss Rate [%]'].mean()
+    avg_pf = results_df['Profit Factor'].mean()
     total_compounded_return = (results_df['Total Return [%]'] / 100 + 1).prod() - 1
 
     print("\n=== Walk-Forward Summary ===")
@@ -345,6 +368,8 @@ def run_walk_forward_validation(initial_champions=None):
     print(f"Average Sharpe: {avg_sharpe:.2f}")
     print(f"Average Sortino: {avg_sortino:.2f}")
     print(f"Average Win Rate: {avg_win:.2f}%")
+    print(f"Average Loss Rate: {avg_loss:.2f}%")
+    print(f"Average Profit Factor: {avg_pf:.2f}")
     print(f"Total Compounded Return: {total_compounded_return * 100:.2f}%")
 
     return {
@@ -354,5 +379,7 @@ def run_walk_forward_validation(initial_champions=None):
         'average_sharpe': avg_sharpe,
         'average_sortino': avg_sortino,
         'average_win_rate': avg_win,
+        'average_loss_rate': avg_loss,
+        'average_profit_factor': avg_pf,
         'total_compounded_return': total_compounded_return,
     }
