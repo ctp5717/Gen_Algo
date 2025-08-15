@@ -8,6 +8,7 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
+import scanner_sim
 from utils.logging_util import get_logger
 
 
@@ -17,7 +18,7 @@ def _evaluate_on_validation(solution, gene_map):
     # lightweight. We check for the pandas_ta accessor and vectorbt's Portfolio
     # class. When absent, return -inf so the tuner can continue without errors.
     if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
-        return -np.inf
+        return -1e6
 
     val_data = data_loader.get_data(
         ticker=config.TICKER,
@@ -26,12 +27,12 @@ def _evaluate_on_validation(solution, gene_map):
         interval=config.TIMEFRAME,
     )
     if val_data.empty:
-        return -np.inf
+        return -1e6
 
     rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
     entries = engine.process_strategy_rules(val_data, rules)
     if entries.sum() < 1:
-        return -np.inf
+        return -1e6
 
     exit_rules = rules.get("exit_rules", {})
     sl_rule = exit_rules.get("stop_loss", {})
@@ -45,9 +46,14 @@ def _evaluate_on_validation(solution, gene_map):
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)
 
+    # Gate entries to obtain diagnostics and admitted trade count
+    gated, _oc, diag = scanner_sim.gate_entries(entries, time_exit, 1)
+    gated_entries = gated.iloc[:, 0]
+    trade_count = int(diag.get("accepted", 0))
+
     portfolio = vbt.Portfolio.from_signals(
         close=val_data["Close"],
-        entries=entries,
+        entries=gated_entries,
         exits=time_exit,
         sl_stop=sl_stop,
         tp_stop=tp_stop,
@@ -57,7 +63,27 @@ def _evaluate_on_validation(solution, gene_map):
     )
     stats = portfolio.stats()
     score = stats.get("Sortino Ratio")
-    return -np.inf if np.isnan(score) else score
+    if score is None:
+        score = -np.inf
+
+    MIN_TRADES = getattr(config, "MIN_TRADES", config.FITNESS_WEIGHTS.get("min_trades", 0))
+    penalties = {}
+    if trade_count < MIN_TRADES:
+        penalties["min_trades"] = MIN_TRADES - trade_count
+        score = -np.inf
+    if np.isnan(score):
+        score = -np.inf
+
+    if score == -np.inf:
+        logger.info(
+            "Trade count: %s | Floor: %s",
+            trade_count,
+            MIN_TRADES,
+        )
+        for name, val in penalties.items():
+            logger.info("Penalty %s: %s", name, val)
+        score = -1e6
+    return score
 
 
 logger = get_logger(__name__)
