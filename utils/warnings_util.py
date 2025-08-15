@@ -1,5 +1,6 @@
 import warnings
 
+
 def suppress_third_party_warnings():
     warnings.filterwarnings(
         "ignore",
