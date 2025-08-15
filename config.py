@@ -249,6 +249,7 @@ SCANNER = {
     "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy
     "seed": 123,                  # seed for random tie-breaks and sampling
     "verbose": False,           # print diagnostics from the scanner
+    "verbose_top_n": 5,         # number of per-asset stats shown in verbose mode
 }
 
 # Trading costs
