@@ -430,11 +430,28 @@ class MultiAssetFitnessEvaluator:
             if config.ROBUSTNESS.get("lambda_mc_dispersion", 0.0) > 0:
                 penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * dispersion
 
+            logger.debug(
+                "run_scores=%s median=%.4f dispersion=%.4f asset_dispersion=%.4f mc_dispersion=%.4f",
+                run_scores,
+                aggregated,
+                dispersion,
+                penalty_asset,
+                penalty_mc,
+            )
+
             result = float(aggregated - penalty_asset - penalty_mc)
-            if self.last_diagnostics is not None:
-                self.last_diagnostics.update(
-                    {"mc_runs": runs, "mc_median": aggregated, "mc_dispersion": dispersion}
-                )
+
+            self.last_diagnostics = self.last_diagnostics or {}
+            self.last_diagnostics.update(
+                {
+                    "mc_runs": runs,
+                    "run_scores": run_scores,
+                    "mc_median": aggregated,
+                    "dispersion": dispersion,
+                    "asset_dispersion": penalty_asset,
+                    "mc_dispersion": penalty_mc,
+                }
+            )
 
             if config.SCANNER.get("verbose") and self.last_diagnostics:
                 diag = self.last_diagnostics
