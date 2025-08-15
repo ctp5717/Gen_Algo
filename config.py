@@ -240,7 +240,7 @@ SCANNER = {
     # Intended live cap on open positions. Override via --max-concurrent-trades
     "max_concurrent_trades": 3,
     # Recommended live policy. One of: fifo | random | score
-    "tie_break_policy": "random",
+    "tie_break_policy": "fifo",
     # scoring function used when tie_break_policy == 'score'
     "score_func": "pct_change",
     # Optional scaling applied to scores to reduce micro-cap bias. One of:
@@ -259,7 +259,7 @@ SLIPPAGE = 0.0
 # unchanged for existing single-asset runs.
 ROBUSTNESS = {
     "lambda_asset_dispersion": 0.1,
-    "lambda_mc_dispersion": 0.05,
+    "lambda_mc_dispersion": 0.0,
 }
 
 # Mini-batching settings allow evaluating only a subset of assets each
