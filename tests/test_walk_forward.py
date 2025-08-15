@@ -14,6 +14,33 @@ sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 import walk_forward  # noqa: E402
 
 
+import pandas as pd  # noqa: E402
+
+
+class _WFDummyErrorTracker:
+    def __init__(self):
+        self.calls = []
+
+    def flush_summary(self, logger, msg):
+        self.calls.append(msg)
+
+
+class _WFDummyEvaluator:
+    def __init__(self, ohlc_dict, *a, **k):
+        self.assets = list(ohlc_dict.keys())
+        self.error_tracker = _WFDummyErrorTracker()
+
+    def __call__(self, ga_instance, solution, solution_idx):
+        return 1.0
+
+    def _evaluate_once(self, *a, **k):
+        return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float)
+
+    @staticmethod
+    def _calc_stats(returns):
+        return 0.0, 0.0, 0.0
+
+
 
 def test_generate_periods_produces_windows():
     start = datetime(2020, 1, 1)
@@ -454,3 +481,112 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert len(pool) == 1 + 1 + settings["num_clones"]
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
+
+
+def test_walk_forward_on_generation_multiprocessing(monkeypatch):
+    """on_generation callback must be picklable under process parallelism"""
+    import types
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "load_group_data",
+        lambda *a, **k: {"A": df},
+    )
+    monkeypatch.setattr(
+        walk_forward.config, "ASSET_GROUP", [("A", "A")], raising=False
+    )
+
+    monkeypatch.setattr(walk_forward.os, "cpu_count", lambda: 2)
+
+    monkeypatch.setattr(walk_forward.config, "GA_POPULATION_SIZE", 2, raising=False)
+    monkeypatch.setattr(walk_forward.config, "GA_NUM_GENERATIONS", 1, raising=False)
+    monkeypatch.setattr(walk_forward.config, "GA_PARENTS_MATING", 1, raising=False)
+    monkeypatch.setattr(walk_forward.config, "GA_MUTATION_NUM_GENES", 1, raising=False)
+
+    monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setattr(
+        walk_forward.config,
+        "SCANNER",
+        {"max_concurrent_trades": 1, "tie_break_policy": "fifo"},
+        raising=False,
+    )
+    monkeypatch.setattr(walk_forward.config, "FEES", 0, raising=False)
+    monkeypatch.setattr(walk_forward.config, "MAX_HOLD_PERIOD", 1, raising=False)
+    monkeypatch.setattr(walk_forward.config, "TIMEFRAME", "1d", raising=False)
+
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+
+    monkeypatch.setattr(
+        walk_forward,
+        "parse_genes_from_config",
+        lambda *a, **k: ([{"low": 0, "high": 1, "step": 1}], {0: {"name": "p"}}, [int]),
+    )
+
+    monkeypatch.setattr(walk_forward, "MultiAssetFitnessEvaluator", _WFDummyEvaluator)
+
+    monkeypatch.setattr(
+        walk_forward.engine,
+        "process_strategy_rules",
+        lambda *a, **k: pd.Series([True, False], index=df.index),
+    )
+
+    def fake_gate(entries, exits, *args, **kwargs):
+        diag = {
+            "collisions": 0,
+            "total_candidates": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "acceptance_rate": 0.0,
+            "per_asset": {a: {"accepted": 0, "rejected": 0} for a in entries.columns},
+        }
+        return entries, pd.Series(0, index=entries.index), diag
+
+    monkeypatch.setattr(walk_forward.scanner_sim, "gate_entries", fake_gate)
+
+    class DummyPortfolio:
+        def __init__(self, entries):
+            self.entries = entries
+
+        def returns(self):
+            return pd.Series([0, 0], index=self.entries.index)
+
+        class Trades:
+            def stats(self):
+                return {"Win Rate [%]": 0.0, "Count": 0}
+
+        @property
+        def trades(self):
+            return DummyPortfolio.Trades()
+
+    monkeypatch.setattr(
+        walk_forward.vbt,
+        "Portfolio",
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio(k["entries"])),
+        raising=False,
+    )
+
+    walk_forward.run_walk_forward_validation()
+
+    assert walk_forward._wf_error_tracker is None
