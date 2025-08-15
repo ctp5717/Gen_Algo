@@ -18,6 +18,7 @@ import time  # <-- NEW: Import the time module
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # Use non-interactive backend
+import pandas as pd
 
 # Import our custom modules
 import config
@@ -148,8 +149,9 @@ def main():
             ohlc_data, config.STRATEGY_RULES, gene_map
         )
     else:
+        single_df = ohlc_data if isinstance(ohlc_data, pd.DataFrame) else next(iter(ohlc_data.values()))
         fitness_evaluator = fitness.FitnessEvaluator(
-            ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
+            ohlc_data=single_df, base_rules=config.STRATEGY_RULES, gene_map=gene_map
         )
     fitness_function = fitness_evaluator.__call__
     global current_error_tracker

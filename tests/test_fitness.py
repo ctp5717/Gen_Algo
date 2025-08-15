@@ -17,7 +17,7 @@ import logging  # noqa: E402
 
 def test_exception_logging(caplog, monkeypatch):
     """FitnessEvaluator logs exception messages"""
-    ohlc = pd.DataFrame({'Close': [1, 2, 3]})
+    ohlc = pd.DataFrame({'Close': [1, 2, 3]}, index=pd.date_range('2020', periods=3, freq='D'))
     evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
 
     def raise_error(*args, **kwargs):

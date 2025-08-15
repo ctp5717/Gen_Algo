@@ -12,6 +12,7 @@ import strategy_engine as engine
 import config
 from utils.warnings_util import suppress_third_party_warnings
 from utils.logging_util import get_logger, OncePerGenerationErrors
+from utils.dataframe_util import assert_monotonic_datetime_index
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
@@ -48,6 +49,7 @@ VERY_LOW_FITNESS = -999.0
 
 class FitnessEvaluator:
     def __init__(self, ohlc_data: pd.DataFrame, base_rules: dict, gene_map: dict):
+        assert_monotonic_datetime_index(ohlc_data, "ohlc_data")
         self.ohlc_data = ohlc_data
         self.base_rules = base_rules
         self.gene_map = gene_map
@@ -59,8 +61,9 @@ class FitnessEvaluator:
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
+            shifted_entries = entries.shift(1, fill_value=False)
 
-            if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+            if shifted_entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---
@@ -73,12 +76,12 @@ class FitnessEvaluator:
             sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
             tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
 
-            time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+            time_based_exit = shifted_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
             time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
             portfolio = vbt.Portfolio.from_signals(
                 close=self.ohlc_data['Close'],
-                entries=entries,
+                entries=shifted_entries,
                 exits=time_based_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
