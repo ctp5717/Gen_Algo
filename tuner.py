@@ -63,6 +63,16 @@ def _evaluate_on_validation(solution, gene_map):
 logger = get_logger(__name__)
 
 
+_error_tracker = None
+
+
+def _on_generation_callback(ga_instance):
+    """Flush error summaries once per GA generation."""
+    if _error_tracker is not None:
+        g = ga_instance.generations_completed
+        _error_tracker.flush_summary(logger, f"Generation {g}")
+
+
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
@@ -77,11 +87,8 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
         print(f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}")
 
-        def on_generation(ga_instance):
-            if error_tracker is not None:
-                g = ga_instance.generations_completed
-                error_tracker.flush_summary(logger, f"Generation {g}")
-
+        global _error_tracker
+        _error_tracker = error_tracker
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],
@@ -92,9 +99,12 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
-            on_generation=on_generation,
+            on_generation=_on_generation_callback,
         )
-        ga.run()
+        try:
+            ga.run()
+        finally:
+            _error_tracker = None
         best_solution, _, _ = ga.best_solution()
         score = _evaluate_on_validation(best_solution, gene_map)
         results.append({"params": params, "score": score})
