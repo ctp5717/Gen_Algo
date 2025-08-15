@@ -456,11 +456,28 @@ class MultiAssetFitnessEvaluator:
             if config.SCANNER.get("verbose") and self.last_diagnostics:
                 diag = self.last_diagnostics
                 print(
+                    f"Candidates: {diag.get('total_candidates', 0)} | "
+                    f"Accepted: {diag.get('accepted', 0)} | "
                     f"Collisions: {diag.get('collisions', 0)} | "
                     f"Rejected: {diag.get('rejected', 0)} | "
                     f"Acceptance Rate: {diag.get('acceptance_rate', 0.0):.2f} | "
+                    f"Avg Open: {diag.get('avg_n_open', 0.0):.2f} | "
+                    f"Max Open: {diag.get('max_n_open', 0)} | "
                     f"MC Dispersion: {diag.get('mc_dispersion', 0.0):.4f}"
                 )
+                per_asset = diag.get("per_asset", {})
+                top_n = config.SCANNER.get("verbose_top_n", 5)
+                if per_asset:
+                    top_assets = sorted(
+                        per_asset.items(),
+                        key=lambda x: x[1].get("candidates", 0),
+                        reverse=True,
+                    )[:top_n]
+                    top_str = " | ".join(
+                        f"{asset}: {stats.get('accepted', 0)}/{stats.get('candidates', 0)}"
+                        for asset, stats in top_assets
+                    )
+                    print(f"Top assets (accepted/candidates): {top_str}")
             return result
         except Exception as e:
             error_tracker.log_exception(logger, "Fitness evaluation failed", e)

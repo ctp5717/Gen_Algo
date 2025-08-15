@@ -209,6 +209,8 @@ def main():
     artifact_utils.append_to_manifest(fitness_path)
 
     try:
+        prev_verbose = config.SCANNER.get("verbose", False)
+        config.SCANNER["verbose"] = True
         if len(getattr(config, "ASSET_GROUP", [])) > 1:
             analysis.run_champion_analysis_multi(best_solution, gene_map)
         else:
@@ -216,6 +218,8 @@ def main():
     except Exception as e:
         print(f"\nAn error occurred during the analysis phase: {e}")
         traceback.print_exc()
+    finally:
+        config.SCANNER["verbose"] = prev_verbose
 
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     wf_enabled = wf_settings.get(
