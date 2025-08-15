@@ -28,6 +28,7 @@ import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 from log_utils import get_run_logger, log_run_parameters
 import artifact_utils
+from utils.logging_util import get_logger
 
 
 def parse_args():
@@ -42,7 +43,11 @@ def parse_args():
 
 
 # --- NEW: Callback function for progress tracking ---
+fitness_logger = get_logger(__name__)
+current_error_tracker = None
 start_time = 0.0
+
+
 def on_generation(ga_instance):
     """
     This function is called by PyGAD after each generation completes.
@@ -61,6 +66,8 @@ def on_generation(ga_instance):
         f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s",
         end="\r",
     )
+    if current_error_tracker is not None:
+        current_error_tracker.flush_summary(fitness_logger, f"Generation {generation}")
 
 def main():
     """ The main execution function. """
@@ -145,6 +152,8 @@ def main():
             ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
         )
     fitness_function = fitness_evaluator.__call__
+    global current_error_tracker
+    current_error_tracker = getattr(fitness_evaluator, "error_tracker", None)
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
         tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)

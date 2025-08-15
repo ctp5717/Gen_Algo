@@ -8,6 +8,7 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
+from utils.logging_util import get_logger
 
 
 def _evaluate_on_validation(solution, gene_map):
@@ -59,17 +60,27 @@ def _evaluate_on_validation(solution, gene_map):
     return -np.inf if np.isnan(score) else score
 
 
+logger = get_logger(__name__)
+
+
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
     fitness_evaluator = fitness.FitnessEvaluator(ohlc_data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
+    error_tracker = getattr(fitness_evaluator, "error_tracker", None)
     num_cores = os.cpu_count()
 
     results = []
 
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
         print(f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}")
+
+        def on_generation(ga_instance):
+            if error_tracker is not None:
+                g = ga_instance.generations_completed
+                error_tracker.flush_summary(logger, f"Generation {g}")
+
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],
@@ -80,6 +91,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
+            on_generation=on_generation,
         )
         ga.run()
         best_solution, _, _ = ga.best_solution()

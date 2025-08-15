@@ -18,6 +18,7 @@ from multi_asset_fitness import MultiAssetFitnessEvaluator
 import scanner_sim
 from scoring import SCORE_FUNCTIONS, apply_score_scaling
 from log_utils import get_run_logger, log_run_parameters
+from utils.logging_util import get_logger
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -80,6 +81,9 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
         pool.append(list(best_solution))
 
     return pool
+
+
+wf_logger = get_logger(__name__)
 
 
 def run_walk_forward_validation(initial_champions=None):
@@ -153,6 +157,13 @@ def run_walk_forward_validation(initial_champions=None):
         evaluator = MultiAssetFitnessEvaluator(
             train_dict, config.STRATEGY_RULES, gene_map
         )
+        error_tracker = getattr(evaluator, "error_tracker", None)
+
+        def on_generation(ga_instance):
+            if error_tracker is not None:
+                g = ga_instance.generations_completed
+                error_tracker.flush_summary(wf_logger, f"Generation {g}")
+
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
@@ -163,6 +174,7 @@ def run_walk_forward_validation(initial_champions=None):
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=["process", num_cores],
+            on_generation=on_generation,
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)

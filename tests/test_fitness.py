@@ -12,10 +12,11 @@ sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
 import pandas as pd  # noqa: E402
 import fitness  # noqa: E402
+import logging  # noqa: E402
 
 
-def test_exception_logging(capsys, monkeypatch):
-    """FitnessEvaluator prints exception messages"""
+def test_exception_logging(caplog, monkeypatch):
+    """FitnessEvaluator logs exception messages"""
     ohlc = pd.DataFrame({'Close': [1, 2, 3]})
     evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
 
@@ -24,8 +25,8 @@ def test_exception_logging(capsys, monkeypatch):
 
     monkeypatch.setattr(fitness.engine, 'process_strategy_rules', raise_error)
 
-    score = evaluator(None, [], 0)
+    with caplog.at_level(logging.ERROR):
+        score = evaluator(None, [], 0)
 
-    captured = capsys.readouterr()
-    assert "boom" in captured.out
+    assert "Fitness evaluation failed" in caplog.text
     assert score == -999.0
