@@ -14,6 +14,9 @@ from utils.warnings_util import suppress_third_party_warnings
 from utils.logging_util import get_logger, OncePerGenerationErrors
 from utils.dataframe_util import assert_monotonic_datetime_index
 
+EPSILON = 1e-09
+
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
     Injects the gene values from a GA solution into a copy of the strategy rules.
@@ -45,6 +48,41 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
 get_logger(__name__)
 error_tracker = OncePerGenerationErrors()
 VERY_LOW_FITNESS = -999.0
+
+
+def _calc_stats(returns: pd.Series) -> tuple[float, float, float]:
+    logger = get_logger(__name__)
+    equity = (1 + returns).cumprod()
+    running_max = equity.cummax()
+    drawdown = (equity / running_max) - 1.0
+    max_dd = -drawdown.min() * 100
+    pos = returns[returns > 0].sum()
+    neg = returns[returns < 0].sum()
+    denom_pf = abs(neg)
+    if denom_pf == 0.0:
+        logger.debug("Profit factor denominator was zero; using EPSILON fallback")
+    denom_pf = denom_pf if denom_pf != 0.0 else EPSILON
+    profit_factor = pos / denom_pf
+    downside = returns[returns < 0]
+    downside_std = downside.std(ddof=0)
+    if downside_std == 0.0:
+        logger.debug("Sortino denominator was zero; using EPSILON fallback")
+    downside_std = downside_std if downside_std != 0.0 else EPSILON
+    sortino = returns.mean() / downside_std
+    return sortino, profit_factor, max_dd
+
+
+def _clamp_metrics(
+    sortino: float, profit_factor: float, max_dd: float
+) -> tuple[float, float, float]:
+    sortino = (
+        float(np.clip(sortino, -5.0, 5.0)) if np.isfinite(sortino) else 0.0
+    )
+    profit_factor = (
+        float(np.clip(profit_factor, 0.0, 5.0)) if np.isfinite(profit_factor) else 0.0
+    )
+    max_dd = float(np.clip(max_dd, 0.0, 100.0)) if np.isfinite(max_dd) else 100.0
+    return sortino, profit_factor, max_dd
 
 
 class FitnessEvaluator:
@@ -90,19 +128,11 @@ class FitnessEvaluator:
                 freq=config.TIMEFRAME
             )
 
-            stats = portfolio.stats()
-            sortino = stats['Sortino Ratio']
-            profit_factor = stats['Profit Factor']
-            max_drawdown = stats['Max Drawdown [%]']
-
-            if np.isinf(profit_factor) or profit_factor > 5:
-                profit_factor = 5
-            if np.isnan(sortino):
-                sortino = 0
-            if np.isnan(profit_factor):
-                profit_factor = 0
-            if np.isnan(max_drawdown):
-                max_drawdown = 100.0
+            returns = portfolio.returns()
+            sortino, profit_factor, max_drawdown = _calc_stats(returns)
+            sortino, profit_factor, max_drawdown = _clamp_metrics(
+                sortino, profit_factor, max_drawdown
+            )
 
             drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
