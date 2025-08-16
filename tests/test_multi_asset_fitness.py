@@ -39,6 +39,7 @@ def fake_eval_parallel(self, solution, seed, assets):
         pd.Series(dtype=float),
         {},
         pd.Series(dtype=float),
+        0.0,
     )
 
 
@@ -85,6 +86,30 @@ def test_mc_dispersion_penalty(monkeypatch):
     config.SCANNER['max_concurrent_trades'] = orig_maxcon
 
 
+def test_concentration_penalty(monkeypatch):
+    data = make_data()
+
+    def fake_process(data, rules):
+        if data['Close'].iloc[0] == 2:  # identify 'up' asset
+            return pd.Series([True, False, True, False, True], index=data.index)
+        return pd.Series(False, index=data.index)
+
+    monkeypatch.setattr('strategy_engine.process_strategy_rules', fake_process)
+
+    original_lambda = config.ROBUSTNESS['lambda_concentration']
+    original_maxhold = config.MAX_HOLD_PERIOD
+    config.ROBUSTNESS['lambda_concentration'] = 0.0
+    config.MAX_HOLD_PERIOD = 1
+    ga = DummyGA()
+    evaluator = MultiAssetFitnessEvaluator(data, {}, {})
+    base = evaluator(ga, [], 0)
+    config.ROBUSTNESS['lambda_concentration'] = 1.0
+    penalised = evaluator(ga, [], 0)
+    assert penalised < base
+    config.ROBUSTNESS['lambda_concentration'] = original_lambda
+    config.MAX_HOLD_PERIOD = original_maxhold
+
+
 def test_monte_carlo_median_with_random_tie_break(monkeypatch):
     import statistics
 
@@ -110,6 +135,7 @@ def test_monte_carlo_median_with_random_tie_break(monkeypatch):
             pd.Series(dtype=float),
             {},
             pd.Series(dtype=float),
+            0.0,
         )
 
     monkeypatch.setattr(
@@ -213,6 +239,7 @@ def test_monte_carlo_diagnostics_saved_and_logged(monkeypatch, caplog):
             pd.Series(dtype=float),
             {},
             pd.Series(dtype=float),
+            0.0,
         )
 
     fake_eval.calls = 0
@@ -263,6 +290,7 @@ def test_asset_metrics_aggregated_across_runs(monkeypatch):
             pd.Series(dtype=float),
             {"collisions": 0, "rejected": 0, "acceptance_rate": 1.0},
             pd.Series(dtype=float),
+            0.0,
         )
         fake_eval.count += 1
         return result
@@ -407,7 +435,7 @@ def test_single_asset_matches_single_eval(monkeypatch):
     config.MAX_HOLD_PERIOD = 1
 
     evaluator = MultiAssetFitnessEvaluator({'up': data['up']}, {}, {})
-    _, _, portfolio_returns, _oc, _diag, trade_counts = evaluator._evaluate_once(
+    _, _, portfolio_returns, _oc, _diag, trade_counts, _conc = evaluator._evaluate_once(
         [], seed=0, assets=['up']
     )
 
