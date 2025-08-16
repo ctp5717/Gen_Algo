@@ -168,7 +168,10 @@ def gate_entries(
     }
     if total != total_candidates:
         logger.warning(
-            "gate_entries mismatch at %s: total_candidates=%d, accepted=%d, rejected=%d, diagnostics=%s",
+            (
+                "gate_entries mismatch at %s: total_candidates=%d, accepted=%d, "
+                "rejected=%d, diagnostics=%s"
+            ),
             datetime.now().isoformat(),
             total_candidates,
             accepted_total,
