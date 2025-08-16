@@ -252,6 +252,9 @@ SCANNER = {
     "verbose_top_n": 5,         # number of per-asset stats shown in verbose mode
 }
 
+# Emit a warning if tie_break_policy is not the recommended 'fifo'
+warn_non_fifo = True
+
 # Trading costs
 FEES = 0.001
 SLIPPAGE = 0.0

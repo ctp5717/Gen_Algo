@@ -31,11 +31,12 @@ def log_run_parameters(logger):
     )
     logger.info("  tie_break_policy: %s", scanner.get("tie_break_policy"))
     if scanner.get("tie_break_policy") != expected_policy:
-        logger.warning(
-            "tie_break_policy '%s' differs from expected live policy '%s'",
-            scanner.get("tie_break_policy"),
-            expected_policy,
-        )
+        if config.warn_non_fifo:
+            logger.warning(
+                "tie_break_policy '%s' differs from expected live policy '%s'",
+                scanner.get("tie_break_policy"),
+                expected_policy,
+            )
     logger.info("  monte_carlo_runs: %s", scanner.get("monte_carlo_runs"))
     logger.info("  seed: %s", scanner.get("seed"))
     logger.info(
