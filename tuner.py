@@ -1,4 +1,6 @@
 import os
+from collections.abc import Mapping
+
 import numpy as np
 import pygad
 import vectorbt as vbt
@@ -111,7 +113,20 @@ def _on_generation_callback(ga_instance):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
-    data = ohlc_data if isinstance(ohlc_data, pd.DataFrame) else next(iter(ohlc_data.values()))
+    if isinstance(ohlc_data, pd.DataFrame):
+        data = ohlc_data
+    elif isinstance(ohlc_data, Mapping):
+        selected = getattr(config, "SELECTED_ASSET_NAME", None)
+        ticker = getattr(config, "TICKER", None)
+        if selected and selected in ohlc_data:
+            data = ohlc_data[selected]
+        elif ticker and ticker in ohlc_data:
+            data = ohlc_data[ticker]
+        else:
+            data = next(iter(ohlc_data.values()))
+    else:
+        data = next(iter(ohlc_data.values()))
+
     fitness_evaluator = fitness.FitnessEvaluator(data, config.STRATEGY_RULES, gene_map)
     fitness_func = fitness_evaluator.__call__
     error_tracker = getattr(fitness_evaluator, "error_tracker", None)

@@ -57,6 +57,61 @@ def test_find_best_hyperparameters_selects_best(monkeypatch):
     assert best == search[1]
 
 
+def test_find_best_hyperparameters_uses_selected_asset(monkeypatch):
+    df_a = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+    df_b = df_a * 2
+    data_map = {'A': df_a, 'B': df_b}
+
+    gene_space = [{'low': 0, 'high': 1}]
+    gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
+    gene_types = [float]
+
+    monkeypatch.setattr(
+        tuner.config,
+        'HYPERPARAMETER_SEARCH_SPACE',
+        [{'sol_per_pop': 1, 'num_parents_mating': 1, 'mutation_num_genes': 1}],
+        raising=False,
+    )
+    monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+    monkeypatch.setattr(tuner.config, 'SELECTED_ASSET_NAME', 'B', raising=False)
+    monkeypatch.setattr(tuner.config, 'TICKER', 'B', raising=False)
+
+    captured = {}
+
+    class DummyEval:
+        def __init__(self, ohlc_data, base_rules, gene_map):
+            captured['data'] = ohlc_data
+
+        def __call__(self, ga_instance, solution, sol_idx):
+            return 0.0
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            pass
+
+        def best_solution(self, **kwargs):
+            return [0], 0.0, None
+
+    monkeypatch.setattr(tuner.fitness, 'FitnessEvaluator', DummyEval)
+    monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
+    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda s, g: 0)
+
+    tuner.find_best_hyperparameters(data_map, gene_space, gene_map, gene_types)
+    assert captured['data'] is df_b
+
+
 def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
     df = pd.DataFrame({
         'Open': [1],
