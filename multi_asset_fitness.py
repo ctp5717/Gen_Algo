@@ -398,15 +398,27 @@ class MultiAssetFitnessEvaluator:
                 )
                 runs = 3
             base_seed = config.SCANNER.get("seed", 0)
+            max_solutions = getattr(ga_instance, "sol_per_pop", 0)
+            seed_base = base_seed + generation * max_solutions + sol_idx
             run_scores: List[float] = []
             concentration_ratios: List[float] = []
             per_asset_runs: Dict[str, List[float]] = {}
             diag_saved = False
 
             if runs > 1 and config.PARALLEL.get("backend") == "multiprocessing":
-                args = [
-                    (solution, base_seed + i, assets) for i in range(runs)
-                ]
+                args = []
+                for i in range(runs):
+                    seed = seed_base + i
+                    logger.debug(
+                        "MC run %d using seed %d (base=%d gen=%d sol_idx=%d max_solutions=%d)",
+                        i,
+                        seed,
+                        base_seed,
+                        generation,
+                        sol_idx,
+                        max_solutions,
+                    )
+                    args.append((solution, seed, assets))
                 with mp.Pool(processes=config.PARALLEL.get("workers") or None) as pool:
                     results = pool.starmap(self._evaluate_once, args)
                 for score, metrics, _pr, oc, diag, trade_counts, conc_ratio in results:
@@ -421,6 +433,16 @@ class MultiAssetFitnessEvaluator:
                         diag_saved = True
             else:
                 for i in range(runs):
+                    seed = seed_base + i
+                    logger.debug(
+                        "MC run %d using seed %d (base=%d gen=%d sol_idx=%d max_solutions=%d)",
+                        i,
+                        seed,
+                        base_seed,
+                        generation,
+                        sol_idx,
+                        max_solutions,
+                    )
                     (
                         score,
                         metrics,
@@ -430,7 +452,7 @@ class MultiAssetFitnessEvaluator:
                         trade_counts,
                         conc_ratio,
                     ) = self._evaluate_once(
-                        solution, seed=base_seed + i, assets=assets
+                        solution, seed=seed, assets=assets
                     )
                     run_scores.append(score)
                     concentration_ratios.append(conc_ratio)
