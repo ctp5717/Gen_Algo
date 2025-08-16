@@ -284,6 +284,7 @@ def test_monte_carlo_diagnostics_saved_and_logged(monkeypatch, caplog):
     config.ROBUSTNESS["lambda_asset_dispersion"] = orig_lambda_asset
     config.ROBUSTNESS["lambda_mc_dispersion"] = orig_lambda_mc
 
+
 def test_asset_metrics_aggregated_across_runs(monkeypatch):
     data = make_data()
 

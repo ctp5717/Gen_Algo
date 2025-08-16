@@ -1,7 +1,8 @@
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from typing import Dict, List
+
+import matplotlib.pyplot as plt
+
+plt.switch_backend("Agg")
 
 
 def plot_collisions_histogram(collisions: Dict[str, int]):
