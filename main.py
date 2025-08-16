@@ -84,6 +84,11 @@ def main():
 
     logger = get_run_logger()
     log_run_parameters(logger)
+    logger.info(
+        "Entries executed on bar open at t+%s; capital allocated equally across %d open trades.",
+        getattr(config, "ENTRY_LAG_BARS", 1),
+        config.SCANNER.get("max_concurrent_trades", 1),
+    )
     print("-" * 35)
 
     print(

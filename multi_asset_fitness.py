@@ -153,7 +153,9 @@ class MultiAssetFitnessEvaluator:
             # Shift signals forward so that trades occur on the next bar.
             # ``asset_entries`` remains unshifted for gating (decisions at ``t``),
             # while ``shifted_entries`` is used for exit simulation.
-            shifted_entries = asset_entries.shift(1, fill_value=False)
+            shifted_entries = asset_entries.shift(
+                getattr(config, "ENTRY_LAG_BARS", 1), fill_value=False
+            )
 
             # Initial time-based exit for max-hold measured from execution time
             time_exit = shifted_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
@@ -247,7 +249,9 @@ class MultiAssetFitnessEvaluator:
             asset_entries = gated[name].reindex(data.index, fill_value=False)
             if asset_entries.any():
                 # Execute trades on the next bar
-                shifted_entries = asset_entries.shift(1, fill_value=False)
+                shifted_entries = asset_entries.shift(
+                    getattr(config, "ENTRY_LAG_BARS", 1), fill_value=False
+                )
                 time_exit = shifted_entries.shift(
                     config.MAX_HOLD_PERIOD, fill_value=False
                 )
@@ -271,7 +275,11 @@ class MultiAssetFitnessEvaluator:
                 trade_counts_dict[name] = 0.0
 
         # Returns are realized one bar after the position count used for gating
-        open_count_safe = open_count.shift(1).reindex(returns_df.index).replace(0, np.nan)
+        open_count_safe = (
+            open_count.shift(getattr(config, "ENTRY_LAG_BARS", 1))
+            .reindex(returns_df.index)
+            .replace(0, np.nan)
+        )
         portfolio_returns = (returns_df.sum(axis=1) / open_count_safe).fillna(0.0)
         trade_counts = pd.Series(trade_counts_dict)
         total_trades = trade_counts.sum()
@@ -281,7 +289,9 @@ class MultiAssetFitnessEvaluator:
             name = assets[0]
             data_sa = self.ohlc_dict[name]
             sa_entries = entries_df[name]
-            shifted_sa = sa_entries.shift(1, fill_value=False)
+            shifted_sa = sa_entries.shift(
+                getattr(config, "ENTRY_LAG_BARS", 1), fill_value=False
+            )
             time_exit_sa = shifted_sa.shift(config.MAX_HOLD_PERIOD, fill_value=False)
             pf_sa = vbt.Portfolio.from_signals(
                 close=data_sa["Close"],
