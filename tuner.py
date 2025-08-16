@@ -53,8 +53,10 @@ def _evaluate_on_validation(solution, gene_map):
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)
 
-    # Gate entries to obtain diagnostics and admitted trade count
-    gated, _oc, diag = scanner_sim.gate_entries(entries, time_exit, 1)
+    # Gate entries using the configured concurrency limit to obtain
+    # diagnostics and admitted trade count
+    max_concurrent = config.SCANNER.get("max_concurrent_trades", 1)
+    gated, _oc, diag = scanner_sim.gate_entries(entries, time_exit, max_concurrent)
     gated_entries = gated.iloc[:, 0]
     trade_count = int(diag.get("accepted", 0))
 
