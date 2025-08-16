@@ -15,6 +15,7 @@ import pprint
 import tuner
 import traceback
 import time  # <-- NEW: Import the time module
+import warnings
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # Use non-interactive backend
@@ -90,6 +91,27 @@ def main():
         config.SCANNER.get("max_concurrent_trades", 1),
     )
     print("-" * 35)
+
+    # Enforce safety limits from config to avoid excessive workloads
+    limits = getattr(config, "LIMITS", {})
+    max_assets = limits.get("max_assets")
+    max_mc_runs = limits.get("max_mc_runs")
+    num_assets = len(getattr(config, "ASSET_GROUP", []))
+    mc_runs = config.SCANNER.get("monte_carlo_runs", 1)
+    if max_assets is not None and num_assets > max_assets:
+        msg = (
+            f"ASSET_GROUP contains {num_assets} assets which exceeds limit ({max_assets}). Aborting."
+        )
+        warnings.warn(msg)
+        logger.warning(msg)
+        return
+    if max_mc_runs is not None and mc_runs > max_mc_runs:
+        msg = (
+            f"SCANNER monte_carlo_runs={mc_runs} exceeds limit ({max_mc_runs}). Aborting."
+        )
+        warnings.warn(msg)
+        logger.warning(msg)
+        return
 
     print(
         "Loading TRAINING data from "
