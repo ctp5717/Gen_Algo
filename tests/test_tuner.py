@@ -6,8 +6,6 @@ import pickle
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-
-sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 sys.modules.setdefault('binance', types.ModuleType('binance'))
 bin_client = types.ModuleType('binance.client')
@@ -121,7 +119,20 @@ def test_evaluate_on_validation_imports_pandas_ta(monkeypatch):
     if hasattr(pd.DataFrame, 'ta'):
         delattr(pd.DataFrame, 'ta')
 
-    sys.modules['pandas_ta'] = types.ModuleType('pandas_ta')
+    class PandasTaStub(types.ModuleType):
+        def __init__(self):  # pragma: no cover - side effects only
+            super().__init__('pandas_ta')
+
+            class _Accessor:
+                def __init__(self, df):
+                    self._df = df
+
+                def ema(self, length):  # noqa: D401 - simple stub
+                    return pd.Series(1.0, index=self._df.index)
+
+            pd.DataFrame.ta = property(lambda self: _Accessor(self))
+
+    monkeypatch.setitem(sys.modules, 'pandas_ta', PandasTaStub())
 
     class DummyPF:
         def stats(self):
@@ -134,11 +145,28 @@ def test_evaluate_on_validation_imports_pandas_ta(monkeypatch):
 
     monkeypatch.setattr(tuner, 'vbt', types.SimpleNamespace(Portfolio=DummyPortfolio))
     monkeypatch.setattr(tuner.data_loader, 'get_data', lambda **kwargs: df)
-    monkeypatch.setattr(tuner.fitness, '_inject_genes_into_rules', lambda rules, gm, sol: {'entry_rules': {}, 'exit_rules': {}})
-    monkeypatch.setattr(tuner.engine, 'process_strategy_rules', lambda data, rules: pd.Series([True, False, True], index=df.index))
-    monkeypatch.setattr(tuner.scanner_sim, 'gate_entries', lambda entries, exits, mc: (pd.DataFrame(entries), None, {'accepted': 2}))
+    monkeypatch.setattr(
+        tuner.fitness,
+        '_inject_genes_into_rules',
+        lambda rules, gm, sol: {'entry_rules': {}, 'exit_rules': {}},
+    )
+    monkeypatch.setattr(
+        tuner.engine,
+        'process_strategy_rules',
+        lambda data, rules: pd.Series([True, False, True], index=df.index),
+    )
+    monkeypatch.setattr(
+        tuner.scanner_sim,
+        'gate_entries',
+        lambda entries, exits, mc: (pd.DataFrame(entries), None, {'accepted': 2}),
+    )
     monkeypatch.setattr(tuner.config, 'TICKER', 'X', raising=False)
-    monkeypatch.setattr(tuner.config, 'VALIDATION_PERIOD', {'start': '2020-01-01', 'end': '2020-01-03'}, raising=False)
+    monkeypatch.setattr(
+        tuner.config,
+        'VALIDATION_PERIOD',
+        {'start': '2020-01-01', 'end': '2020-01-03'},
+        raising=False,
+    )
     monkeypatch.setattr(tuner.config, 'TIMEFRAME', '1D', raising=False)
     monkeypatch.setattr(tuner.config, 'STRATEGY_RULES', {}, raising=False)
     monkeypatch.setattr(tuner.config, 'MAX_HOLD_PERIOD', 1, raising=False)

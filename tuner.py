@@ -22,6 +22,8 @@ def _evaluate_on_validation(solution, gene_map):
         import pandas_ta  # noqa: F401  # pylint: disable=unused-import
     except Exception:  # pragma: no cover - graceful degradation
         return -1e6
+    if not hasattr(pd.DataFrame, "ta"):
+        return -1e6
     if not hasattr(vbt, "Portfolio"):
         return -1e6
 
