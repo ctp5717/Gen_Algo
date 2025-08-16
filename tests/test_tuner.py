@@ -9,6 +9,10 @@ sys.path.insert(0, str(ROOT))
 
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
+sys.modules.setdefault('binance', types.ModuleType('binance'))
+bin_client = types.ModuleType('binance.client')
+bin_client.Client = object
+sys.modules.setdefault('binance.client', bin_client)
 
 import tuner  # noqa: E402
 
@@ -100,6 +104,50 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
     original = list(gene_types)
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
     assert gene_types == original
+
+
+def test_evaluate_on_validation_imports_pandas_ta(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'Open': [1, 1, 1],
+            'High': [1, 1, 1],
+            'Low': [1, 1, 1],
+            'Close': [1, 1, 1],
+            'Volume': [1, 1, 1],
+        },
+        index=pd.date_range('2020-01-01', periods=3),
+    )
+
+    if hasattr(pd.DataFrame, 'ta'):
+        delattr(pd.DataFrame, 'ta')
+
+    sys.modules['pandas_ta'] = types.ModuleType('pandas_ta')
+
+    class DummyPF:
+        def stats(self):
+            return {'Sortino Ratio': 1.0}
+
+    class DummyPortfolio:
+        @staticmethod
+        def from_signals(*a, **k):
+            return DummyPF()
+
+    monkeypatch.setattr(tuner, 'vbt', types.SimpleNamespace(Portfolio=DummyPortfolio))
+    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda **kwargs: df)
+    monkeypatch.setattr(tuner.fitness, '_inject_genes_into_rules', lambda rules, gm, sol: {'entry_rules': {}, 'exit_rules': {}})
+    monkeypatch.setattr(tuner.engine, 'process_strategy_rules', lambda data, rules: pd.Series([True, False, True], index=df.index))
+    monkeypatch.setattr(tuner.scanner_sim, 'gate_entries', lambda entries, exits, mc: (pd.DataFrame(entries), None, {'accepted': 2}))
+    monkeypatch.setattr(tuner.config, 'TICKER', 'X', raising=False)
+    monkeypatch.setattr(tuner.config, 'VALIDATION_PERIOD', {'start': '2020-01-01', 'end': '2020-01-03'}, raising=False)
+    monkeypatch.setattr(tuner.config, 'TIMEFRAME', '1D', raising=False)
+    monkeypatch.setattr(tuner.config, 'STRATEGY_RULES', {}, raising=False)
+    monkeypatch.setattr(tuner.config, 'MAX_HOLD_PERIOD', 1, raising=False)
+    monkeypatch.setattr(tuner.config, 'FEES', 0.0, raising=False)
+    monkeypatch.setattr(tuner.config, 'MIN_TRADES', 0, raising=False)
+    monkeypatch.setattr(tuner.config, 'FITNESS_WEIGHTS', {'min_trades': 0}, raising=False)
+
+    score = tuner._evaluate_on_validation([], {})
+    assert score == 1.0
 
 
 def test_find_best_hyperparameters_pickleable_callback(monkeypatch):

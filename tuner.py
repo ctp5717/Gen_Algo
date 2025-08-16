@@ -15,9 +15,14 @@ from utils.logging_util import get_logger
 def _evaluate_on_validation(solution, gene_map):
     """Evaluate solution on validation data and return Sortino Ratio."""
     # If heavy optional dependencies are missing, skip evaluation to keep tests
-    # lightweight. We check for the pandas_ta accessor and vectorbt's Portfolio
-    # class. When absent, return -inf so the tuner can continue without errors.
-    if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
+    # lightweight. Import pandas_ta on demand to register the accessor used by
+    # indicator rules. When either pandas_ta or vectorbt is unavailable we
+    # return a large negative score so the tuner can continue without errors.
+    try:  # pragma: no cover - import side effects only
+        import pandas_ta  # noqa: F401  # pylint: disable=unused-import
+    except Exception:  # pragma: no cover - graceful degradation
+        return -1e6
+    if not hasattr(vbt, "Portfolio"):
         return -1e6
 
     val_data = data_loader.get_data(
