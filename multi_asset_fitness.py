@@ -236,6 +236,7 @@ class MultiAssetFitnessEvaluator:
             seed=seed,
             scores=scores_df,
             price_index=close_df.index,
+            collect_collision_histogram=True,
         )
 
         returns_df = pd.DataFrame(0.0, index=gated.index, columns=gated.columns)

@@ -29,6 +29,7 @@ import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 from log_utils import get_run_logger, log_run_parameters
 import artifact_utils
+import charts
 from utils.logging_util import get_logger
 
 
@@ -207,6 +208,32 @@ def main():
     fig.savefig(fitness_path)
     plt.close(fig)
     artifact_utils.append_to_manifest(fitness_path)
+
+    # Plot diagnostics from the training run if available
+    diag = getattr(fitness_evaluator, "last_diagnostics", {})
+    if diag:
+        artifacts_dir.mkdir(exist_ok=True)
+        collisions = diag.get("collisions_by_asset")
+        if collisions:
+            fig = charts.plot_collisions_histogram(collisions)
+            path = artifacts_dir / "collisions_histogram.png"
+            fig.savefig(path)
+            plt.close(fig)
+            artifact_utils.append_to_manifest(path)
+        per_asset = diag.get("per_asset")
+        if per_asset:
+            fig = charts.plot_per_asset_acceptance_rate(per_asset)
+            path = artifacts_dir / "per_asset_acceptance.png"
+            fig.savefig(path)
+            plt.close(fig)
+            artifact_utils.append_to_manifest(path)
+        run_scores = diag.get("run_scores")
+        if run_scores:
+            fig = charts.plot_mc_dispersion(run_scores, diag.get("mc_median"))
+            path = artifacts_dir / "mc_dispersion.png"
+            fig.savefig(path)
+            plt.close(fig)
+            artifact_utils.append_to_manifest(path)
 
     try:
         prev_verbose = config.SCANNER.get("verbose", False)
