@@ -61,7 +61,7 @@ class FitnessEvaluator:
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
-            shifted_entries = entries.shift(1, fill_value=False)
+            shifted_entries = entries.shift(config.ENTRY_LAG_BARS, fill_value=False)
 
             if shifted_entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
                 return -1.0

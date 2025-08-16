@@ -360,7 +360,7 @@ def test_exit_parity_with_single_asset(monkeypatch):
 
     for name, df in data.items():
         raw_entries = pd.Series([True] + [False] * (len(df.index) - 1), index=df.index)
-        shifted_entries = raw_entries.shift(1, fill_value=False)
+        shifted_entries = raw_entries.shift(config.ENTRY_LAG_BARS, fill_value=False)
         time_exit = shifted_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         pf = vbt.Portfolio.from_signals(
             close=df['Close'],
@@ -453,7 +453,7 @@ def test_single_asset_matches_single_eval(monkeypatch):
     import vectorbt as vbt  # local import to avoid heavy dependency at module load
 
     entries = pd.Series([True, False, True, False, True], index=data['up'].index)
-    shifted = entries.shift(1, fill_value=False)
+    shifted = entries.shift(config.ENTRY_LAG_BARS, fill_value=False)
     time_exit = shifted.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     pf = vbt.Portfolio.from_signals(
         close=data['up']['Close'],

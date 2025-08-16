@@ -52,7 +52,7 @@ def test_single_asset_parity(monkeypatch):
         entries_df, exits_df, max_concurrent=1, price_index=data.index
     )
     asset_entries = gated.iloc[:, 0].reindex(data.index, fill_value=False)
-    shifted_entries = asset_entries.shift(1, fill_value=False)
+    shifted_entries = asset_entries.shift(config.ENTRY_LAG_BARS, fill_value=False)
     time_exit = shifted_entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     pf_multi = vectorbt.Portfolio.from_signals(
         close=data['Close'],
@@ -65,7 +65,7 @@ def test_single_asset_parity(monkeypatch):
         freq=config.TIMEFRAME,
     )
     entries_single = fake_process(data, {})
-    shifted_single = entries_single.shift(1, fill_value=False)
+    shifted_single = entries_single.shift(config.ENTRY_LAG_BARS, fill_value=False)
     time_exit_single = shifted_single.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     pf_single = vectorbt.Portfolio.from_signals(
         close=data['Close'],

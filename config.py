@@ -252,6 +252,10 @@ SCANNER = {
     "verbose_top_n": 5,         # number of per-asset stats shown in verbose mode
 }
 
+# Assumptions governing how trades are executed
+# Entries are filled on the next bar open by default
+ENTRY_LAG_BARS = 1
+
 # Emit a warning if tie_break_policy is not the recommended 'fifo'
 warn_non_fifo = True
 
