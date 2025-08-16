@@ -110,7 +110,7 @@ def test_concentration_penalty(monkeypatch):
     config.MAX_HOLD_PERIOD = original_maxhold
 
 
-def test_monte_carlo_median_with_random_tie_break(monkeypatch):
+def test_monte_carlo_median_with_random_tie_break(monkeypatch, caplog):
     import statistics
 
     data = make_data()
@@ -143,12 +143,23 @@ def test_monte_carlo_median_with_random_tie_break(monkeypatch):
     )
 
     ga = DummyGA()
+    ga.generations_completed = 1
+    ga.sol_per_pop = 10
+    sol_idx = 3
     evaluator = MultiAssetFitnessEvaluator(data, {}, {})
-    score = evaluator(ga, [], 0)
+    with caplog.at_level("DEBUG"):
+        score = evaluator(ga, [], sol_idx)
 
-    expected_seeds = [config.SCANNER['seed'] + i for i in range(config.SCANNER['monte_carlo_runs'])]
+    base = (
+        config.SCANNER["seed"]
+        + ga.generations_completed * ga.sol_per_pop
+        + sol_idx
+    )
+    expected_seeds = [base + i for i in range(config.SCANNER['monte_carlo_runs'])]
     assert seeds == expected_seeds
     assert score == statistics.median(expected_seeds)
+    for s in expected_seeds:
+        assert f"using seed {s}" in caplog.text
 
     config.SCANNER['tie_break_policy'] = orig_policy
     config.SCANNER['monte_carlo_runs'] = orig_runs
