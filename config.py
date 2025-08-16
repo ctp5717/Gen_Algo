@@ -148,7 +148,7 @@ GA_MUTATION_NUM_GENES = 1
 # GA_MUTATION_NUM_GENES = 4 # Mutate more genes with a more complex strategy
 
 # --- AUTO-TUNER SETTINGS ---
-AUTO_TUNE_ENABLED = True
+AUTO_TUNE_ENABLED = False
 GENERATIONS_PER_TUNE = 10
 HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1},
@@ -181,26 +181,11 @@ CHAMPION_SELECTION_SETTINGS = {
 # function which evaluates a single strategy across all assets while enforcing
 # a live-like cap on concurrent positions.
 ASSET_GROUP = [
-    ("Bitcoin", "BTC-USD"),
     ("Ethereum", "ETH-USD"),
     ("Solana", "SOL-USD"),
     ("Cardano", "ADA-USD"),
     ("XRP", "XRP-USD"),
     ("Dogecoin", "DOGE-USD"),
-    ("Litecoin", "LTC-USD"),
-    ("Chainlink", "LINK-USD"),
-    ("Polygon", "MATIC-USD"),
-    ("Polkadot", "DOT-USD"),
-    ("Avalanche", "AVAX-USD"),
-    ("TRON", "TRX-USD"),
-    ("Uniswap", "UNI-USD"),
-    ("Filecoin", "FIL-USD"),
-    ("Stellar", "XLM-USD"),
-    ("Near_Protocol", "NEAR-USD"),
-    ("Internet_Computer", "ICP-USD"),
-    ("Optimism", "OP-USD"),
-    ("The_Graph", "GRT-USD"),
-    ("Shiba_Inu", "SHIB-USD"),
 ]
 
 # Small Asset Basket
@@ -253,8 +238,8 @@ SCANNER = {
     # Optional scaling applied to scores to reduce micro-cap bias. One of:
     # None | 'atr' | 'dollar_volume'
     "score_scaling": None,
-    "monte_carlo_runs": 3,       # >1 enables Monte Carlo replay for random policy
-    "seed": 123,                  # seed for random tie-breaks and sampling
+    "monte_carlo_runs": 1,       # >1 enables Monte Carlo replay for random policy
+    "seed": 0,                  # seed for random tie-breaks and sampling
     "verbose": False,           # print diagnostics from the scanner
     "verbose_top_n": 5,         # number of per-asset stats shown in verbose mode
 }
@@ -273,7 +258,7 @@ SLIPPAGE = 0.0
 # Optional robustness penalties – kept at zero by default so behaviour is
 # unchanged for existing single-asset runs.
 ROBUSTNESS = {
-    "lambda_asset_dispersion": 0.1,
+    "lambda_asset_dispersion": 0.0,
     "lambda_mc_dispersion": 0.0,
     "lambda_concentration": 0.0,
 }
@@ -284,7 +269,7 @@ ROBUSTNESS = {
 # sampled while the elite settings force full evaluations periodically to keep
 # top performers accurate.
 MINIBATCH = {
-    "enabled": True,
+    "enabled": False,
     "size": 7,
     "elite_eval_period": 5,
     "elite_count": 10,
