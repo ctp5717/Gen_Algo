@@ -148,8 +148,8 @@ GA_MUTATION_NUM_GENES = 1
 # GA_MUTATION_NUM_GENES = 4 # Mutate more genes with a more complex strategy
 
 # --- AUTO-TUNER SETTINGS ---
-AUTO_TUNE_ENABLED = False
-GENERATIONS_PER_TUNE = 10
+AUTO_TUNE_ENABLED = True
+GENERATIONS_PER_TUNE = 5
 HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1},
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
