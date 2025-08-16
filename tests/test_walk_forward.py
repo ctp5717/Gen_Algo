@@ -34,7 +34,7 @@ class _WFDummyEvaluator:
         return 1.0
 
     def _evaluate_once(self, *a, **k):
-        return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float)
+        return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0
 
     @staticmethod
     def _calc_stats(returns):
@@ -145,7 +145,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
             return 1.0
 
         def _evaluate_once(self, *a, **k):
-            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float)
+            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0
 
         @staticmethod
         def _calc_stats(returns):
@@ -249,7 +249,7 @@ def test_walk_forward_returns_summary(monkeypatch):
             return 1.0
 
         def _evaluate_once(self, *a, **k):
-            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float)
+            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0
 
         @staticmethod
         def _calc_stats(returns):
@@ -380,6 +380,7 @@ def test_walk_forward_reproducible_with_fixed_seed(monkeypatch):
                 pd.Series(dtype=float),
                 {},
                 pd.Series(dtype=float),
+                0.0,
             )
 
         @staticmethod

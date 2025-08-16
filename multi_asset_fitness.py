@@ -273,6 +273,8 @@ class MultiAssetFitnessEvaluator:
         open_count_safe = open_count.shift(1).reindex(returns_df.index).replace(0, np.nan)
         portfolio_returns = (returns_df.sum(axis=1) / open_count_safe).fillna(0.0)
         trade_counts = pd.Series(trade_counts_dict)
+        total_trades = trade_counts.sum()
+        concentration_ratio = float(trade_counts.max() / total_trades) if total_trades > 0 else 0.0
 
         if len(assets) == 1:
             name = assets[0]
@@ -328,6 +330,7 @@ class MultiAssetFitnessEvaluator:
             open_count,
             diag,
             trade_counts,
+            concentration_ratio,
         )
 
     @staticmethod
@@ -395,6 +398,7 @@ class MultiAssetFitnessEvaluator:
                 runs = 3
             base_seed = config.SCANNER.get("seed", 0)
             run_scores: List[float] = []
+            concentration_ratios: List[float] = []
             per_asset_runs: Dict[str, List[float]] = {}
             diag_saved = False
 
@@ -404,8 +408,9 @@ class MultiAssetFitnessEvaluator:
                 ]
                 with mp.Pool(processes=config.PARALLEL.get("workers") or None) as pool:
                     results = pool.starmap(self._evaluate_once, args)
-                for score, metrics, _pr, oc, diag, trade_counts in results:
+                for score, metrics, _pr, oc, diag, trade_counts, conc_ratio in results:
                     run_scores.append(score)
+                    concentration_ratios.append(conc_ratio)
                     for a, m in metrics.items():
                         per_asset_runs.setdefault(a, []).append(m)
                     if not diag_saved and assets == self.assets:
@@ -415,10 +420,19 @@ class MultiAssetFitnessEvaluator:
                         diag_saved = True
             else:
                 for i in range(runs):
-                    score, metrics, _pr, oc, diag, trade_counts = self._evaluate_once(
+                    (
+                        score,
+                        metrics,
+                        _pr,
+                        oc,
+                        diag,
+                        trade_counts,
+                        conc_ratio,
+                    ) = self._evaluate_once(
                         solution, seed=base_seed + i, assets=assets
                     )
                     run_scores.append(score)
+                    concentration_ratios.append(conc_ratio)
                     for a, m in metrics.items():
                         per_asset_runs.setdefault(a, []).append(m)
                     if not diag_saved and assets == self.assets:
@@ -431,6 +445,7 @@ class MultiAssetFitnessEvaluator:
             dispersion = float(np.std(run_scores))
             penalty_asset = 0.0
             penalty_mc = 0.0
+            penalty_conc = 0.0
             if per_asset_runs and config.ROBUSTNESS.get("lambda_asset_dispersion", 0.0) > 0:
                 per_asset_avg = {a: np.mean(v) for a, v in per_asset_runs.items()}
                 penalty_asset = config.ROBUSTNESS["lambda_asset_dispersion"] * np.std(
@@ -438,18 +453,27 @@ class MultiAssetFitnessEvaluator:
                 )
             if config.ROBUSTNESS.get("lambda_mc_dispersion", 0.0) > 0:
                 penalty_mc = config.ROBUSTNESS["lambda_mc_dispersion"] * dispersion
+            if config.ROBUSTNESS.get("lambda_concentration", 0.0) > 0 and concentration_ratios:
+                concentration_ratio = float(np.median(concentration_ratios))
+                penalty_conc = (
+                    config.ROBUSTNESS["lambda_concentration"] * concentration_ratio
+                )
+            else:
+                concentration_ratio = float(np.median(concentration_ratios)) if concentration_ratios else 0.0
 
             logger.debug(
-                "run_scores=%s median=%.4f dispersion=%.4f "
-                "asset_dispersion=%.4f mc_dispersion=%.4f",
+                "run_scores=%s median=%.4f dispersion=%.4f asset_dispersion=%.4f "
+                "mc_dispersion=%.4f concentration_ratio=%.4f concentration_penalty=%.4f",
                 run_scores,
                 aggregated,
                 dispersion,
                 penalty_asset,
                 penalty_mc,
+                concentration_ratio,
+                penalty_conc,
             )
 
-            result = float(aggregated - penalty_asset - penalty_mc)
+            result = float(aggregated - penalty_asset - penalty_mc - penalty_conc)
 
             if is_elite_eval:
                 logger.info(
@@ -468,6 +492,8 @@ class MultiAssetFitnessEvaluator:
                     "dispersion": dispersion,
                     "asset_dispersion": penalty_asset,
                     "mc_dispersion": penalty_mc,
+                    "concentration_ratio": concentration_ratio,
+                    "concentration_penalty": penalty_conc,
                 }
             )
 

@@ -261,6 +261,7 @@ SLIPPAGE = 0.0
 ROBUSTNESS = {
     "lambda_asset_dispersion": 0.1,
     "lambda_mc_dispersion": 0.0,
+    "lambda_concentration": 0.0,
 }
 
 # Mini-batching settings allow evaluating only a subset of assets each
