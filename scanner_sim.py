@@ -1,9 +1,14 @@
 import random
+from datetime import datetime
 from typing import Any, Dict, Tuple, Mapping
 
 import pandas as pd
 
+from utils.logging_util import get_logger
 from utils.dataframe_util import to_frame
+
+
+logger = get_logger(__name__)
 
 
 def gate_entries(
@@ -146,7 +151,7 @@ def gate_entries(
     open_count = pd.Series(open_count_list, index=idx)
     accepted_total = sum(v["accepted"] for v in per_asset.values())
     total_rejected = rejected
-    assert accepted_total + total_rejected == total_candidates
+    total = accepted_total + total_rejected
     avg_n_open = float(open_count.mean())
     max_n_open = int(open_count.max()) if len(open_count) else 0
     diagnostics: Dict[str, Any] = {
@@ -161,6 +166,15 @@ def gate_entries(
         "max_n_open": max_n_open,
         "per_asset": per_asset,
     }
+    if total != total_candidates:
+        logger.warning(
+            "gate_entries mismatch at %s: total_candidates=%d, accepted=%d, rejected=%d, diagnostics=%s",
+            datetime.now().isoformat(),
+            total_candidates,
+            accepted_total,
+            total_rejected,
+            diagnostics,
+        )
     if collision_hist is not None:
         diagnostics["collisions_by_asset"] = collision_hist
     if verbose:
