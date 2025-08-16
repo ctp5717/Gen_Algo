@@ -430,12 +430,13 @@ class MultiAssetFitnessEvaluator:
                     )
                     assets = list(rng.choice(self.assets, size=size, replace=False))
 
-            logger.info(
-                "Generation %d, solution %d, assets: %s",
-                generation,
-                sol_idx,
-                ",".join(map(str, assets)),
-            )
+            if config.SCANNER.get("verbose"):
+                logger.info(
+                    "Generation %d, solution %d, assets: %s",
+                    generation,
+                    sol_idx,
+                    ",".join(map(str, assets)),
+                )
 
             runs = config.SCANNER.get("monte_carlo_runs", 1)
             # Ensure a minimum number of runs for stochastic tie-breaks
