@@ -236,6 +236,13 @@ ASSET_GROUP = [
 #    ("Shiba_Inu", "SHIB-USD"),
 #]
 
+# --- SAFETY LIMITS ---------------------------------------------------------
+# Prevent runaway configurations that would consume excessive resources.
+LIMITS = {
+    "max_assets": 50,   # maximum assets allowed in ASSET_GROUP
+    "max_mc_runs": 100, # maximum Monte Carlo runs allowed
+}
+
 SCANNER = {
     # Intended live cap on open positions. Override via --max-concurrent-trades
     "max_concurrent_trades": 3,
