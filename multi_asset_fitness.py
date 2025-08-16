@@ -23,10 +23,14 @@ try:  # Optional dependency for JIT acceleration
 except Exception:  # pragma: no cover - numba not installed
     nb = None
 
+EPSILON = 1e-09
+
 
 if nb is not None:
     @nb.njit(cache=True, parallel=True)
-    def _calc_stats_numba(returns: np.ndarray) -> tuple[float, float, float]:
+    def _calc_stats_numba(
+        returns: np.ndarray,
+    ) -> tuple[float, float, float, bool, bool]:
         n = returns.shape[0]
         equity = np.empty(n)
         equity[0] = 1.0 + returns[0]
@@ -48,7 +52,9 @@ if nb is not None:
                 pos += v
             elif v < 0:
                 neg += v
-        profit_factor = pos / abs(neg) if neg != 0 else np.inf
+        pf_denom_zero = neg == 0.0
+        denom_pf = abs(neg) if not pf_denom_zero else EPSILON
+        profit_factor = pos / denom_pf
 
         downside_sum = 0.0
         count = 0
@@ -59,8 +65,10 @@ if nb is not None:
         downside_std = np.sqrt(downside_sum / count) if count else 0.0
 
         mean = np.mean(returns)
-        sortino = mean / downside_std if downside_std != 0 else np.nan
-        return sortino, profit_factor, max_dd
+        sortino_denom_zero = downside_std == 0.0
+        denom_sortino = downside_std if not sortino_denom_zero else EPSILON
+        sortino = mean / denom_sortino
+        return sortino, profit_factor, max_dd, pf_denom_zero, sortino_denom_zero
 
 
 get_logger(__name__)
@@ -315,15 +323,9 @@ class MultiAssetFitnessEvaluator:
             assert int(trade_counts[name]) == int(sa_trade_count)
 
         sortino, profit_factor, max_dd = self._calc_stats(portfolio_returns)
-
-        if np.isinf(profit_factor) or profit_factor > 5:
-            profit_factor = 5
-        if np.isnan(sortino):
-            sortino = 0
-        if np.isnan(profit_factor):
-            profit_factor = 0
-        if np.isnan(max_dd):
-            max_dd = 100.0
+        sortino, profit_factor, max_dd = self._clamp_metrics(
+            sortino, profit_factor, max_dd
+        )
 
         drawdown_score = 1 - (max_dd / 100.0)
         weights = config.FITNESS_WEIGHTS
@@ -351,8 +353,19 @@ class MultiAssetFitnessEvaluator:
         Falls back to the standard pandas implementation unless the config
         requests a Numba backend and the library is available.
         """
+        logger = get_logger(__name__)
         if config.PARALLEL.get("backend") == "numba" and nb is not None:
-            sortino, profit_factor, max_dd = _calc_stats_numba(returns.to_numpy())
+            sortino, profit_factor, max_dd, pf_zero, sort_zero = _calc_stats_numba(
+                returns.to_numpy()
+            )
+            if pf_zero:
+                logger.debug(
+                    "Profit factor denominator was zero; using EPSILON fallback"
+                )
+            if sort_zero:
+                logger.debug(
+                    "Sortino denominator was zero; using EPSILON fallback"
+                )
             return float(sortino), float(profit_factor), float(max_dd)
 
         equity = (1 + returns).cumprod()
@@ -361,10 +374,38 @@ class MultiAssetFitnessEvaluator:
         max_dd = -drawdown.min() * 100
         pos = returns[returns > 0].sum()
         neg = returns[returns < 0].sum()
-        profit_factor = pos / abs(neg) if neg != 0 else np.inf
+        denom_pf = abs(neg)
+        if denom_pf == 0.0:
+            logger.debug(
+                "Profit factor denominator was zero; using EPSILON fallback"
+            )
+        denom_pf = denom_pf if denom_pf != 0.0 else EPSILON
+        profit_factor = pos / denom_pf
         downside = returns[returns < 0]
         downside_std = downside.std(ddof=0)
-        sortino = returns.mean() / downside_std if downside_std != 0 else np.nan
+        if downside_std == 0.0:
+            logger.debug(
+                "Sortino denominator was zero; using EPSILON fallback"
+            )
+        downside_std = downside_std if downside_std != 0.0 else EPSILON
+        sortino = returns.mean() / downside_std
+        return sortino, profit_factor, max_dd
+
+    @staticmethod
+    def _clamp_metrics(
+        sortino: float, profit_factor: float, max_dd: float
+    ) -> tuple[float, float, float]:
+        sortino = (
+            float(np.clip(sortino, -5.0, 5.0)) if np.isfinite(sortino) else 0.0
+        )
+        profit_factor = (
+            float(np.clip(profit_factor, 0.0, 5.0))
+            if np.isfinite(profit_factor)
+            else 0.0
+        )
+        max_dd = (
+            float(np.clip(max_dd, 0.0, 100.0)) if np.isfinite(max_dd) else 100.0
+        )
         return sortino, profit_factor, max_dd
 
     def __call__(self, ga_instance, solution, sol_idx):
@@ -492,7 +533,10 @@ class MultiAssetFitnessEvaluator:
                     config.ROBUSTNESS["lambda_concentration"] * concentration_ratio
                 )
             else:
-                concentration_ratio = float(np.median(concentration_ratios)) if concentration_ratios else 0.0
+                if concentration_ratios:
+                    concentration_ratio = float(np.median(concentration_ratios))
+                else:
+                    concentration_ratio = 0.0
 
             logger.debug(
                 "run_scores=%s median=%.4f dispersion=%.4f asset_dispersion=%.4f "
