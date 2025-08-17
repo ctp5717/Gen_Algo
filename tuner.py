@@ -7,6 +7,7 @@ import pandas as pd
 import config
 import data_loader
 import fitness
+import multi_asset_fitness
 import strategy_engine as engine
 import scanner_sim
 from utils.logging_util import get_logger
@@ -19,6 +20,40 @@ def _evaluate_on_validation(solution, gene_map):
     # class. When absent, return -inf so the tuner can continue without errors.
     if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
         return -1e6
+
+    if len(getattr(config, "ASSET_GROUP", [])) > 1:
+        val_dict = data_loader.load_group_data(
+            config.ASSET_GROUP,
+            config.VALIDATION_PERIOD["start"],
+            config.VALIDATION_PERIOD["end"],
+            config.TIMEFRAME,
+        )
+        if not val_dict:
+            return -1e6
+        evaluator = multi_asset_fitness.MultiAssetFitnessEvaluator(
+            val_dict, config.STRATEGY_RULES, gene_map
+        )
+        (
+            _fitness,
+            _metrics,
+            portfolio_returns,
+            _open_count,
+            diag,
+            _trade_counts,
+            _conc,
+        ) = evaluator._evaluate_once(
+            solution,
+            seed=config.SCANNER.get("seed", 0),
+            assets=evaluator.assets,
+        )
+        sortino, _pf, _dd = evaluator._calc_stats(portfolio_returns)
+        MIN_TRADES = getattr(
+            config, "MIN_TRADES", config.FITNESS_WEIGHTS.get("min_trades", 0)
+        )
+        trade_count = int(diag.get("accepted", 0))
+        if trade_count < MIN_TRADES or np.isnan(sortino):
+            return -1e6
+        return float(sortino)
 
     val_data = data_loader.get_data(
         ticker=config.TICKER,
@@ -46,8 +81,13 @@ def _evaluate_on_validation(solution, gene_map):
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)
 
-    # Gate entries to obtain diagnostics and admitted trade count
-    gated, _oc, diag = scanner_sim.gate_entries(entries, time_exit, 1)
+    gated, _oc, diag = scanner_sim.gate_entries(
+        entries,
+        time_exit,
+        config.SCANNER.get("max_concurrent_trades", 1),
+        config.SCANNER.get("tie_break_policy", "fifo"),
+        seed=config.SCANNER.get("seed", 0),
+    )
     gated_entries = gated.iloc[:, 0]
     trade_count = int(diag.get("accepted", 0))
 
@@ -59,6 +99,7 @@ def _evaluate_on_validation(solution, gene_map):
         tp_stop=tp_stop,
         sl_trail=sl_trail,
         fees=config.FEES,
+        slippage=getattr(config, "SLIPPAGE", 0.0),
         freq=config.TIMEFRAME,
     )
     stats = portfolio.stats()
@@ -102,8 +143,24 @@ def _on_generation_callback(ga_instance):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
-    data = ohlc_data if isinstance(ohlc_data, pd.DataFrame) else next(iter(ohlc_data.values()))
-    fitness_evaluator = fitness.FitnessEvaluator(data, config.STRATEGY_RULES, gene_map)
+    if len(getattr(config, "ASSET_GROUP", [])) > 1:
+        ohlc_dict = (
+            {config.ASSET_GROUP[0][0]: ohlc_data}
+            if isinstance(ohlc_data, pd.DataFrame)
+            else ohlc_data
+        )
+        fitness_evaluator = multi_asset_fitness.MultiAssetFitnessEvaluator(
+            ohlc_dict, config.STRATEGY_RULES, gene_map
+        )
+    else:
+        data = (
+            ohlc_data
+            if isinstance(ohlc_data, pd.DataFrame)
+            else next(iter(ohlc_data.values()))
+        )
+        fitness_evaluator = fitness.FitnessEvaluator(
+            data, config.STRATEGY_RULES, gene_map
+        )
     fitness_func = fitness_evaluator.__call__
     error_tracker = getattr(fitness_evaluator, "error_tracker", None)
     num_cores = os.cpu_count()
