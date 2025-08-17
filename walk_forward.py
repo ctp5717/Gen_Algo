@@ -310,9 +310,10 @@ def run_walk_forward_validation(initial_champions=None):
         val_evaluator = MultiAssetFitnessEvaluator(
             test_dict, config.STRATEGY_RULES, gene_map
         )
-        validation_score, *_ = val_evaluator._evaluate_once(
+        res = val_evaluator._evaluate_once(
             best_solution, config.SCANNER.get("seed", 0), val_evaluator.assets
         )
+        validation_score = res.fitness
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
         champion_pool = _update_champion_pool(
             champion_pool, best_solution, validation_score, gene_space, champion_settings

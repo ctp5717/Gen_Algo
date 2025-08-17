@@ -10,7 +10,7 @@ import config  # noqa: E402
 
 # Stub heavy dependency
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
-from multi_asset_fitness import MultiAssetFitnessEvaluator  # noqa: E402
+from multi_asset_fitness import MultiAssetFitnessEvaluator, EvalResult  # noqa: E402
 
 
 class DummyGA:
@@ -32,7 +32,7 @@ def patch_engine(monkeypatch, pattern):
 
 def fake_eval_parallel(self, solution, seed, assets):
     """Lightweight stand-in for `_evaluate_once` used in multiprocessing tests."""
-    return (
+    return EvalResult(
         float(seed),
         {},
         pd.Series(dtype=float),
@@ -128,7 +128,7 @@ def test_monte_carlo_median_with_random_tie_break(monkeypatch, caplog):
 
     def fake_eval(self, solution, seed, assets):
         seeds.append(seed)
-        return (
+        return EvalResult(
             float(seed),
             {},
             pd.Series(dtype=float),
@@ -243,7 +243,7 @@ def test_monte_carlo_diagnostics_saved_and_logged(monkeypatch, caplog):
     def fake_eval(self, solution, seed, assets):
         idx = fake_eval.calls
         fake_eval.calls += 1
-        return (
+        return EvalResult(
             scores[idx],
             metrics,
             pd.Series(dtype=float),
@@ -295,7 +295,7 @@ def test_asset_metrics_aggregated_across_runs(monkeypatch):
             {"up": 0.0, "down": 0.0},
             {"up": 4.0, "down": 8.0},
         ]
-        result = (
+        result = EvalResult(
             1.0,
             metrics_list[fake_eval.count % len(metrics_list)],
             pd.Series(dtype=float),
@@ -447,9 +447,11 @@ def test_single_asset_matches_single_eval(monkeypatch):
     config.MAX_HOLD_PERIOD = 1
 
     evaluator = MultiAssetFitnessEvaluator({'up': data['up']}, {}, {})
-    _, _, portfolio_returns, _oc, _diag, trade_counts, _conc = evaluator._evaluate_once(
+    res = evaluator._evaluate_once(
         [], seed=0, assets=['up']
     )
+    portfolio_returns = res.portfolio_returns
+    trade_counts = res.trade_counts
 
     import vectorbt as vbt  # local import to avoid heavy dependency at module load
 
