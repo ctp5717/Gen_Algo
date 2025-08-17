@@ -263,6 +263,11 @@ ROBUSTNESS = {
     "lambda_concentration": 0.0,
 }
 
+# Example presets (uncomment to enable):
+# ROBUSTNESS = {"lambda_asset_dispersion": 0.05,
+#               "lambda_mc_dispersion": 0.05,
+#               "lambda_concentration": 0.05}
+
 # Mini-batching settings allow evaluating only a subset of assets each
 # generation.  Enabled is off by default so behaviour matches the original
 # single-pass evaluation.  When enabled, ``size`` controls how many assets are
