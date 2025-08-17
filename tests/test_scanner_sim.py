@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
 import scanner_sim
@@ -8,7 +9,7 @@ def _make_series(values):
     return pd.Series(values, index=pd.date_range("2020", periods=len(values), freq="D"))
 
 
-def test_no_gating_when_capacity_high():
+def test_k_ge_assets_admits_all_entries():
     entries = pd.concat({
         "A": _make_series([1, 0, 1]),
         "B": _make_series([0, 1, 0])
@@ -23,7 +24,7 @@ def test_no_gating_when_capacity_high():
     assert diag["rejected"] == 0
 
 
-def test_k1_limits_entries():
+def test_k1_single_entry_per_timestamp():
     entries = pd.concat({
         "A": _make_series([1, 0, 1, 0]),
         "B": _make_series([1, 0, 0, 1])
@@ -38,7 +39,7 @@ def test_k1_limits_entries():
     assert (open_count <= 1).all()
 
 
-def test_random_policy_deterministic_with_seed():
+def test_random_policy_same_seed_deterministic():
     entries = pd.concat({
         "A": _make_series([1, 0]),
         "B": _make_series([1, 0])
@@ -52,7 +53,7 @@ def test_random_policy_deterministic_with_seed():
     assert_frame_equal(gated1, gated2)
 
 
-def test_no_reentry_while_open():
+def test_no_asset_reenters_before_exit():
     entries = pd.concat(
         {"A": _make_series([1, 1, 0]), "B": _make_series([0, 0, 0])}, axis=1
     ).astype(bool)
@@ -61,6 +62,59 @@ def test_no_reentry_while_open():
     ).astype(bool)
     gated, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1)
     assert not bool(gated.loc[gated.index[1], "A"])
+
+
+def test_capacity_monotonicity():
+    entries = pd.concat(
+        {"A": _make_series([1, 0, 0, 0]), "B": _make_series([0, 1, 0, 0])}, axis=1
+    ).astype(bool)
+    exits = pd.concat(
+        {"A": _make_series([0, 0, 1, 0]), "B": _make_series([0, 0, 0, 1])}, axis=1
+    ).astype(bool)
+    gated_k1, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1)
+    gated_k2, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=2)
+    assert not ((gated_k1 & ~gated_k2).any().any())
+
+
+def test_allocation_sums_to_one():
+    entries = pd.concat(
+        {"A": _make_series([1, 0, 0, 0]), "B": _make_series([0, 1, 0, 0])}, axis=1
+    ).astype(bool)
+    exits = pd.concat(
+        {"A": _make_series([0, 0, 1, 0]), "B": _make_series([0, 0, 0, 1])}, axis=1
+    ).astype(bool)
+    gated, open_count, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=2)
+    positions = pd.DataFrame(False, index=gated.index, columns=gated.columns)
+    open_set: set[str] = set()
+    for ts in gated.index:
+        for asset in list(open_set):
+            if exits.at[ts, asset]:
+                open_set.remove(asset)
+        for asset in gated.columns:
+            if gated.at[ts, asset]:
+                open_set.add(asset)
+        for asset in open_set:
+            positions.at[ts, asset] = True
+    alloc = positions.astype(float).div(open_count.replace(0, pd.NA), axis=0).fillna(0.0)
+    sums = alloc.sum(axis=1)
+    assert sums[open_count > 0].to_list() == pytest.approx([1.0] * int((open_count > 0).sum()))
+    assert (sums[open_count == 0] == 0.0).all()
+
+
+def test_fifo_policy_deterministic_across_runs():
+    entries = pd.concat({"A": _make_series([1]), "B": _make_series([1])}, axis=1).astype(bool)
+    exits = pd.concat({"A": _make_series([0]), "B": _make_series([0])}, axis=1).astype(bool)
+    gated1, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1, tie_break_policy="fifo")
+    gated2, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1, tie_break_policy="fifo")
+    assert_frame_equal(gated1, gated2)
+
+
+def test_random_policy_differs_across_seeds():
+    entries = pd.concat({"A": _make_series([1]), "B": _make_series([1])}, axis=1).astype(bool)
+    exits = pd.concat({"A": _make_series([0]), "B": _make_series([0])}, axis=1).astype(bool)
+    gated1, _, _ = scanner_sim.gate_entries(entries, exits, 1, tie_break_policy="random", seed=0)
+    gated2, _, _ = scanner_sim.gate_entries(entries, exits, 1, tie_break_policy="random", seed=1)
+    assert not gated1.equals(gated2)
 
 
 def test_capacity_zero_rejects_all():
