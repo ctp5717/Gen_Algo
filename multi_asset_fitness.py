@@ -133,6 +133,13 @@ class MultiAssetFitnessEvaluator:
         self.gene_map = gene_map
         self.assets: List[str] = list(ohlc_dict.keys())
         self.last_assets: List[str] = []  # exposed for testing
+        # Track which assets were sampled for the current generation when
+        # mini-batching is enabled. ``_last_batch_generation`` stores the GA
+        # generation the assets were sampled for while ``_batch_assets`` holds
+        # the actual subset. This ensures every solution in the same generation
+        # is evaluated on an identical asset subset.
+        self._last_batch_generation: int = -1
+        self._batch_assets: List[str] = self.assets
         # Diagnostics from the most recent full evaluation
         self.last_open_count: pd.Series | None = None
         self.last_trade_counts: pd.Series | None = None
@@ -446,10 +453,16 @@ class MultiAssetFitnessEvaluator:
                     assets = self.assets
                     is_elite_eval = True
                 else:
-                    rng = np.random.default_rng(
-                        config.SCANNER.get("seed", 0) + generation + sol_idx
-                    )
-                    assets = list(rng.choice(self.assets, size=size, replace=False))
+                    if self._last_batch_generation != generation:
+                        rng = np.random.default_rng(
+                            config.SCANNER.get("seed", 0) + generation
+                        )
+                        self._batch_assets = list(
+                            rng.choice(self.assets, size=size, replace=False)
+                        )
+                        self._last_batch_generation = generation
+                    assets = self._batch_assets
+            self.last_assets = assets
 
             if config.SCANNER.get("verbose"):
                 logger.info(
