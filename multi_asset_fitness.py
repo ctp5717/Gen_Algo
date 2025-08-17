@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Dict, List
+from dataclasses import dataclass
 import warnings
 import multiprocessing as mp
 
@@ -74,6 +75,33 @@ if nb is not None:
 get_logger(__name__)
 error_tracker = OncePerGenerationErrors()
 VERY_LOW_FITNESS = -999.0
+
+
+@dataclass
+class EvalResult:
+    """Container for detailed evaluation metrics.
+
+    The class implements ``__iter__`` to provide backward compatibility with the
+    previous tuple return type of :meth:`_evaluate_once`.  This allows existing
+    code that unpacks the result as a tuple to continue working temporarily.
+    """
+
+    fitness: float
+    per_asset_sortino: dict[str, float]
+    portfolio_returns: pd.Series
+    open_count: pd.Series
+    diagnostics: dict
+    trade_counts: pd.Series
+    concentration_ratio: float
+
+    def __iter__(self):  # pragma: no cover - trivial
+        yield self.fitness
+        yield self.per_asset_sortino
+        yield self.portfolio_returns
+        yield self.open_count
+        yield self.diagnostics
+        yield self.trade_counts
+        yield self.concentration_ratio
 
 
 class MultiAssetFitnessEvaluator:
@@ -220,14 +248,7 @@ class MultiAssetFitnessEvaluator:
 
     def _evaluate_once(
         self, solution, seed: int | None, assets: List[str]
-    ) -> tuple[
-        float,
-        Dict[str, float],
-        pd.Series,
-        pd.Series,
-        Dict[str, float],
-        pd.Series,
-    ]:
+    ) -> EvalResult:
         suppress_third_party_warnings()
         (
             close_df,
@@ -336,7 +357,7 @@ class MultiAssetFitnessEvaluator:
         )
         if np.isnan(fitness_score):
             fitness_score = -1.0
-        return (
+        return EvalResult(
             float(fitness_score),
             per_asset_sortino,
             portfolio_returns,
@@ -473,15 +494,15 @@ class MultiAssetFitnessEvaluator:
                     args.append((solution, seed, assets))
                 with mp.Pool(processes=config.PARALLEL.get("workers") or None) as pool:
                     results = pool.starmap(self._evaluate_once, args)
-                for score, metrics, _pr, oc, diag, trade_counts, conc_ratio in results:
-                    run_scores.append(score)
-                    concentration_ratios.append(conc_ratio)
-                    for a, m in metrics.items():
+                for res in results:
+                    run_scores.append(res.fitness)
+                    concentration_ratios.append(res.concentration_ratio)
+                    for a, m in res.per_asset_sortino.items():
                         per_asset_runs.setdefault(a, []).append(m)
                     if not diag_saved and assets == self.assets:
-                        self.last_open_count = oc
-                        self.last_trade_counts = trade_counts
-                        self.last_diagnostics = diag
+                        self.last_open_count = res.open_count
+                        self.last_trade_counts = res.trade_counts
+                        self.last_diagnostics = res.diagnostics
                         diag_saved = True
             else:
                 for i in range(runs):
@@ -495,25 +516,17 @@ class MultiAssetFitnessEvaluator:
                         sol_idx,
                         max_solutions,
                     )
-                    (
-                        score,
-                        metrics,
-                        _pr,
-                        oc,
-                        diag,
-                        trade_counts,
-                        conc_ratio,
-                    ) = self._evaluate_once(
+                    res = self._evaluate_once(
                         solution, seed=seed, assets=assets
                     )
-                    run_scores.append(score)
-                    concentration_ratios.append(conc_ratio)
-                    for a, m in metrics.items():
+                    run_scores.append(res.fitness)
+                    concentration_ratios.append(res.concentration_ratio)
+                    for a, m in res.per_asset_sortino.items():
                         per_asset_runs.setdefault(a, []).append(m)
                     if not diag_saved and assets == self.assets:
-                        self.last_open_count = oc
-                        self.last_trade_counts = trade_counts
-                        self.last_diagnostics = diag
+                        self.last_open_count = res.open_count
+                        self.last_trade_counts = res.trade_counts
+                        self.last_diagnostics = res.diagnostics
                         diag_saved = True
 
             aggregated = float(np.median(run_scores))

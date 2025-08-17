@@ -12,7 +12,7 @@ sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
 import walk_forward  # noqa: E402
-
+from multi_asset_fitness import EvalResult  # noqa: E402
 
 import pandas as pd  # noqa: E402
 
@@ -34,7 +34,7 @@ class _WFDummyEvaluator:
         return 1.0
 
     def _evaluate_once(self, *a, **k):
-        return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0
+        return EvalResult(1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0)
 
     @staticmethod
     def _calc_stats(returns):
@@ -145,7 +145,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
             return 1.0
 
         def _evaluate_once(self, *a, **k):
-            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0
+            return EvalResult(1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0)
 
         @staticmethod
         def _calc_stats(returns):
@@ -249,7 +249,7 @@ def test_walk_forward_returns_summary(monkeypatch):
             return 1.0
 
         def _evaluate_once(self, *a, **k):
-            return 1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0
+            return EvalResult(1.0, {}, pd.Series(dtype=float), pd.Series(dtype=float), {}, pd.Series(dtype=float), 0.0)
 
         @staticmethod
         def _calc_stats(returns):
@@ -373,7 +373,7 @@ def test_walk_forward_reproducible_with_fixed_seed(monkeypatch):
 
         def _evaluate_once(self, solution, seed, assets):
             rng = random.Random(seed)
-            return (
+            return EvalResult(
                 rng.random(),
                 {},
                 pd.Series(dtype=float),

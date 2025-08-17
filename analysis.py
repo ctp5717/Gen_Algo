@@ -114,19 +114,16 @@ def run_champion_analysis_multi(best_solution: list, gene_map: dict):
         return
 
     evaluator = MultiAssetFitnessEvaluator(ohlc_dict, config.STRATEGY_RULES, gene_map)
-    # _evaluate_once returns (fitness, per_asset_sortino, portfolio_returns,
-    # open_count, diag, trade_counts, concentration_ratio)
-    (
-        _fitness,
-        per_asset_sortino,
-        portfolio_returns,
-        open_count,
-        diag,
-        trade_counts,
-        concentration_ratio,
-    ) = evaluator._evaluate_once(
+    res = evaluator._evaluate_once(
         best_solution, seed=config.SCANNER.get("seed", 0), assets=evaluator.assets
     )
+
+    per_asset_sortino = res.per_asset_sortino
+    portfolio_returns = res.portfolio_returns
+    open_count = res.open_count
+    diag = res.diagnostics
+    trade_counts = res.trade_counts
+    concentration_ratio = res.concentration_ratio
 
     sortino, profit_factor, max_dd = evaluator._calc_stats(portfolio_returns)
     print("\n--- Validation Period Portfolio Stats ---")

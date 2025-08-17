@@ -33,19 +33,13 @@ def _evaluate_on_validation(solution, gene_map):
         evaluator = multi_asset_fitness.MultiAssetFitnessEvaluator(
             val_dict, config.STRATEGY_RULES, gene_map
         )
-        (
-            _fitness,
-            _metrics,
-            portfolio_returns,
-            _open_count,
-            diag,
-            _trade_counts,
-            _conc,
-        ) = evaluator._evaluate_once(
+        res = evaluator._evaluate_once(
             solution,
             seed=config.SCANNER.get("seed", 0),
             assets=evaluator.assets,
         )
+        portfolio_returns = res.portfolio_returns
+        diag = res.diagnostics
         sortino, _pf, _dd = evaluator._calc_stats(portfolio_returns)
         MIN_TRADES = getattr(
             config, "MIN_TRADES", config.FITNESS_WEIGHTS.get("min_trades", 0)
