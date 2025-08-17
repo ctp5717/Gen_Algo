@@ -211,7 +211,7 @@ def test_multiprocessing_backend(monkeypatch):
 
 def test_minibatch_uses_subset(monkeypatch):
     data = make_data()
-    patch_engine(monkeypatch, [True]*5)
+    patch_engine(monkeypatch, [True] * 5)
     orig_minibatch = config.MINIBATCH.copy()
     config.MINIBATCH['enabled'] = True
     config.MINIBATCH['size'] = 1
@@ -219,6 +219,34 @@ def test_minibatch_uses_subset(monkeypatch):
     ga = DummyGA()
     evaluator = MultiAssetFitnessEvaluator(data, {}, {})
     evaluator(ga, [], 0)
+    first = list(evaluator.last_assets)
+    evaluator(ga, [], 1)
+    # Same generation => same asset subset
+    assert evaluator.last_assets == first
+    ga.generations_completed += 1
+    evaluator(ga, [], 0)
+    assert len(evaluator.last_assets) == 1
+    config.MINIBATCH.update(orig_minibatch)
+
+
+def test_elite_rescored_on_full_assets(monkeypatch):
+    data = make_data()
+    patch_engine(monkeypatch, [True] * 5)
+    orig_minibatch = config.MINIBATCH.copy()
+    config.MINIBATCH.update({
+        'enabled': True,
+        'size': 1,
+        'elite_eval_period': 1,
+        'elite_count': 1,
+    })
+    ga = DummyGA()
+    ga.generations_completed = 1
+    evaluator = MultiAssetFitnessEvaluator(data, {}, {})
+    evaluator(ga, [], 0)
+    # Elite solution rescored on full asset set
+    assert set(evaluator.last_assets) == set(evaluator.assets)
+    evaluator(ga, [], 1)
+    # Non-elite uses minibatch
     assert len(evaluator.last_assets) == 1
     config.MINIBATCH.update(orig_minibatch)
 

@@ -3,6 +3,7 @@ import numpy as np
 import pygad
 import vectorbt as vbt
 import pandas as pd
+import warnings
 
 import config
 import data_loader
@@ -33,21 +34,38 @@ def _evaluate_on_validation(solution, gene_map):
         evaluator = multi_asset_fitness.MultiAssetFitnessEvaluator(
             val_dict, config.STRATEGY_RULES, gene_map
         )
-        res = evaluator._evaluate_once(
-            solution,
-            seed=config.SCANNER.get("seed", 0),
-            assets=evaluator.assets,
-        )
-        portfolio_returns = res.portfolio_returns
-        diag = res.diagnostics
-        sortino, _pf, _dd = evaluator._calc_stats(portfolio_returns)
+        runs = config.SCANNER.get("monte_carlo_runs", 1)
+        if (
+            config.SCANNER.get("tie_break_policy") == "random"
+            and runs < 3
+        ):
+            warnings.warn(
+                "monte_carlo_runs increased to 3 for random tie-break policy",
+                RuntimeWarning,
+            )
+            runs = 3
+        base_seed = config.SCANNER.get("seed", 0)
+        scores = []
+        trade_counts = []
+        for i in range(runs):
+            res = evaluator._evaluate_once(
+                solution,
+                seed=base_seed + i,
+                assets=evaluator.assets,
+            )
+            portfolio_returns = res.portfolio_returns
+            diag = res.diagnostics
+            sortino, _pf, _dd = evaluator._calc_stats(portfolio_returns)
+            scores.append(sortino)
+            trade_counts.append(int(diag.get("accepted", 0)))
+        sortino = float(np.median(scores))
+        trade_count = int(np.median(trade_counts))
         MIN_TRADES = getattr(
             config, "MIN_TRADES", config.FITNESS_WEIGHTS.get("min_trades", 0)
         )
-        trade_count = int(diag.get("accepted", 0))
         if trade_count < MIN_TRADES or np.isnan(sortino):
             return -1e6
-        return float(sortino)
+        return sortino
 
     val_data = data_loader.get_data(
         ticker=config.TICKER,
