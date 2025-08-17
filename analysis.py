@@ -6,6 +6,7 @@ Analysis & Reporting Module
 """
 
 import vectorbt as vbt
+import pandas as pd
 import config
 import data_loader
 import fitness
@@ -113,7 +114,17 @@ def run_champion_analysis_multi(best_solution: list, gene_map: dict):
         return
 
     evaluator = MultiAssetFitnessEvaluator(ohlc_dict, config.STRATEGY_RULES, gene_map)
-    _, _, portfolio_returns, open_count, diag, trade_counts = evaluator._evaluate_once(
+    # _evaluate_once returns (fitness, per_asset_sortino, portfolio_returns,
+    # open_count, diag, trade_counts, concentration_ratio)
+    (
+        _fitness,
+        per_asset_sortino,
+        portfolio_returns,
+        open_count,
+        diag,
+        trade_counts,
+        concentration_ratio,
+    ) = evaluator._evaluate_once(
         best_solution, seed=config.SCANNER.get("seed", 0), assets=evaluator.assets
     )
 
@@ -126,24 +137,41 @@ def run_champion_analysis_multi(best_solution: list, gene_map: dict):
         f"Collisions: {diag['collisions']} | Rejected: {diag['rejected']} | "
         f"Acceptance Rate: {diag['acceptance_rate']:.2f}"
     )
-    print("Per-asset admitted trades:")
-    for asset, cnt in trade_counts.items():
-        print(f"  {asset}: {int(cnt)}")
+    print(f"Portfolio concentration (Herfindahl): {concentration_ratio:.3f}")
+
+    per_asset_df = pd.DataFrame({
+        "admitted_trades": trade_counts.astype(int),
+        "sortino": pd.Series(per_asset_sortino),
+    })
+    per_asset_df.index.name = "asset"
+    print("Per-asset stats:")
+    print(per_asset_df.reset_index().to_string(index=False, formatters={"sortino": "{:.3f}".format}))
 
     equity = (1 + portfolio_returns).cumprod()
     fig1, ax1 = plt.subplots()
-    equity.plot(ax=ax1, title="Portfolio Equity Curve (Validation)")
+    equity.plot(
+        ax=ax1,
+        title=(
+            "Portfolio Equity Curve (Validation)\n"
+            f"Herfindahl Concentration: {concentration_ratio:.3f}"
+        ),
+    )
     fig2, ax2 = plt.subplots()
     open_count.plot(ax=ax2, title="Open Positions Over Time")
     fig3, ax3 = plt.subplots()
     trade_counts.plot(kind="bar", ax=ax3, title="Per-Asset Admitted Trades")
+    fig4, ax4 = plt.subplots()
+    pd.Series(per_asset_sortino).plot(
+        kind="bar", ax=ax4, title="Per-Asset Sortino Ratio"
+    )
     artifact_utils.ARTIFACTS_DIR.mkdir(exist_ok=True)
     paths = [
         artifact_utils.ARTIFACTS_DIR / "multi_equity.png",
         artifact_utils.ARTIFACTS_DIR / "multi_open_positions.png",
         artifact_utils.ARTIFACTS_DIR / "multi_trade_counts.png",
+        artifact_utils.ARTIFACTS_DIR / "multi_sortino.png",
     ]
-    for fig, path in zip([fig1, fig2, fig3], paths):
+    for fig, path in zip([fig1, fig2, fig3, fig4], paths):
         fig.savefig(path)
         plt.close(fig)
         artifact_utils.append_to_manifest(path)
