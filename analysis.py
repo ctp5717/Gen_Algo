@@ -137,15 +137,44 @@ def run_champion_analysis_multi(best_solution: list, gene_map: dict):
         f"Collisions: {diag['collisions']} | Rejected: {diag['rejected']} | "
         f"Acceptance Rate: {diag['acceptance_rate']:.2f}"
     )
-    print(f"Portfolio concentration (Herfindahl): {concentration_ratio:.3f}")
+    conc_label = (
+        "diversified" if concentration_ratio <= 0.25 else
+        "moderate" if concentration_ratio <= 0.5 else
+        "concentrated"
+    )
+    print(
+        f"Portfolio concentration (Herfindahl): {concentration_ratio:.3f} "
+        f"({conc_label})"
+    )
+    logger.info(
+        "Portfolio concentration (Herfindahl): %.3f (%s)",
+        concentration_ratio,
+        conc_label,
+    )
 
-    per_asset_df = pd.DataFrame({
-        "admitted_trades": trade_counts.astype(int),
-        "sortino": pd.Series(per_asset_sortino),
-    })
-    per_asset_df.index.name = "asset"
+    per_asset = diag.get("per_asset", {})
+    rows = []
+    for asset, stats in per_asset.items():
+        candidates = stats.get("candidates", 0)
+        accepted = stats.get("accepted", 0)
+        acceptance_pct = (accepted / candidates * 100) if candidates else 0.0
+        rows.append({
+            "Asset": asset,
+            "Candidates": candidates,
+            "Accepted": accepted,
+            "Acceptance%": acceptance_pct,
+            "Sortino": per_asset_sortino.get(asset, float("nan")),
+        })
+    per_asset_df = pd.DataFrame(rows).set_index("Asset")
     print("Per-asset stats:")
-    print(per_asset_df.reset_index().to_string(index=False, formatters={"sortino": "{:.3f}".format}))
+    print(
+        per_asset_df.to_string(
+            formatters={
+                "Acceptance%": "{:.2f}".format,
+                "Sortino": "{:.3f}".format,
+            }
+        )
+    )
 
     equity = (1 + portfolio_returns).cumprod()
     fig1, ax1 = plt.subplots()
