@@ -104,8 +104,12 @@ def test_allocation_sums_to_one():
 def test_fifo_policy_deterministic_across_runs():
     entries = pd.concat({"A": _make_series([1]), "B": _make_series([1])}, axis=1).astype(bool)
     exits = pd.concat({"A": _make_series([0]), "B": _make_series([0])}, axis=1).astype(bool)
-    gated1, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1, tie_break_policy="fifo")
-    gated2, _, _ = scanner_sim.gate_entries(entries, exits, max_concurrent=1, tie_break_policy="fifo")
+    gated1, _, _ = scanner_sim.gate_entries(
+        entries, exits, max_concurrent=1, tie_break_policy="fifo"
+    )
+    gated2, _, _ = scanner_sim.gate_entries(
+        entries, exits, max_concurrent=1, tie_break_policy="fifo"
+    )
     assert_frame_equal(gated1, gated2)
 
 
