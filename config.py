@@ -164,6 +164,10 @@ FITNESS_WEIGHTS = {
 
 # Settings controlling how walk-forward champions are kept or discarded
 CHAMPION_SELECTION_SETTINGS = {
+    # Metric used to evaluate champions; "fitness" uses the composite
+    # score from :class:`MultiAssetFitnessEvaluator`, while "sortino"
+    # bases the decision on the Sortino ratio.
+    "metric": "fitness",
     # Minimum validation fitness required for a champion to survive
     "survival_threshold": 0.5,
     # Threshold at which a champion is considered elite and cloned

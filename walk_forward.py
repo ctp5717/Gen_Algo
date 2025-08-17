@@ -48,19 +48,25 @@ def _generate_periods(start: datetime, end: datetime, train_months: int, test_mo
     return periods
 
 
-def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
-    """Update champion pool based on validation fitness."""
+def _update_champion_pool(
+    pool, best_solution, validation_score, metric_name, gene_space, settings
+):
+    """Update champion pool based on validation metric."""
     survival = settings.get("survival_threshold", 0.0)
     cloning = settings.get("cloning_threshold", float("inf"))
     num_clones = settings.get("num_clones", 0)
     mutation_rate = settings.get("clone_mutation_rate", 0.0)
 
     if validation_score < survival:
-        print("Champion discarded due to poor performance.")
+        print(
+            f"Champion discarded: {metric_name} {validation_score:.4f} < threshold {survival:.4f}."
+        )
         return pool
 
     if validation_score >= cloning:
-        print("Elite Champion found. Cloning champion.")
+        print(
+            f"Elite Champion found ({metric_name} {validation_score:.4f} ≥ {cloning:.4f}). Cloning champion."
+        )
         pool.append(list(best_solution))
         for _ in range(num_clones):
             clone = list(best_solution)
@@ -77,7 +83,7 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
                     clone[idx] = type(clone[idx])(val)
             pool.append(clone)
     else:
-        print("Viable Champion found and kept for next fold.")
+        print(f"Viable Champion kept ({metric_name} {validation_score:.4f}).")
         pool.append(list(best_solution))
 
     return pool
@@ -306,17 +312,26 @@ def run_walk_forward_validation(initial_champions=None):
         for param_name, param_value in winning_params.items():
             print(f"  {param_name}: {param_value}")
 
-        # Evaluate champion on validation data using composite fitness
+        # Evaluate champion on validation data using the requested metric
         val_evaluator = MultiAssetFitnessEvaluator(
             test_dict, config.STRATEGY_RULES, gene_map
         )
         res = val_evaluator._evaluate_once(
             best_solution, config.SCANNER.get("seed", 0), val_evaluator.assets
         )
-        validation_score = res.fitness
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
+        metric_name = champion_settings.get("metric", "fitness")
+        if metric_name == "sortino":
+            validation_score, _, _ = val_evaluator._calc_stats(res.portfolio_returns)
+        else:
+            validation_score = res.fitness
         champion_pool = _update_champion_pool(
-            champion_pool, best_solution, validation_score, gene_space, champion_settings
+            champion_pool,
+            best_solution,
+            validation_score,
+            metric_name,
+            gene_space,
+            champion_settings,
         )
 
         with open(
