@@ -167,6 +167,7 @@ This module's purpose is to provide a final, unbiased report on the performance 
       * Go to the `STRATEGY_RULES` dictionary. Use the `'is_active': True/False` flags to choose which indicator conditions to include in your strategy.
       * Adjust the `low` and `high` ranges for any genes you want to optimize.
       * For multi-asset runs, `SCANNER['max_concurrent_trades']` caps open positions (recommended live setting: 3). Override this via `--max-concurrent-trades` when running `main.py`. Keep `tie_break_policy` set to `fifo` to match live trade allocation.
+      * Robustness penalties default to zero. Override them with `--lambda-asset-disp`, `--lambda-mc-disp`, and `--lambda-conc` to apply asset dispersion, Monte Carlo dispersion, or concentration penalties.
 
 2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
 

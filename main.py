@@ -41,6 +41,24 @@ def parse_args():
         type=int,
         help="Maximum open positions enforced by the scanner",
     )
+    parser.add_argument(
+        "--lambda-asset-disp",
+        dest="lambda_asset_disp",
+        type=float,
+        help="Penalty weight for asset-level dispersion",
+    )
+    parser.add_argument(
+        "--lambda-mc-disp",
+        dest="lambda_mc_disp",
+        type=float,
+        help="Penalty weight for Monte Carlo dispersion",
+    )
+    parser.add_argument(
+        "--lambda-conc",
+        dest="lambda_conc",
+        type=float,
+        help="Penalty weight for concentration",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -77,10 +95,17 @@ def main():
     args = parse_args()
     if args.max_concurrent_trades is not None:
         config.SCANNER["max_concurrent_trades"] = args.max_concurrent_trades
+    if getattr(args, "lambda_asset_disp", None) is not None:
+        config.ROBUSTNESS["lambda_asset_dispersion"] = args.lambda_asset_disp
+    if getattr(args, "lambda_mc_disp", None) is not None:
+        config.ROBUSTNESS["lambda_mc_dispersion"] = args.lambda_mc_disp
+    if getattr(args, "lambda_conc", None) is not None:
+        config.ROBUSTNESS["lambda_concentration"] = args.lambda_conc
     print("--- GA Trading Strategy Framework ---")
     print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
+    print(f"Active robustness penalties: {config.ROBUSTNESS}")
     print("-" * 35)
 
     logger = get_run_logger()
