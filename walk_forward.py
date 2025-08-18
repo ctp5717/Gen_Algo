@@ -7,6 +7,7 @@ import os
 import numpy as np
 import pygad
 import vectorbt as vbt
+import math
 
 import config
 import data_loader
@@ -94,18 +95,33 @@ def run_walk_forward_validation(initial_champions=None):
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
     end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
 
-    all_data = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=start_date,
-        end_date=end_date,
-        interval=config.TIMEFRAME,
-    )
-    if all_data.empty:
-        print("No data available for walk-forward validation.")
-        return
-
-    start = all_data.index[0]
-    end = all_data.index[-1]
+    multi = getattr(config, "MULTI_ASSET", {}).get("enabled")
+    if multi:
+        all_data = data_loader.get_group_data(
+            asset_group=config.ASSET_GROUP,
+            start_date=start_date,
+            end_date=end_date,
+            interval=config.TIMEFRAME,
+            coverage_threshold=config.COVERAGE_THRESHOLD,
+        )
+        if not all_data:
+            print("No data available for walk-forward validation.")
+            return
+        sample_df = next(iter(all_data.values()))
+        start = sample_df.index[0]
+        end = sample_df.index[-1]
+    else:
+        all_data = data_loader.get_data(
+            ticker=config.TICKER,
+            start_date=start_date,
+            end_date=end_date,
+            interval=config.TIMEFRAME,
+        )
+        if all_data.empty:
+            print("No data available for walk-forward validation.")
+            return
+        start = all_data.index[0]
+        end = all_data.index[-1]
     train_months = wf_settings.get(
         "training_period_length",
         getattr(config, "WALK_FORWARD_TRAINING_MONTHS", 12),
@@ -128,12 +144,24 @@ def run_walk_forward_validation(initial_champions=None):
         print(f"Train: {p['train_start'].date()} -> {p['train_end'].date()}")
         print(f"Test : {p['test_start'].date()} -> {p['test_end'].date()}")
         # fmt: off
-        train_data = all_data.loc[p['train_start']:p['train_end']]
-        test_data = all_data.loc[p['test_start']:p['test_end']]
+        if multi:
+            train_data = {t: df.loc[p['train_start']:p['train_end']] for t, df in all_data.items()}
+            test_data = {t: df.loc[p['test_start']:p['test_end']] for t, df in all_data.items()}
+        else:
+            train_data = all_data.loc[p['train_start']:p['train_end']]
+            test_data = all_data.loc[p['test_start']:p['test_end']]
         # fmt: on
 
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
-        evaluator = fitness.FitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map)
+        if multi:
+            settings_train = dict(config.MULTI_ASSET)
+            rate = settings_train.get("min_total_trades_per_year")
+            if rate:
+                years = (p['train_end'] - p['train_start']).days / 365.25
+                settings_train["min_total_trades"] = math.ceil(rate * years)
+            evaluator = fitness.MultiAssetFitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map, settings_train)
+        else:
+            evaluator = fitness.get_fitness_evaluator(train_data, config.STRATEGY_RULES, gene_map)
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
@@ -164,6 +192,52 @@ def run_walk_forward_validation(initial_champions=None):
         }
 
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
+        if multi:
+            settings_val = dict(config.MULTI_ASSET)
+            rate = settings_val.get("min_total_trades_per_year")
+            if rate:
+                years_val = (p['test_end'] - p['test_start']).days / 365.25
+                settings_val["min_total_trades"] = math.ceil(rate * years_val)
+            test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
+            validation_score = test_eval(None, best_solution, 0)
+            details = test_eval.last_details
+            cov_pen = details.get('penalties', {}).get('coverage', 0.0)
+            print(
+                f"Validation fitness: {validation_score:.4f} | Mu: {details.get('mu'):.4f} | "
+                f"Lambda*Sigma: {details.get('lambda_sigma'):.4f} | Coverage Penalty: {cov_pen:.4f}"
+            )
+            scored = [
+                (t, d['score'], d.get('trades', 0))
+                for t, d in details['per_asset'].items()
+                if d['score'] is not None
+            ]
+            if scored:
+                scored.sort(key=lambda x: x[1])
+                top = scored[-3:][::-1]
+                bottom = scored[:3]
+                print("Top assets:")
+                for t, s, tr in top:
+                    print(f"  {t}: score={s:.3f}, trades={tr}")
+                print("Bottom assets:")
+                for t, s, tr in bottom:
+                    print(f"  {t}: score={s:.3f}, trades={tr}")
+            champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
+            champion_pool = _update_champion_pool(
+                champion_pool, best_solution, validation_score, gene_space, champion_settings
+            )
+            results.append({
+                'Window': idx,
+                'Fitness': validation_score,
+                'Mu': details.get('mu'),
+                'Sigma': details.get('sigma'),
+                'Lambda Sigma': details.get('lambda_sigma'),
+                'Total Trades': details.get('total_trades'),
+                'Coverage Penalty': cov_pen,
+                'Assets Traded': f"{details.get('assets_included')}/{len(test_data)}",
+                'Params': winning_params,
+            })
+            continue
+
         entries = engine.process_strategy_rules(test_data, rules)
         if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
             print("No trades in test period.")
@@ -245,6 +319,16 @@ def run_walk_forward_validation(initial_champions=None):
         return None
 
     results_df = pd.DataFrame(results)
+    print("\n=== Walk-Forward Summary ===")
+    with pd.option_context('display.max_colwidth', None, 'display.width', None):
+        print(results_df.to_string(index=False))
+
+    if multi:
+        avg_fitness = results_df['Fitness'].mean()
+        print("\nAggregate Metrics:")
+        print(f"Average Fitness: {avg_fitness:.4f}")
+        return {'folds': results_df, 'average_fitness': avg_fitness}
+
     avg_return = results_df['Total Return [%]'].mean()
     std_return = results_df['Total Return [%]'].std()
     avg_sharpe = results_df['Sharpe Ratio'].mean()
@@ -252,9 +336,6 @@ def run_walk_forward_validation(initial_champions=None):
     avg_win = results_df['Win Rate [%]'].mean()
     total_compounded_return = (results_df['Total Return [%]'] / 100 + 1).prod() - 1
 
-    print("\n=== Walk-Forward Summary ===")
-    with pd.option_context('display.max_colwidth', None, 'display.width', None):
-        print(results_df.to_string(index=False))
     print("\nAggregate Metrics:")
     print(f"Average Return: {avg_return:.2f}% (+/- {std_return:.2f}%)")
     print(f"Average Sharpe: {avg_sharpe:.2f}")
