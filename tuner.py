@@ -11,12 +11,25 @@ import strategy_engine as engine
 
 
 def _evaluate_on_validation(solution, gene_map):
-    """Evaluate solution on validation data and return Sortino Ratio."""
+    """Evaluate solution on validation data and return the objective score."""
     # If heavy optional dependencies are missing, skip evaluation to keep tests
     # lightweight. We check for the pandas_ta accessor and vectorbt's Portfolio
     # class. When absent, return -inf so the tuner can continue without errors.
     if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
         return -np.inf
+
+    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+        val_data = data_loader.get_group_data(
+            asset_group=config.ASSET_GROUP,
+            start_date=config.VALIDATION_PERIOD["start"],
+            end_date=config.VALIDATION_PERIOD["end"],
+            interval=config.TIMEFRAME,
+            coverage_threshold=config.COVERAGE_THRESHOLD,
+        )
+        if not val_data:
+            return -np.inf
+        evaluator = fitness.MultiAssetFitnessEvaluator(val_data, config.STRATEGY_RULES, gene_map, config.MULTI_ASSET)
+        return evaluator(None, solution, 0)
 
     val_data = data_loader.get_data(
         ticker=config.TICKER,
@@ -62,7 +75,9 @@ def _evaluate_on_validation(solution, gene_map):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
-    fitness_evaluator = fitness.FitnessEvaluator(ohlc_data, config.STRATEGY_RULES, gene_map)
+    fitness_evaluator = fitness.get_fitness_evaluator(
+        ohlc_data, config.STRATEGY_RULES, gene_map
+    )
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()
 
