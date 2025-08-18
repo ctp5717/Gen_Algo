@@ -102,7 +102,15 @@ def main():
     if getattr(args, "lambda_conc", None) is not None:
         config.ROBUSTNESS["lambda_concentration"] = args.lambda_conc
     print("--- GA Trading Strategy Framework ---")
-    print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
+    # Print a more descriptive message when running multi-asset optimisation.
+    # When evaluating a group of assets we display the list of asset names rather than
+    # just the single selected asset defined in the config.  This avoids confusion
+    # when the GA is actually operating on multiple symbols.
+    if len(getattr(config, "ASSET_GROUP", [])) > 1:
+        asset_names = [name for name, _ in config.ASSET_GROUP]
+        print("Starting multi-asset optimization for: " + ", ".join(asset_names))
+    else:
+        print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print(f"Active robustness penalties: {config.ROBUSTNESS}")

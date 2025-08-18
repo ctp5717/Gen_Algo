@@ -321,6 +321,28 @@ class MultiAssetFitnessEvaluator:
         total_trades = trade_counts.sum()
         concentration_ratio = float(trade_counts.max() / total_trades) if total_trades > 0 else 0.0
 
+        # --- NEW: Minimum trade count penalty ---
+        # A strategy that produces too few trades is unlikely to be robust or useful.
+        # If the total number of trades admitted by the scanner falls below the configured
+        # threshold we treat the solution as extremely poor by returning a very low fitness
+        # value immediately.  The threshold may be provided via a global `MIN_TRADES`
+        # value or specified in the fitness weights dictionary under ``min_trades``.
+        # This aligns multi‑asset behaviour with the single‑asset evaluator and the
+        # hyperparameter tuner.
+        min_trades = getattr(config, "MIN_TRADES", config.FITNESS_WEIGHTS.get("min_trades", 0))
+        if total_trades < min_trades:
+            # Keep diagnostics intact but abort further metric calculations.
+            # Returning ``VERY_LOW_FITNESS`` ensures the GA discards this candidate.
+            return EvalResult(
+                float(VERY_LOW_FITNESS),
+                per_asset_sortino,
+                portfolio_returns,
+                open_count,
+                diag,
+                trade_counts,
+                concentration_ratio,
+            )
+
         if len(assets) == 1:
             name = assets[0]
             data_sa = self.ohlc_dict[name]

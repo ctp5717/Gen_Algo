@@ -8,6 +8,12 @@ import pytest
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import config  # noqa: E402
 
+# Tests operate on tiny synthetic datasets that do not meet the default
+# minimum trade threshold used by the evaluator.  Override the global
+# configuration so that the penalty does not interfere with unrelated
+# assertions.
+config.MIN_TRADES = 0
+
 # Stub heavy dependency
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 from multi_asset_fitness import MultiAssetFitnessEvaluator, EvalResult  # noqa: E402
