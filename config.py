@@ -59,6 +59,20 @@ CRYPTO_UNIVERSE = {
     "The_Graph": "GRT-USD"
 }
 
+# Default asset group used when multi-asset optimisation is enabled.  Each
+# entry is a tuple of (friendly name, ticker).  By default we keep the group
+# very small to avoid additional API calls during normal single-asset runs.
+# Minimum fraction of bars required for an asset to be retained when aligning
+# group data across multiple tickers. Assets with coverage below this threshold
+# are dropped. Used consistently across training, tuning, analysis and
+# walk-forward phases.
+COVERAGE_THRESHOLD = 0.8
+
+ASSET_GROUP = [
+    ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
+    ("Ethereum", CRYPTO_UNIVERSE["Ethereum"]),
+]
+
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
 
 SELECTED_ASSET_NAME = "Dogecoin"
@@ -151,6 +165,48 @@ HYPERPARAMETER_SEARCH_SPACE = [
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
     "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 10
+}
+
+# --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
+# These options control the behaviour of the multi-asset fitness evaluator.  By
+# default the framework behaves exactly as before (single asset) until
+# `MULTI_ASSET['enabled']` is set to True.
+MULTI_ASSET = {
+    # Master switch
+    "enabled": False,
+    # Optional per-ticker weights; if None, all assets are weighted equally
+    "asset_weights": None,
+    # Penalty multiplier for dispersion across assets
+    "lambda_dispersion": 0.25,
+    # Which per-asset metric to aggregate; typically "composite"
+    "metric": "composite",  # composite | sortino | profit_factor | return
+    # Profit factor cap to avoid outliers
+    "winsorize_pf_cap": 5.0,
+    # Substitute value for NaN metrics
+    "nan_fallback": 0.0,
+    # Group trade floor configuration
+    "min_total_trades": 10,
+    "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
+    "soft_penalty_strength": 1.0,
+    "soft_penalty_mode": "multiplicative",  # multiplicative | additive
+    # How to handle assets with zero trades
+    "zero_trade_policy": "ignore",  # penalize | ignore
+    "zero_trade_penalty": -1.0,
+    # Penalty applied when ignoring assets
+    "coverage_penalty": 0.3,
+    # Minimal trades to consider an asset as traded
+    "per_asset_min_trades": 1,
+    # Optional scaling of the group trade floor based on fold length (years)
+    "min_total_trades_per_year": None,
+    # Fitness score returned when the hard floor triggers or an error occurs
+    "poor_score": -999.0,
+}
+
+# Basic charting options for the multi-asset analysis overview.
+CHARTS = {
+    "max_assets_in_overview": 20,
+    "save_pngs": False,
+    "show_distribution": True,
 }
 
 # Settings controlling how walk-forward champions are kept or discarded
