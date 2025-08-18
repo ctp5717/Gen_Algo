@@ -71,6 +71,12 @@ COVERAGE_THRESHOLD = 0.8
 ASSET_GROUP = [
     ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
     ("Ethereum", CRYPTO_UNIVERSE["Ethereum"]),
+    ("Solana", CRYPTO_UNIVERSE["Solana"]),
+    ("Cardano", CRYPTO_UNIVERSE["Cardano"]),
+    ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
+    ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
+    ("Dai", CRYPTO_UNIVERSE["Dai"]),
+    ("Near_Protocol", CRYPTO_UNIVERSE["Near_Protocol"]),
 ]
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
@@ -164,7 +170,7 @@ HYPERPARAMETER_SEARCH_SPACE = [
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
-    "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 10
+    "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 0
 }
 
 # --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
@@ -173,7 +179,7 @@ FITNESS_WEIGHTS = {
 # `MULTI_ASSET['enabled']` is set to True.
 MULTI_ASSET = {
     # Master switch
-    "enabled": False,
+    "enabled": True,
     # Optional per-ticker weights; if None, all assets are weighted equally
     "asset_weights": None,
     # Penalty multiplier for dispersion across assets
@@ -185,7 +191,7 @@ MULTI_ASSET = {
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Group trade floor configuration
-    "min_total_trades": 10,
+    "min_total_trades": 6,
     "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
     "soft_penalty_strength": 1.0,
     "soft_penalty_mode": "multiplicative",  # multiplicative | additive
