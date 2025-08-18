@@ -186,8 +186,18 @@ class MultiAssetFitnessEvaluator:
             freq=config.TIMEFRAME,
         )
 
-        stats = portfolio.stats()
         trades = int(portfolio.trades.count())
+        if trades == 0:
+            return {
+                "sortino": None,
+                "profit_factor": None,
+                "max_drawdown": None,
+                "trades": 0,
+                "total_return": None,
+                "equity_curve": portfolio.value(),
+            }
+
+        stats = portfolio.stats()
         return {
             "sortino": stats.get("Sortino Ratio"),
             "profit_factor": stats.get("Profit Factor"),
@@ -270,7 +280,19 @@ class MultiAssetFitnessEvaluator:
                     }
 
             if not per_asset_metrics:
-                return self.settings.get("nan_fallback", 0.0)
+                fallback = self.settings.get("nan_fallback", 0.0)
+                self.last_details = {
+                    "per_asset": per_asset_details,
+                    "mu": None,
+                    "sigma": None,
+                    "lambda_sigma": None,
+                    "total_trades": total_trades,
+                    "assets_included": 0,
+                    "assets_ignored": len(self.group_data),
+                    "penalties": {"trade_floor": None, "coverage": None},
+                    "fitness": fallback,
+                }
+                return fallback
 
             # Determine weights for included assets and renormalise
             asset_weights = self.settings.get("asset_weights") or {}
@@ -336,7 +358,19 @@ class MultiAssetFitnessEvaluator:
 
         except Exception as e:
             print(f"Error in multi-asset fitness evaluation: {e}")
-            return self.settings.get("poor_score", -999.0)
+            poor = self.settings.get("poor_score", -999.0)
+            self.last_details = {
+                "per_asset": {},
+                "mu": None,
+                "sigma": None,
+                "lambda_sigma": None,
+                "total_trades": 0,
+                "assets_included": 0,
+                "assets_ignored": len(self.group_data),
+                "penalties": {"trade_floor": "error", "coverage": None},
+                "fitness": poor,
+            }
+            return poor
 
 
 def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
@@ -350,6 +384,6 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
     """
 
     settings = getattr(config, "MULTI_ASSET", {})
-    if settings.get("enabled"):
+    if settings.get("enabled") and isinstance(ohlc_data, dict):
         return MultiAssetFitnessEvaluator(ohlc_data, base_rules, gene_map, settings)
     return FitnessEvaluator(ohlc_data, base_rules, gene_map)

@@ -38,6 +38,73 @@ def _make_evaluator(settings=None, stats_list=None):
     return evaluator
 
 
+def test_evaluate_single_asset_handles_zero_trades(monkeypatch):
+    df = pd.DataFrame({'Close': [1, 1, 1]}, index=pd.RangeIndex(3))
+    evaluator = fitness.MultiAssetFitnessEvaluator({'A': df}, {}, {}, {})
+
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.Series([False, False, False], index=df.index),
+    )
+
+    class DummyPortfolio:
+        class trades:
+            @staticmethod
+            def count():
+                return 0
+
+        def stats(self):
+            raise RuntimeError('stats should not be called')
+
+        def value(self):
+            return pd.Series([1, 1, 1], index=df.index)
+
+    monkeypatch.setattr(
+        fitness.vbt,
+        'Portfolio',
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    stats = evaluator._evaluate_single_asset(df, {})
+    assert stats['trades'] == 0
+
+
+def test_no_assets_traded_sets_default_details(monkeypatch):
+    df = pd.DataFrame({'Close': [1, 1, 1]}, index=pd.RangeIndex(3))
+
+    monkeypatch.setattr(
+        fitness.engine,
+        'process_strategy_rules',
+        lambda *a, **k: pd.Series([False, False, False], index=df.index),
+    )
+
+    class DummyPortfolio:
+        class trades:
+            @staticmethod
+            def count():
+                return 0
+
+        def stats(self):
+            raise RuntimeError('stats should not be called')
+
+        def value(self):
+            return pd.Series([1, 1, 1], index=df.index)
+
+    monkeypatch.setattr(
+        fitness.vbt,
+        'Portfolio',
+        types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
+        raising=False,
+    )
+
+    evaluator = fitness.MultiAssetFitnessEvaluator({'A': df}, {}, {}, {})
+    score = evaluator(None, [], 0)
+    assert score == 0.0
+    assert evaluator.last_details['total_trades'] == 0
+
+
 def test_aggregation_math():
     stats = [
         {'total_return': 1.6, 'trades': 5},

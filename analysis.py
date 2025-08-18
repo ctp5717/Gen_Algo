@@ -16,7 +16,9 @@ import numpy as np
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
-    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+    if getattr(config, "MULTI_ASSET", {}).get("enabled") and any(
+        g.get("path") for g in gene_map.values()
+    ):
         _run_multi_asset_analysis(best_solution, gene_map)
         return
 
@@ -120,12 +122,17 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     sigma = details.get("sigma")
     lam_sigma = details.get("lambda_sigma")
     total_trades = details.get("total_trades", 0)
-    cov_pen = details.get("penalties", {}).get("coverage", 0.0)
+    cov_pen = details.get("penalties", {}).get("coverage")
+    cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
     assets_incl = details.get("assets_included")
     total_assets = len(group_data)
+    mu_str = f"{mu:.3f}" if isinstance(mu, (int, float)) else "nan"
+    lam_str = f"{lam_sigma:.3f}" if isinstance(lam_sigma, (int, float)) else "nan"
     print(
-        f"Fitness: {F:.3f} | Mu: {mu:.3f} | Lambda*Sigma: {lam_sigma:.3f} | Coverage Penalty: {cov_pen:.3f} | Total Trades: {total_trades} | Assets: {assets_incl}/{total_assets}"
+        f"Fitness: {F:.3f} | Mu: {mu_str} | Lambda*Sigma: {lam_str} | Coverage Penalty: {cov_pen:.3f} | Total Trades: {total_trades} | Assets: {assets_incl}/{total_assets}"
     )
+
+    plt.ion()
 
     scored = [
         (t, d["score"], d.get("trades", 0))
@@ -143,21 +150,22 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         for t, s, tr in bottom:
             print(f"  {t}: score={s:.3f}, trades={tr}")
 
-    charts_cfg = getattr(config, "CHARTS", {})
-    _plot_multi_asset_overview(
-        per_asset_scores,
-        per_asset_trades,
-        equity_curves,
-        mu,
-        sigma,
-        lam_sigma,
-        F,
-        total_trades,
-        assets_incl,
-        total_assets,
-        settings,
-        charts_cfg,
-    )
+    if per_asset_scores:
+        charts_cfg = getattr(config, "CHARTS", {})
+        _plot_multi_asset_overview(
+            per_asset_scores,
+            per_asset_trades,
+            equity_curves,
+            mu,
+            sigma,
+            lam_sigma,
+            F,
+            total_trades,
+            assets_incl,
+            total_assets,
+            settings,
+            charts_cfg,
+        )
 
 
 def _plot_multi_asset_overview(

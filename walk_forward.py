@@ -201,10 +201,17 @@ def run_walk_forward_validation(initial_champions=None):
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
-            cov_pen = details.get('penalties', {}).get('coverage', 0.0)
+            cov_pen = details.get('penalties', {}).get('coverage')
+            cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
+            mu = details.get('mu')
+            lam_sig = details.get('lambda_sigma')
+            mu_str = f"{mu:.4f}" if isinstance(mu, (int, float)) else "nan"
+            lam_sig_str = (
+                f"{lam_sig:.4f}" if isinstance(lam_sig, (int, float)) else "nan"
+            )
             print(
-                f"Validation fitness: {validation_score:.4f} | Mu: {details.get('mu'):.4f} | "
-                f"Lambda*Sigma: {details.get('lambda_sigma'):.4f} | Coverage Penalty: {cov_pen:.4f}"
+                f"Validation fitness: {validation_score:.4f} | Mu: {mu_str} | "
+                f"Lambda*Sigma: {lam_sig_str} | Coverage Penalty: {cov_pen:.4f}"
             )
             scored = [
                 (t, d['score'], d.get('trades', 0))
@@ -327,7 +334,12 @@ def run_walk_forward_validation(initial_champions=None):
         avg_fitness = results_df['Fitness'].mean()
         print("\nAggregate Metrics:")
         print(f"Average Fitness: {avg_fitness:.4f}")
-        return {'folds': results_df, 'average_fitness': avg_fitness}
+        return {
+            'folds': results_df,
+            'average_fitness': avg_fitness,
+            'average_return': avg_fitness,
+            'total_compounded_return': avg_fitness,
+        }
 
     avg_return = results_df['Total Return [%]'].mean()
     std_return = results_df['Total Return [%]'].std()
