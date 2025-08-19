@@ -332,29 +332,34 @@ class MultiAssetFitnessEvaluator:
             policy = self.settings.get("trade_floor_policy", "hard_floor")
             poor_score = self.settings.get("poor_score", -999.0)
             trade_penalty = None
+            coverage_penalty = 0.0
+
             if policy == "hard_floor" and total_trades < min_trades:
                 F = poor_score
                 trade_penalty = "hard_floor"
-            elif policy == "soft_penalty" and total_trades < min_trades:
-                mode = self.settings.get("soft_penalty_mode", "multiplicative")
-                strength = self.settings.get("soft_penalty_strength", 1.0)
-                if mode == "additive":
-                    penalty = strength * (
-                        1 - total_trades / max(1, min_trades)
-                    )
-                    F -= penalty
-                    trade_penalty = {"mode": "additive", "penalty": penalty}
-                else:
-                    scale = (total_trades / max(1, min_trades)) ** strength
-                    F *= scale
-                    trade_penalty = {"mode": "multiplicative", "scale": scale}
+            else:
+                if policy == "soft_penalty" and total_trades < min_trades:
+                    mode = self.settings.get("soft_penalty_mode", "multiplicative")
+                    strength = self.settings.get("soft_penalty_strength", 1.0)
+                    if mode == "additive":
+                        penalty = strength * (
+                            1 - total_trades / max(1, min_trades)
+                        )
+                        F -= penalty
+                        trade_penalty = {"mode": "additive", "penalty": penalty}
+                    else:
+                        scale = (total_trades / max(1, min_trades)) ** strength
+                        F *= scale
+                        trade_penalty = {"mode": "multiplicative", "scale": scale}
 
-            coverage_penalty = 0.0
-            if self.settings.get("zero_trade_policy") == "ignore":
-                kappa = self.settings.get("coverage_penalty", 0.0)
-                coverage = len(included_assets) / max(1, len(self.group_data))
-                coverage_penalty = kappa * (1 - coverage)
-                F -= coverage_penalty
+                if (
+                    self.settings.get("zero_trade_policy") == "ignore"
+                    and self.settings.get("coverage_penalty_weight") is not None
+                ):
+                    weight = self.settings.get("coverage_penalty_weight")
+                    coverage = len(included_assets) / max(1, len(self.group_data))
+                    coverage_penalty = weight * (1 - coverage)
+                    F -= coverage_penalty
 
             # store diagnostics for optional inspection
             self.last_details = {

@@ -199,7 +199,7 @@ MULTI_ASSET = {
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
-    "coverage_penalty": 0.3,
+    "coverage_penalty_weight": 0.3,
     # Minimal trades to consider an asset as traded
     "per_asset_min_trades": 1,
     # Optional scaling of the group trade floor based on fold length (years)
