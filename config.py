@@ -207,7 +207,7 @@ MULTI_ASSET = {
     # trades are still evaluated and contribute a neutral score.
     "per_asset_min_trades": 0,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": None,
+    "min_total_trades_per_year": 24,
     # Fitness score returned when the hard floor triggers or an error occurs
     "poor_score": -999.0,
 }
@@ -215,7 +215,7 @@ MULTI_ASSET = {
 # Basic charting options for the multi-asset analysis overview.
 CHARTS = {
     "max_assets_in_overview": 20,
-    "save_pngs": False,
+    "save_pngs": True,
     "show_distribution": True,
 }
 
@@ -248,7 +248,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'price_is_above_indicator'}
             },
             {
-                'is_active': True, # This rule is ON
+                'is_active': False, # This rule is ON
                 'rule_name': 'RSI_Momentum_Filter',
                 'indicator': 'rsi',
                 'params': {
@@ -260,7 +260,7 @@ STRATEGY_RULES = {
                 }
             },
             {
-                'is_active': False,
+                'is_active': True,
                 'rule_name': 'MACD_Momentum_Cross',
                 'indicator': 'macd',
                 'params': {
@@ -271,7 +271,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'indicator_crosses_above_value', 'value': 0}
             },
             {
-                'is_active': False,
+                'is_active': True,
                 'rule_name': 'Bollinger_Band_Breakout',
                 'indicator': 'bbands',
                 'params': {
