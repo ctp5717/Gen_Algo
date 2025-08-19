@@ -204,14 +204,30 @@ def run_walk_forward_validation(initial_champions=None):
             cov_pen = details.get('penalties', {}).get('coverage')
             cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
             mu = details.get('mu')
+            sigma = details.get('sigma')
             lam_sig = details.get('lambda_sigma')
+            assets_incl = details.get('assets_included')
+            total_assets = len(test_data)
             mu_str = f"{mu:.4f}" if isinstance(mu, (int, float)) else "nan"
+            sigma_str = (
+                f"{sigma:.4f}"
+                if isinstance(sigma, (int, float))
+                else "nan (no scored assets)"
+            )
             lam_sig_str = (
                 f"{lam_sig:.4f}" if isinstance(lam_sig, (int, float)) else "nan"
             )
+            assets_str = f"{assets_incl}/{total_assets}"
             print(
-                f"Validation fitness: {validation_score:.4f} | Mu: {mu_str} | "
-                f"Lambda*Sigma: {lam_sig_str} | Coverage Penalty: {cov_pen:.4f}"
+                "Validation fitness: {val:.4f} | mu={mu} | sigma={sig} | "
+                "lambda*sigma={lam} | coverage_penalty={cov:.4f} | assets={assets}".format(
+                    val=validation_score,
+                    mu=mu_str,
+                    sig=sigma_str,
+                    lam=lam_sig_str,
+                    cov=cov_pen,
+                    assets=assets_str,
+                )
             )
             scored = [
                 (t, d['score'], d.get('trades', 0))
@@ -240,7 +256,7 @@ def run_walk_forward_validation(initial_champions=None):
                 'Lambda Sigma': details.get('lambda_sigma'),
                 'Total Trades': details.get('total_trades'),
                 'Coverage Penalty': cov_pen,
-                'Assets Traded': f"{details.get('assets_included')}/{len(test_data)}",
+                'Assets Traded': assets_str,
                 'Params': winning_params,
             })
             continue
