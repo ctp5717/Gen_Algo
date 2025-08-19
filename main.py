@@ -120,9 +120,10 @@ def main():
         # --- NEW: Pass the callback function to the GA instance ---
         on_generation=on_generation
     )
-    
+
     ga_instance.run()
-    
+    analysis.persist_details(fitness_evaluator)
+
     # Print a newline character to move off the progress line.
     print("\n" + "-" * 35)
     print("Optimization finished.")

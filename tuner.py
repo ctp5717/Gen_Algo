@@ -8,6 +8,7 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
+import analysis
 from utils import _norm_freq
 
 
@@ -103,6 +104,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             parallel_processing=["process", num_cores],
         )
         ga.run()
+        analysis.persist_details(fitness_evaluator)
         best_solution, _, _ = ga.best_solution()
         score = _evaluate_on_validation(best_solution, gene_map)
         results.append({"params": params, "score": score})
