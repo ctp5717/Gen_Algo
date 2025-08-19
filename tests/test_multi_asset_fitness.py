@@ -17,6 +17,7 @@ import fitness  # noqa: E402
 import tuner  # noqa: E402
 import data_loader  # noqa: E402
 import config as cfg  # noqa: E402
+import pytest  # noqa: E402
 
 
 def _make_evaluator(settings=None, stats_list=None):
@@ -170,7 +171,7 @@ def test_zero_trade_policy_penalize_vs_ignore():
     ignore_settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty': 0.3,
+        'coverage_penalty_weight': 0.3,
         'per_asset_min_trades': 1,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
@@ -178,6 +179,26 @@ def test_zero_trade_policy_penalize_vs_ignore():
     }
     ev_ign = _make_evaluator(ignore_settings, stats)
     assert np.isclose(ev_ign(None, [], 0), 0.9)
+
+
+@pytest.mark.parametrize("weight,expected", [(None, 1.0), (0.0, 1.0), (0.3, 0.9)])
+def test_coverage_penalty_weight_monotonic(weight, expected):
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty_weight': weight,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    assert np.isclose(ev(None, [], 0), expected)
 
 
 def test_weight_renormalization():
@@ -189,7 +210,7 @@ def test_weight_renormalization():
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty': 0.3,
+        'coverage_penalty_weight': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
         'trade_floor_policy': 'hard_floor',
@@ -240,7 +261,7 @@ def test_per_asset_min_trades_threshold():
         'metric': 'return',
         'per_asset_min_trades': 3,
         'zero_trade_policy': 'ignore',
-        'coverage_penalty': 0.0,
+        'coverage_penalty_weight': 0.0,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
@@ -258,7 +279,7 @@ def test_diagnostics_and_factory(monkeypatch):
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty': 0.3,
+        'coverage_penalty_weight': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
         'trade_floor_policy': 'soft_penalty',
@@ -273,7 +294,17 @@ def test_diagnostics_and_factory(monkeypatch):
     score2 = ev(None, [], 0)
     assert np.isclose(score1, score2)
     details = ev.last_details
-    assert {'per_asset', 'mu', 'sigma', 'lambda_sigma', 'total_trades', 'assets_included', 'assets_ignored', 'penalties'} <= details.keys()
+    expected_keys = {
+        'per_asset',
+        'mu',
+        'sigma',
+        'lambda_sigma',
+        'total_trades',
+        'assets_included',
+        'assets_ignored',
+        'penalties',
+    }
+    assert expected_keys <= details.keys()
     any_asset = next(iter(details['per_asset'].values()))
     assert 'trades' in any_asset
 
@@ -347,7 +378,12 @@ def test_ga_and_tuner_consistency(monkeypatch):
         'B': pd.DataFrame({'Close': [1, 2, 3]}),
     }
 
-    monkeypatch.setattr(fitness.MultiAssetFitnessEvaluator, '_evaluate_single_asset', fake_eval, raising=False)
+    monkeypatch.setattr(
+        fitness.MultiAssetFitnessEvaluator,
+        '_evaluate_single_asset',
+        fake_eval,
+        raising=False,
+    )
     monkeypatch.setattr(data_loader, 'get_group_data', lambda *args, **kwargs: group_data)
     monkeypatch.setattr(pd.DataFrame, 'ta', property(lambda self: None), raising=False)
     vbt = sys.modules['vectorbt']
