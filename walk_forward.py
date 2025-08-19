@@ -15,6 +15,20 @@ from gene_parser import parse_genes_from_config
 import fitness
 
 
+def _sparkline(arr):
+    """Return a tiny sparkline for a sequence of numbers."""
+    ticks = "▁▂▃▄▅▆▇█"
+    arr = np.asarray(arr, dtype=float)
+    if arr.size == 0:
+        return ""
+    mn, mx = np.nanmin(arr), np.nanmax(arr)
+    if mx == mn:
+        return ticks[0] * len(arr)
+    scaled = (arr - mn) / (mx - mn) * (len(ticks) - 1)
+    chars = [ticks[int(round(x))] for x in scaled]
+    return "".join(chars)
+
+
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
     """Generate rolling training and testing windows."""
     # Ensure plain Python datetimes for relativedelta calculations
@@ -77,7 +91,7 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     return pool
 
 
-def run_walk_forward_validation(initial_champions=None):
+def run_walk_forward(initial_champions=None):
     """Execute walk-forward validation across the available data.
 
     Parameters
@@ -252,6 +266,17 @@ def run_walk_forward_validation(initial_champions=None):
                 print("Bottom assets:")
                 for t, s, tr in bottom:
                     print(f"  {t}: score={s:.3f}, trades={tr}")
+            # Compute combined equity curve for optional sparkline later
+            equity_curves = [
+                d.get('equity_curve')
+                for d in details['per_asset'].values()
+                if d.get('included') and isinstance(d.get('equity_curve'), pd.Series)
+            ]
+            combined_eq = None
+            if equity_curves:
+                eq_norms = [ec / ec.iloc[0] for ec in equity_curves if len(ec) > 0]
+                if eq_norms:
+                    combined_eq = sum(eq_norms) / len(eq_norms)
             champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
             champion_pool = _update_champion_pool(
                 champion_pool, best_solution, validation_score, gene_space, champion_settings
@@ -265,6 +290,7 @@ def run_walk_forward_validation(initial_champions=None):
                 'Total Trades': details.get('total_trades'),
                 'Coverage Penalty': cov_pen,
                 'Assets Traded': assets_str,
+                'Equity Curve': combined_eq,
                 'Params': winning_params,
             })
             continue
@@ -361,13 +387,45 @@ def run_walk_forward_validation(initial_champions=None):
 
     if multi:
         avg_fitness = results_df['Fitness'].mean()
+        poor = config.MULTI_ASSET.get("poor_score", -999.0)
+        total_folds = len(results_df)
+        fails = (results_df['Fitness'] == poor).sum()
+        floor_fail_rate = fails / total_folds if total_folds else float("nan")
+        valid = results_df[results_df['Fitness'] != poor]
+        mean_fit = valid['Fitness'].mean()
+        median_fit = valid['Fitness'].median()
+        median_mu = pd.to_numeric(valid['Mu'], errors='coerce').median()
+        median_sigma = pd.to_numeric(valid['Sigma'], errors='coerce').median()
+        median_lambda_sigma = pd.to_numeric(valid['Lambda Sigma'], errors='coerce').median()
         print("\nAggregate Metrics:")
         print(f"Average Fitness: {avg_fitness:.4f}")
+        print(f"floor_fail_rate: {floor_fail_rate:.2%}")
+        print(f"Mean Fitness (excl poor): {mean_fit:.4f}")
+        print(f"Median Fitness (excl poor): {median_fit:.4f}")
+        print(f"Median mu: {median_mu:.4f}")
+        print(f"Median sigma: {median_sigma:.4f}")
+        print(f"Median lambda*sigma: {median_lambda_sigma:.4f}")
+        combined_eq = None
+        if 'Equity Curve' in results_df.columns:
+            try:
+                combined_eq = pd.concat(
+                    [s for s in results_df['Equity Curve'] if isinstance(s, pd.Series)]
+                )
+            except Exception:
+                combined_eq = None
+        if combined_eq is not None and not combined_eq.empty:
+            print(f"Combined Equity: {_sparkline(combined_eq.values)}")
         return {
             'folds': results_df,
             'average_fitness': avg_fitness,
             'average_return': avg_fitness,
             'total_compounded_return': avg_fitness,
+            'floor_fail_rate': floor_fail_rate,
+            'mean_fitness': mean_fit,
+            'median_fitness': median_fit,
+            'median_mu': median_mu,
+            'median_sigma': median_sigma,
+            'median_lambda_sigma': median_lambda_sigma,
         }
 
     avg_return = results_df['Total Return [%]'].mean()
@@ -393,3 +451,7 @@ def run_walk_forward_validation(initial_champions=None):
         'average_win_rate': avg_win,
         'total_compounded_return': total_compounded_return,
     }
+
+
+# Backwards compatibility for older imports
+run_walk_forward_validation = run_walk_forward
