@@ -20,9 +20,9 @@ import config as cfg  # noqa: E402
 import pytest  # noqa: E402
 
 
-def _make_evaluator(settings=None, stats_list=None):
+def _make_evaluator(settings=None, stats_list=None, group_data=None):
     """Utility to construct a MultiAssetFitnessEvaluator with patched stats."""
-    group_data = {
+    group_data = group_data or {
         'A': pd.DataFrame({'Close': [1, 2, 3]}),
         'B': pd.DataFrame({'Close': [1, 2, 3]}),
         'C': pd.DataFrame({'Close': [1, 2, 3]}),
@@ -237,6 +237,27 @@ def test_soft_penalty_additive():
     ev = _make_evaluator(settings, stats)
     # Mean = 1.0, total trades = 15 => penalty 2*(1-0.5)=1 => fitness 0
     assert np.isclose(ev(None, [], 0), 0.0)
+
+
+def test_min_total_trades_per_year_scaling():
+    stats = [
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+    ]
+    settings = {
+        'metric': 'return',
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades_per_year': 12,
+    }
+    idx = pd.to_datetime(['2020-01-01', '2020-07-01'])
+    group_data = {
+        'A': pd.DataFrame({'Close': [1, 2]}, index=idx),
+        'B': pd.DataFrame({'Close': [1, 2]}, index=idx),
+    }
+    ev = _make_evaluator(settings, stats, group_data)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 1.0)
+    assert ev.settings['min_total_trades'] == 6
 
 
 def test_per_asset_min_trades_threshold():

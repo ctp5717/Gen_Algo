@@ -191,7 +191,10 @@ MULTI_ASSET = {
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Group trade floor configuration
-    "min_total_trades": 6,
+    # Require a slightly larger sample of trades across the entire basket to
+    # reduce false positives.  Individual assets are permitted to contribute
+    # zero trades by default; the overall floor enforces sufficient activity.
+    "min_total_trades": 10,
     "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
     "soft_penalty_strength": 1.0,
     "soft_penalty_mode": "multiplicative",  # multiplicative | additive
@@ -200,8 +203,9 @@ MULTI_ASSET = {
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
     "coverage_penalty_weight": 0.3,
-    # Minimal trades to consider an asset as traded
-    "per_asset_min_trades": 1,
+    # Minimal trades to consider an asset as traded; 0 means assets with no
+    # trades are still evaluated and contribute a neutral score.
+    "per_asset_min_trades": 0,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": None,
     # Fitness score returned when the hard floor triggers or an error occurs
