@@ -218,7 +218,7 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             total_trades,
             assets_incl,
             total_assets,
-            settings,
+            evaluator.settings,
             charts_cfg,
         )
 
@@ -275,9 +275,10 @@ def _plot_multi_asset_overview(
     ax3 = fig.add_subplot(gs[3])
     ax0.axis("off")
     sigma_str = f"{sigma:.2f}" if isinstance(sigma, (int, float)) else "nan"
+    floor = settings.get("min_total_trades")
     kpi = (
         f"F={F:.2f} | μ={mu:.2f} | σ={sigma_str} | λσ={lam_sigma:.2f} | "
-        f"Trades={total_trades} | Assets={assets_included}/{total_assets}"
+        f"Trades={total_trades} | Floor={floor} | Assets={assets_included}/{total_assets}"
     )
     ax0.text(0.5, 0.5, kpi, ha="center", va="center", fontsize=10)
 
@@ -292,12 +293,12 @@ def _plot_multi_asset_overview(
 
     trades_sorted = [trades[t] for t in tick_sorted]
     ax3.bar(tick_sorted, trades_sorted)
-    if settings.get("min_total_trades"):
+    if floor:
         ax3.axhline(
-            settings["min_total_trades"] / max(1, total_assets),
+            floor / max(1, total_assets),
             color="gray",
             linestyle="--",
-            label="floor/N",
+            label=f"floor/N ({floor}/{total_assets})",
         )
     ax3.set_title("Trades per asset")
     ax3.legend()
