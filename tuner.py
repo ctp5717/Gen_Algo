@@ -8,6 +8,7 @@ import config
 import data_loader
 import fitness
 import strategy_engine as engine
+from utils import _norm_freq
 
 
 def _evaluate_on_validation(solution, gene_map):
@@ -28,7 +29,12 @@ def _evaluate_on_validation(solution, gene_map):
         )
         if not val_data:
             return -np.inf
-        evaluator = fitness.MultiAssetFitnessEvaluator(val_data, config.STRATEGY_RULES, gene_map, config.MULTI_ASSET)
+        evaluator = fitness.MultiAssetFitnessEvaluator(
+            val_data,
+            config.STRATEGY_RULES,
+            gene_map,
+            config.MULTI_ASSET,
+        )
         return evaluator(None, solution, 0)
 
     val_data = data_loader.get_data(
@@ -65,7 +71,7 @@ def _evaluate_on_validation(solution, gene_map):
         tp_stop=tp_stop,
         sl_trail=sl_trail,
         fees=0.001,
-        freq=config.TIMEFRAME,
+        freq=_norm_freq(config.TIMEFRAME),
     )
     stats = portfolio.stats()
     score = stats.get("Sortino Ratio")

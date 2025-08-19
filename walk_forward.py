@@ -13,6 +13,7 @@ import data_loader
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
+from utils import _norm_freq
 
 
 def _sparkline(arr):
@@ -342,7 +343,7 @@ def run_walk_forward(initial_champions=None):
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=0.001,
-            freq=config.TIMEFRAME,
+            freq=_norm_freq(config.TIMEFRAME),
         )
         stats = portfolio.stats()
         tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')

@@ -17,6 +17,7 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from utils import _norm_freq
 
 # Expose last analysis details for external inspection
 last_details = {}
@@ -72,7 +73,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=0.001,
-            freq=config.TIMEFRAME
+            freq=_norm_freq(config.TIMEFRAME)
         )
 
     except Exception as e:
@@ -396,7 +397,7 @@ def _plot_asset_panels(
         tp_stop=tp_stop,
         sl_trail=sl_trail,
         fees=0.001,
-        freq=config.TIMEFRAME,
+        freq=_norm_freq(config.TIMEFRAME),
     )
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12))

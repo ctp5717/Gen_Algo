@@ -13,6 +13,7 @@ sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
 import indicator_library  # noqa: E402
 import strategy_engine  # noqa: E402
+from utils import _norm_freq  # noqa: E402
 
 
 def test_process_strategy_rules_simple(monkeypatch):
@@ -59,3 +60,7 @@ def test_process_strategy_rules_simple(monkeypatch):
     signal = strategy_engine.process_strategy_rules(data, rules)
 
     assert signal.all()
+
+
+def test_norm_freq_minutes():
+    assert _norm_freq('15m') == '15T'
