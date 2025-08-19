@@ -7,7 +7,6 @@ import os
 import numpy as np
 import pygad
 import vectorbt as vbt
-import math
 
 import config
 import data_loader
@@ -155,11 +154,8 @@ def run_walk_forward_validation(initial_champions=None):
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
         if multi:
             settings_train = dict(config.MULTI_ASSET)
-            rate = settings_train.get("min_total_trades_per_year")
-            if rate:
-                years = (p['train_end'] - p['train_start']).days / 365.25
-                settings_train["min_total_trades"] = math.ceil(rate * years)
             evaluator = fitness.MultiAssetFitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map, settings_train)
+            print(f"Training trade floor: {evaluator.settings.get('min_total_trades')}")
         else:
             evaluator = fitness.get_fitness_evaluator(train_data, config.STRATEGY_RULES, gene_map)
         ga_instance = pygad.GA(
@@ -194,10 +190,6 @@ def run_walk_forward_validation(initial_champions=None):
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         if multi:
             settings_val = dict(config.MULTI_ASSET)
-            rate = settings_val.get("min_total_trades_per_year")
-            if rate:
-                years_val = (p['test_end'] - p['test_start']).days / 365.25
-                settings_val["min_total_trades"] = math.ceil(rate * years_val)
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
@@ -218,10 +210,12 @@ def run_walk_forward_validation(initial_champions=None):
                 f"{lam_sig:.4f}" if isinstance(lam_sig, (int, float)) else "nan"
             )
             assets_str = f"{assets_incl}/{total_assets}"
+            floor = test_eval.settings.get('min_total_trades')
             print(
-                "Validation fitness: {val:.4f} | mu={mu} | sigma={sig} | "
+                "Validation fitness: {val:.4f} | floor={floor} | mu={mu} | sigma={sig} | "
                 "lambda*sigma={lam} | coverage_penalty={cov:.4f} | assets={assets}".format(
                     val=validation_score,
+                    floor=floor,
                     mu=mu_str,
                     sig=sigma_str,
                     lam=lam_sig_str,

@@ -159,15 +159,17 @@ class MultiAssetFitnessEvaluator:
         rate = self.settings.get("min_total_trades_per_year")
         if rate:
             try:
-                starts = []
-                ends = []
+                starts: list[pd.Timestamp] = []
+                ends: list[pd.Timestamp] = []
                 for df in self.group_data.values():
                     if not df.empty:
                         starts.append(df.index[0])
                         ends.append(df.index[-1])
                 if starts and ends:
                     years = (max(ends) - min(starts)).days / 365.25
-                    self.settings["min_total_trades"] = math.ceil(rate * max(years, 0))
+                    floor = math.ceil(rate * max(years, 0))
+                    self.settings["min_total_trades"] = floor
+                    print(f"[MultiAssetFitnessEvaluator] trade floor={floor}")
             except Exception:
                 pass
         self.last_details = {}

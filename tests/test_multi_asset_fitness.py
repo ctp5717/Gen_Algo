@@ -379,6 +379,17 @@ def test_min_total_trades_per_year_scaling():
     assert ev.settings['min_total_trades'] == 6
 
 
+def test_min_total_trades_per_year_three_month_fold():
+    idx = pd.to_datetime(['2020-01-01', '2020-04-01'])
+    group_data = {
+        'A': pd.DataFrame({'Close': [1, 2]}, index=idx),
+        'B': pd.DataFrame({'Close': [1, 2]}, index=idx),
+    }
+    settings = {'min_total_trades_per_year': 24}
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+    assert ev.settings['min_total_trades'] == 6
+
+
 def test_per_asset_min_trades_threshold():
     stats = [
         {'total_return': 1.0, 'trades': 2},
