@@ -174,6 +174,13 @@ When multi-asset analysis runs, an overview chart is also written to
 run and `sha` is the short commit hash. Set `DISABLE_PNG_REPORTS=1` to skip
 writing this file.
 
+The multi-asset evaluator now enforces a minimum of **10 trades** across the
+entire basket by default. Individual assets are allowed to contribute zero
+trades (per-asset minimum of 0), but the group floor guards against strategies
+that only trade a handful of times. If you prefer the requirement to scale with
+the amount of data, set `MULTI_ASSET['min_total_trades_per_year']` to the
+desired trade rate.
+
 ### Project Roadmap
 
 Of course. Here is the complete project roadmap, with thorough descriptions for all the features we have not yet implemented.

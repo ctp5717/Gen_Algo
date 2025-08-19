@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+import math
 import pandas as pd
 import numpy as np
 import vectorbt as vbt
@@ -155,6 +156,20 @@ class MultiAssetFitnessEvaluator:
         self.settings = copy.deepcopy(defaults)
         if settings:
             self.settings.update(settings)
+        rate = self.settings.get("min_total_trades_per_year")
+        if rate:
+            try:
+                starts = []
+                ends = []
+                for df in self.group_data.values():
+                    if not df.empty:
+                        starts.append(df.index[0])
+                        ends.append(df.index[-1])
+                if starts and ends:
+                    years = (max(ends) - min(starts)).days / 365.25
+                    self.settings["min_total_trades"] = math.ceil(rate * max(years, 0))
+            except Exception:
+                pass
         self.last_details = {}
 
     # ------------------------------------------------------------------
