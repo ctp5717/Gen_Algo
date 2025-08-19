@@ -18,6 +18,9 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+# Expose last analysis details for external inspection
+last_details = {}
+
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
     if getattr(config, "MULTI_ASSET", {}).get("enabled") and any(
@@ -112,6 +115,8 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, config.STRATEGY_RULES, gene_map, settings)
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
+    global last_details
+    last_details = details
 
     per_asset_scores = {
         t: d["score"] for t, d in details["per_asset"].items() if d.get("included")
@@ -159,7 +164,14 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     plt.ion()
 
     scored = [
-        (t, d["score"], d.get("trades", 0))
+        (
+            t,
+            d["score"],
+            d.get("trades", 0),
+            d.get("profit_factor_capped"),
+            d.get("drawdown_score"),
+            d.get("penalties"),
+        )
         for t, d in details["per_asset"].items()
         if d["score"] is not None
     ]
@@ -168,11 +180,21 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         bottom = scored[:3]
         top = scored[-3:][::-1]
         print("Top assets:")
-        for t, s, tr in top:
-            print(f"  {t}: score={s:.3f}, trades={tr}")
+        for t, s, tr, pf, dd, pen in top:
+            pf_str = f"{pf:.3f}" if isinstance(pf, (int, float)) else "nan"
+            dd_str = f"{dd:.3f}" if isinstance(dd, (int, float)) else "nan"
+            pen_str = pen if pen else "None"
+            print(
+                f"  {t}: score={s:.3f}, trades={tr}, pf={pf_str}, dd={dd_str}, penalties={pen_str}"
+            )
         print("Bottom assets:")
-        for t, s, tr in bottom:
-            print(f"  {t}: score={s:.3f}, trades={tr}")
+        for t, s, tr, pf, dd, pen in bottom:
+            pf_str = f"{pf:.3f}" if isinstance(pf, (int, float)) else "nan"
+            dd_str = f"{dd:.3f}" if isinstance(dd, (int, float)) else "nan"
+            pen_str = pen if pen else "None"
+            print(
+                f"  {t}: score={s:.3f}, trades={tr}, pf={pf_str}, dd={dd_str}, penalties={pen_str}"
+            )
 
     if ignored_assets:
         print("Ignored assets:")

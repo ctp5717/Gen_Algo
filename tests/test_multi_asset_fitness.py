@@ -384,6 +384,45 @@ def test_per_asset_min_trades_threshold():
     assert np.isclose(ev_ign(None, [], 0), 1.0)
 
 
+def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
+    stats = [
+        {
+            "sortino": 1.0,
+            "profit_factor": 10.0,
+            "max_drawdown": 10.0,
+            "total_return": 0.0,
+            "trades": 5,
+        },
+        {
+            "sortino": 1.0,
+            "profit_factor": 2.0,
+            "max_drawdown": 20.0,
+            "total_return": 0.0,
+            "trades": 0,
+        },
+    ]
+    settings = {
+        "metric": "composite",
+        "per_asset_min_trades": 1,
+        "zero_trade_policy": "penalize",
+        "zero_trade_penalty": -1.0,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "lambda_dispersion": 0.0,
+    }
+    df = pd.DataFrame({"Close": [1, 2, 3]})
+    group_data = {"A": df, "B": df}
+    ev = _make_evaluator(settings, stats, group_data)
+    ev(None, [], 0)
+    details = ev.last_details["per_asset"]
+    a = details["A"]
+    assert np.isclose(a["profit_factor_capped"], 5.0)
+    assert np.isclose(a["drawdown_score"], 0.9)
+    assert a.get("penalties") in (None, {})
+    b = details["B"]
+    assert b.get("penalties", {}).get("zero_trades") == -1.0
+
+
 def test_diagnostics_and_factory(monkeypatch):
     stats = [
         {'total_return': 1.0, 'trades': 5},
@@ -420,7 +459,7 @@ def test_diagnostics_and_factory(monkeypatch):
     }
     assert expected_keys <= details.keys()
     any_asset = next(iter(details['per_asset'].values()))
-    assert 'trades' in any_asset
+    assert {'trades', 'profit_factor_capped', 'drawdown_score', 'penalties'} <= any_asset.keys()
 
     import config as cfg
     orig = cfg.MULTI_ASSET['enabled']
