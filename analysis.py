@@ -128,8 +128,23 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     total_assets = len(group_data)
     mu_str = f"{mu:.3f}" if isinstance(mu, (int, float)) else "nan"
     lam_str = f"{lam_sigma:.3f}" if isinstance(lam_sigma, (int, float)) else "nan"
+    sigma_str = (
+        f"{sigma:.3f}"
+        if isinstance(sigma, (int, float))
+        else "nan (no scored assets)"
+    )
+    assets_str = f"{assets_incl}/{total_assets}"
     print(
-        f"Fitness: {F:.3f} | Mu: {mu_str} | Lambda*Sigma: {lam_str} | Coverage Penalty: {cov_pen:.3f} | Total Trades: {total_trades} | Assets: {assets_incl}/{total_assets}"
+        "Fitness: {f:.3f} | mu={mu} | sigma={sigma} | lambda*sigma={lam} | "
+        "coverage_penalty={cov:.3f} | total_trades={trades} | assets={assets}".format(
+            f=F,
+            mu=mu_str,
+            sigma=sigma_str,
+            lam=lam_str,
+            cov=cov_pen,
+            trades=total_trades,
+            assets=assets_str,
+        )
     )
 
     plt.ion()
@@ -219,9 +234,10 @@ def _plot_multi_asset_overview(
     ax2 = fig.add_subplot(gs[2])
     ax3 = fig.add_subplot(gs[3])
     ax0.axis("off")
+    sigma_str = f"{sigma:.2f}" if isinstance(sigma, (int, float)) else "nan"
     kpi = (
-        f"F={F:.2f} | μ={mu:.2f} | λσ={lam_sigma:.2f} | Trades={total_trades} | "
-        f"Assets {assets_included}/{total_assets}"
+        f"F={F:.2f} | μ={mu:.2f} | σ={sigma_str} | λσ={lam_sigma:.2f} | "
+        f"Trades={total_trades} | Assets={assets_included}/{total_assets}"
     )
     ax0.text(0.5, 0.5, kpi, ha="center", va="center", fontsize=10)
 
