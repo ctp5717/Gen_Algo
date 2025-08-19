@@ -179,6 +179,9 @@ def test_zero_trade_policy_penalize_vs_ignore():
     }
     ev_ign = _make_evaluator(ignore_settings, stats)
     assert np.isclose(ev_ign(None, [], 0), 0.9)
+    ignored = ev_ign.last_details['per_asset']['A']
+    assert ignored['included'] is False
+    assert ignored.get('ignored_reason') == 'insufficient_trades'
 
 
 @pytest.mark.parametrize("weight,expected", [(None, 1.0), (0.0, 1.0), (0.3, 0.9)])

@@ -114,13 +114,18 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     details = evaluator.last_details
 
     per_asset_scores = {
-        t: d["score"] for t, d in details["per_asset"].items() if d["score"] is not None
+        t: d["score"] for t, d in details["per_asset"].items() if d.get("included")
     }
     per_asset_trades = {
-        t: d.get("trades", 0) for t, d in details["per_asset"].items() if d["score"] is not None
+        t: d.get("trades", 0) for t, d in details["per_asset"].items() if d.get("included")
     }
     equity_curves = {
-        t: d.get("equity_curve") for t, d in details["per_asset"].items() if d["score"] is not None
+        t: d.get("equity_curve") for t, d in details["per_asset"].items() if d.get("included")
+    }
+    ignored_assets = {
+        t: d.get("ignored_reason", "unknown")
+        for t, d in details["per_asset"].items()
+        if not d.get("included")
     }
     mu = details.get("mu")
     sigma = details.get("sigma")
@@ -168,6 +173,11 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         print("Bottom assets:")
         for t, s, tr in bottom:
             print(f"  {t}: score={s:.3f}, trades={tr}")
+
+    if ignored_assets:
+        print("Ignored assets:")
+        for t, reason in ignored_assets.items():
+            print(f"  {t}: {reason}")
 
     if per_asset_scores:
         charts_cfg = getattr(config, "CHARTS", {}).copy()
