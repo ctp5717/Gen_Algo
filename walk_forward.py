@@ -229,12 +229,26 @@ def run_walk_forward_validation(initial_champions=None):
                     assets=assets_str,
                 )
             )
+            poor = config.MULTI_ASSET.get("poor_score", -999.0)
+            if validation_score == poor:
+                trade_pen = details.get('penalties', {}).get('trade_floor')
+                if trade_pen == "hard_floor":
+                    reason = "trade floor not met"
+                elif trade_pen == "error":
+                    reason = "evaluation error"
+                elif trade_pen:
+                    reason = f"trade floor penalty: {trade_pen}"
+                else:
+                    reason = "unspecified reason"
+                print(f"Fitness equals poor_score ({poor}) due to {reason}.")
             scored = [
                 (t, d['score'], d.get('trades', 0))
                 for t, d in details['per_asset'].items()
                 if d['score'] is not None
             ]
-            if scored:
+            if not scored:
+                print("No assets were scored in this window.")
+            else:
                 scored.sort(key=lambda x: x[1])
                 top = scored[-3:][::-1]
                 bottom = scored[:3]
@@ -266,6 +280,8 @@ def run_walk_forward_validation(initial_champions=None):
             print("No trades in test period.")
             results.append({
                 'Window': idx,
+                'Total Trades': int(entries.sum()),
+                'Assets Traded': '0/1',
                 'Total Return [%]': np.nan,
                 'Max Drawdown [%]': np.nan,
                 'Sharpe Ratio': np.nan,
@@ -327,8 +343,11 @@ def run_walk_forward_validation(initial_champions=None):
             champion_pool, best_solution, validation_score, gene_space, champion_settings
         )
 
+        total_trades = int(entries.sum())
         results.append({
             'Window': idx,
+            'Total Trades': total_trades,
+            'Assets Traded': '1/1',
             'Total Return [%]': tr,
             'Max Drawdown [%]': dd,
             'Sharpe Ratio': sharpe,
