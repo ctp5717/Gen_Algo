@@ -33,11 +33,17 @@ def on_generation(ga_instance):
     
     elapsed_time = time.time() - start_time
     est_time_remaining = (elapsed_time / generation) * (total_generations - generation) if generation > 0 else 0
-    
+    remaining_seconds = int(est_time_remaining)
+    if remaining_seconds == 0:
+        time_left_str = "0s"
+    else:
+        unit = "sec" if remaining_seconds == 1 else "secs"
+        time_left_str = f"{remaining_seconds} {unit}"
+
     # Use carriage return `\r` and `end=''` to keep the output on a single, updating line.
     print(
         "Generation "
-        f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s",
+        f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {time_left_str}",
         end="\r",
     )
 
