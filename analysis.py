@@ -5,6 +5,7 @@ Analysis & Reporting Module
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 
+import json
 import vectorbt as vbt
 import config
 import data_loader
@@ -21,6 +22,38 @@ from utils import _norm_freq
 
 # Expose last analysis details for external inspection
 last_details = {}
+
+
+def persist_details(fitness_evaluator, charts_cfg=None):
+    """Persist ``fitness_evaluator.last_details`` as JSON.
+
+    The file is written to ``reports/{run_ts}/details_{sha}.json`` where
+    ``run_ts`` and ``sha`` mirror the values used for chart generation.
+    ``charts_cfg`` may supply these; otherwise they are derived from
+    ``config.CHARTS`` and git metadata.
+    """
+
+    details = getattr(fitness_evaluator, "last_details", None)
+    if not details:
+        return None
+
+    cfg = dict(getattr(config, "CHARTS", {})) if charts_cfg is None else charts_cfg.copy()
+    run_ts = cfg.get("run_ts") or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    cfg["run_ts"] = run_ts
+    try:
+        sha = cfg.get("sha") or subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            text=True,
+        ).strip()
+    except Exception:
+        sha = "unknown"
+
+    out_dir = Path("reports") / run_ts
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"details_{sha}.json"
+    with open(out_path, "w") as f:
+        json.dump(details, f, default=str)
+    return out_path
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
@@ -235,6 +268,8 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             evaluator.settings,
             charts_cfg,
         )
+        if charts_cfg.get("save_pngs"):
+            persist_details(evaluator, charts_cfg)
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         ranked_items = sorted(
             (

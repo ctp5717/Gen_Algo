@@ -13,6 +13,7 @@ import data_loader
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
+import analysis
 from utils import _norm_freq
 
 
@@ -207,6 +208,7 @@ def run_walk_forward(initial_champions=None):
             settings_val = dict(config.MULTI_ASSET)
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
+            analysis.persist_details(test_eval)
             details = test_eval.last_details
             cov_pen = details.get('penalties', {}).get('coverage')
             cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
@@ -359,6 +361,7 @@ def run_walk_forward(initial_champions=None):
         # Evaluate champion on validation data using composite fitness
         val_evaluator = fitness.FitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map)
         validation_score = val_evaluator(None, best_solution, 0)
+        analysis.persist_details(val_evaluator)
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
         champion_pool = _update_champion_pool(
             champion_pool, best_solution, validation_score, gene_space, champion_settings
