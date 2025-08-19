@@ -203,9 +203,9 @@ MULTI_ASSET = {
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
     "coverage_penalty_weight": 0.3,
-    # Minimal trades to consider an asset as traded; 0 means assets with no
-    # trades are still evaluated and contribute a neutral score.
-    "per_asset_min_trades": 0,
+    # Minimal trades to consider an asset as traded. Assets with no trades
+    # are ignored unless explicitly penalised.
+    "per_asset_min_trades": 1,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 24,
     # Fitness score returned when the hard floor triggers or an error occurs

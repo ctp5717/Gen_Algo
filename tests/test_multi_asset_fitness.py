@@ -231,6 +231,32 @@ def test_zero_trade_policy_penalize_vs_ignore():
     assert ignored.get('ignored_reason') == 'insufficient_trades'
 
 
+@pytest.mark.parametrize("min_trades", [0, 1])
+def test_zero_trade_assets_excluded_with_coverage_penalty(min_trades):
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty_weight': 0.3,
+        'per_asset_min_trades': min_trades,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 0.9)
+    per_asset = ev.last_details['per_asset']
+    ignored = per_asset['A']
+    assert ignored['included'] is False
+    assert ignored.get('ignored_reason') == 'insufficient_trades'
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.1)
+
+
 @pytest.mark.parametrize("weight,expected", [(None, 1.0), (0.0, 1.0), (0.3, 0.9)])
 def test_coverage_penalty_weight_monotonic(weight, expected):
     stats = [
