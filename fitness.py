@@ -13,7 +13,7 @@ import config
 
 
 def weighted_mean_std(values, weights):
-    """Compute weighted mean and standard deviation.
+    r"""Compute weighted mean and standard deviation.
 
     Parameters
     ----------
