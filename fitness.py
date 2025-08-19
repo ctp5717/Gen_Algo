@@ -252,6 +252,7 @@ class MultiAssetFitnessEvaluator:
                             **stats,
                             "score": None,
                             "included": False,
+                            "ignored_reason": "insufficient_trades",
                         }
                         continue
                 else:
