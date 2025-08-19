@@ -50,7 +50,8 @@ def on_generation(ga_instance):
 def main():
     """ The main execution function. """
     print("--- GA Trading Strategy Framework ---")
-    print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
+    group_names = ", ".join(name for name, _ in getattr(config, "ASSET_GROUP", []))
+    print(f"Starting multi-asset optimization for {group_names}")
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
@@ -92,6 +93,10 @@ def main():
     fitness_evaluator = fitness.get_fitness_evaluator(
         ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
     )
+    evaluator_name = type(fitness_evaluator).__name__
+    objective = getattr(fitness_evaluator, "settings", {}).get("metric", "composite")
+    print(f"Active evaluator: {evaluator_name} | Objective: {objective}")
+    assert objective, "Objective must be defined"
     fitness_function = fitness_evaluator.__call__
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
