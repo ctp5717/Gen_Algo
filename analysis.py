@@ -13,6 +13,10 @@ import strategy_engine as engine
 import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
 import numpy as np
+import os
+import subprocess
+from datetime import datetime
+from pathlib import Path
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
@@ -166,7 +170,11 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             print(f"  {t}: score={s:.3f}, trades={tr}")
 
     if per_asset_scores:
-        charts_cfg = getattr(config, "CHARTS", {})
+        charts_cfg = getattr(config, "CHARTS", {}).copy()
+        if os.getenv("DISABLE_PNG_REPORTS") == "1":
+            charts_cfg["save_pngs"] = False
+        else:
+            charts_cfg["save_pngs"] = True
         _plot_multi_asset_overview(
             per_asset_scores,
             per_asset_trades,
@@ -264,3 +272,17 @@ def _plot_multi_asset_overview(
 
     fig.tight_layout()
     fig.show()
+
+    if charts_cfg.get("save_pngs"):
+        run_ts = charts_cfg.get("run_ts") or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        try:
+            sha = charts_cfg.get("sha") or subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                text=True,
+            ).strip()
+        except Exception:
+            sha = "unknown"
+        out_dir = Path("reports") / run_ts
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"overview_{sha}.png"
+        fig.savefig(out_path, dpi=150)

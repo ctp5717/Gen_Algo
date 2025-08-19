@@ -169,6 +169,11 @@ This module's purpose is to provide a final, unbiased report on the performance 
 
 3.  **Analyze the Results:** The script will first run the optimization, printing a live progress bar. At the end, it will display a plot of the GA's learning curve, print the optimal parameters, and then automatically run the final analysis on the unseen validation data, printing a full statistical report and displaying the final equity curve.
 
+When multi-asset analysis runs, an overview chart is also written to
+`reports/{run_ts}/overview_{sha}.png`, where `run_ts` is the timestamp of the
+run and `sha` is the short commit hash. Set `DISABLE_PNG_REPORTS=1` to skip
+writing this file.
+
 ### Project Roadmap
 
 Of course. Here is the complete project roadmap, with thorough descriptions for all the features we have not yet implemented.
