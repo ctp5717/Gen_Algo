@@ -237,15 +237,34 @@ class MultiAssetFitnessEvaluator:
                 trades = stats.get("trades", 0)
                 total_trades += trades
 
+                # Pre-compute capped profit factor and drawdown score for storage
+                pf_raw = stats.get("profit_factor")
+                cap = self.settings.get("winsorize_pf_cap", 5.0)
+                if pf_raw is None or np.isnan(pf_raw):
+                    pf_capped = self.settings.get("nan_fallback", 0.0)
+                else:
+                    pf_capped = min(cap, pf_raw) if not np.isinf(pf_raw) else cap
+
+                dd_raw = stats.get("max_drawdown")
+                if dd_raw is None or np.isnan(dd_raw):
+                    dd_raw = 100.0
+                drawdown_score = 1 - (dd_raw / 100.0)
+
+                penalties = {}
+
                 if trades < self.settings.get("per_asset_min_trades", 1):
                     if self.settings.get("zero_trade_policy") == "penalize":
                         val = self.settings.get("zero_trade_penalty", -1.0)
+                        penalties["zero_trades"] = val
                         per_asset_metrics.append(val)
                         included_assets.append(ticker)
                         per_asset_details[ticker] = {
                             **stats,
                             "score": val,
                             "included": True,
+                            "profit_factor_capped": pf_capped,
+                            "drawdown_score": drawdown_score,
+                            "penalties": penalties,
                         }
                     else:
                         per_asset_details[ticker] = {
@@ -253,6 +272,9 @@ class MultiAssetFitnessEvaluator:
                             "score": None,
                             "included": False,
                             "ignored_reason": "insufficient_trades",
+                            "profit_factor_capped": pf_capped,
+                            "drawdown_score": drawdown_score,
+                            "penalties": penalties or None,
                         }
                         continue
                 else:
@@ -260,30 +282,18 @@ class MultiAssetFitnessEvaluator:
                     if metric_type == "sortino":
                         val = stats.get("sortino", self.settings.get("nan_fallback", 0.0))
                     elif metric_type == "profit_factor":
-                        val = stats.get("profit_factor", self.settings.get("nan_fallback", 0.0))
+                        val = pf_capped
                     elif metric_type == "return":
                         val = stats.get("total_return", self.settings.get("nan_fallback", 0.0))
                     else:  # composite metric
                         sortino = stats.get("sortino")
-                        pf = stats.get("profit_factor")
-                        dd = stats.get("max_drawdown")
-
-                        cap = self.settings.get("winsorize_pf_cap", 5.0)
-                        if pf is None or np.isnan(pf):
-                            pf = self.settings.get("nan_fallback", 0.0)
-                        pf = min(cap, pf) if not np.isinf(pf) else cap
-
                         if sortino is None or np.isnan(sortino):
                             sortino = self.settings.get("nan_fallback", 0.0)
-
-                        if dd is None or np.isnan(dd):
-                            dd = 100.0
-                        drawdown_score = 1 - (dd / 100.0)
 
                         w = config.FITNESS_WEIGHTS
                         val = (
                             sortino * w["sortino_ratio"]
-                            + pf * w["profit_factor"]
+                            + pf_capped * w["profit_factor"]
                             + drawdown_score * w["max_drawdown"]
                         )
 
@@ -293,6 +303,9 @@ class MultiAssetFitnessEvaluator:
                         **stats,
                         "score": val,
                         "included": True,
+                        "profit_factor_capped": pf_capped,
+                        "drawdown_score": drawdown_score,
+                        "penalties": penalties or None,
                     }
 
             if not per_asset_metrics:
