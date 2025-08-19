@@ -174,6 +174,10 @@ def run_walk_forward(initial_champions=None):
             print(f"Training trade floor: {evaluator.settings.get('min_total_trades')}")
         else:
             evaluator = fitness.get_fitness_evaluator(train_data, config.STRATEGY_RULES, gene_map)
+        ev_name = type(evaluator).__name__
+        objective = getattr(evaluator, "settings", {}).get("metric", "composite")
+        print(f"[WalkForward] Evaluator: {ev_name} | Objective: {objective}")
+        assert objective, "Objective must be defined"
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
@@ -207,6 +211,10 @@ def run_walk_forward(initial_champions=None):
         if multi:
             settings_val = dict(config.MULTI_ASSET)
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
+            ev_name = type(test_eval).__name__
+            objective = getattr(test_eval, "settings", {}).get("metric", "composite")
+            print(f"[WalkForward] Validation evaluator: {ev_name} | Objective: {objective}")
+            assert objective, "Objective must be defined"
             validation_score = test_eval(None, best_solution, 0)
             analysis.persist_details(test_eval)
             details = test_eval.last_details
@@ -360,6 +368,10 @@ def run_walk_forward(initial_champions=None):
 
         # Evaluate champion on validation data using composite fitness
         val_evaluator = fitness.FitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map)
+        ev_name = type(val_evaluator).__name__
+        objective = getattr(val_evaluator, "settings", {}).get("metric", "composite")
+        print(f"[WalkForward] Validation evaluator: {ev_name} | Objective: {objective}")
+        assert objective, "Objective must be defined"
         validation_score = val_evaluator(None, best_solution, 0)
         analysis.persist_details(val_evaluator)
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})

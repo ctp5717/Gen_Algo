@@ -85,6 +85,10 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     fitness_evaluator = fitness.get_fitness_evaluator(
         ohlc_data, config.STRATEGY_RULES, gene_map
     )
+    evaluator_name = type(fitness_evaluator).__name__
+    objective = getattr(fitness_evaluator, "settings", {}).get("metric", "composite")
+    print(f"Active evaluator: {evaluator_name} | Objective: {objective}")
+    assert objective, "Objective must be defined"
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()
 
