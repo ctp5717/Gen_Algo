@@ -175,6 +175,7 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         for t, d in details["per_asset"].items()
         if d["score"] is not None
     ]
+    export_tickers = {t for t, tr in per_asset_trades.items() if tr > 0}
     if scored:
         scored.sort(key=lambda x: x[1])
         bottom = scored[:3]
@@ -195,6 +196,8 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             print(
                 f"  {t}: score={s:.3f}, trades={tr}, pf={pf_str}, dd={dd_str}, penalties={pen_str}"
             )
+        export_tickers.update(t for t, *_ in top)
+        export_tickers.update(t for t, *_ in bottom)
 
     if ignored_assets:
         print("Ignored assets:")
@@ -207,6 +210,16 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             charts_cfg["save_pngs"] = False
         else:
             charts_cfg["save_pngs"] = True
+        run_ts = charts_cfg.get("run_ts") or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        charts_cfg["run_ts"] = run_ts
+        try:
+            sha = charts_cfg.get("sha") or subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                text=True,
+            ).strip()
+        except Exception:
+            sha = "unknown"
+        charts_cfg["sha"] = sha
         _plot_multi_asset_overview(
             per_asset_scores,
             per_asset_trades,
@@ -221,6 +234,35 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             evaluator.settings,
             charts_cfg,
         )
+        rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
+        ranked_items = sorted(
+            (
+                t,
+                details["per_asset"][t].get("score"),
+            )
+            for t in per_asset_scores.keys()
+        )
+        ranked_items.sort(key=lambda kv: float("-inf") if kv[1] is None else kv[1], reverse=True)
+        rank_map = {t: i + 1 for i, (t, _) in enumerate(ranked_items)}
+        out_dir = Path("reports") / run_ts
+        for t in export_tickers:
+            ohlc = group_data.get(t)
+            if ohlc is None:
+                continue
+            d = details["per_asset"][t]
+            rank = rank_map.get(t, len(rank_map) + 1)
+            score = d.get("score")
+            tr = d.get("trades", 0)
+            _plot_asset_panels(
+                t,
+                ohlc,
+                rules,
+                rank,
+                tr,
+                score,
+                charts_cfg.get("save_pngs"),
+                out_dir,
+            )
 
 
 def _plot_multi_asset_overview(
@@ -318,4 +360,77 @@ def _plot_multi_asset_overview(
         out_dir = Path("reports") / run_ts
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"overview_{sha}.png"
+        fig.savefig(out_path, dpi=150)
+
+
+def _plot_asset_panels(
+    ticker,
+    ohlc,
+    rules,
+    rank,
+    trades,
+    score,
+    save_png,
+    out_dir,
+):
+    """Render a three-panel chart for a single asset."""
+
+    plt.ion()
+
+    entries = engine.process_strategy_rules(ohlc, rules)
+    exit_rules = rules.get("exit_rules", {})
+    sl_rule = exit_rules.get("stop_loss", {})
+    tsl_rule = exit_rules.get("trailing_stop", {})
+    tp_rule = exit_rules.get("take_profit", {})
+    sl_stop = sl_rule.get("params", {}).get("value") if sl_rule.get("is_active", False) else None
+    sl_trail = tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
+    tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
+    time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
+    time_exit = time_exit.reindex(entries.index, fill_value=False)
+
+    portfolio = vbt.Portfolio.from_signals(
+        close=ohlc["Close"],
+        entries=entries,
+        exits=time_exit,
+        sl_stop=sl_stop,
+        tp_stop=tp_stop,
+        sl_trail=sl_trail,
+        fees=0.001,
+        freq=config.TIMEFRAME,
+    )
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12))
+
+    ohlc["Close"].plot(ax=ax1, title=f"{ticker} Price & Signals")
+    records = portfolio.trades.records
+    if not records.empty:
+        entry_dates = ohlc.index[records["entry_idx"]]
+        entry_prices = ohlc["Close"].iloc[records["entry_idx"]]
+        exit_dates = ohlc.index[records["exit_idx"]]
+        exit_prices = ohlc["Close"].iloc[records["exit_idx"]]
+        ax1.scatter(entry_dates, entry_prices, marker="^", color="green", label="Entry")
+        ax1.scatter(exit_dates, exit_prices, marker="v", color="red", label="Exit")
+        ax1.legend()
+
+        pnl_pct = records["pnl"] / records["entry_price"]
+        colors = np.where(pnl_pct >= 0, "green", "red")
+        ax2.scatter(exit_dates, pnl_pct, c=colors)
+    ax2.axhline(0, color="black", linewidth=0.5)
+    ax2.set_title("Trade PnL (%)")
+    ax2.set_ylabel("PnL %")
+
+    equity = portfolio.value()
+    benchmark = ohlc["Close"] / ohlc["Close"].iloc[0] * equity.iloc[0]
+    ax3.plot(equity.index, equity, label="Strategy")
+    ax3.plot(benchmark.index, benchmark, label="Buy & Hold")
+    ax3.set_title("Equity vs Benchmark")
+    ax3.legend()
+
+    fig.tight_layout()
+    fig.show()
+
+    if save_png:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        score_val = score if isinstance(score, (int, float)) else float("nan")
+        out_path = out_dir / f"{rank}_{ticker}_{trades}_{score_val:.2f}.png"
         fig.savefig(out_path, dpi=150)
