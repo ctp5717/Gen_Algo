@@ -280,7 +280,25 @@ class MultiAssetFitnessEvaluator:
                     }
 
             if not per_asset_metrics:
-                fallback = self.settings.get("nan_fallback", 0.0)
+                poor = self.settings.get("poor_score", -999.0)
+                min_trades = self.settings.get("min_total_trades", 0)
+                policy = self.settings.get("trade_floor_policy", "hard_floor")
+                trade_penalty = None
+                F = poor
+                if total_trades < min_trades:
+                    if policy == "hard_floor":
+                        trade_penalty = "hard_floor"
+                    elif policy == "soft_penalty":
+                        mode = self.settings.get("soft_penalty_mode", "multiplicative")
+                        strength = self.settings.get("soft_penalty_strength", 1.0)
+                        if mode == "additive":
+                            penalty = strength * (1 - total_trades / max(1, min_trades))
+                            F -= penalty
+                            trade_penalty = {"mode": "additive", "penalty": penalty}
+                        else:
+                            scale = (total_trades / max(1, min_trades)) ** strength
+                            F *= scale
+                            trade_penalty = {"mode": "multiplicative", "scale": scale}
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": None,
@@ -289,10 +307,10 @@ class MultiAssetFitnessEvaluator:
                     "total_trades": total_trades,
                     "assets_included": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {"trade_floor": None, "coverage": None},
-                    "fitness": fallback,
+                    "penalties": {"trade_floor": trade_penalty, "coverage": None},
+                    "fitness": F,
                 }
-                return fallback
+                return F
 
             # Determine weights for included assets and renormalise
             asset_weights = self.settings.get("asset_weights") or {}

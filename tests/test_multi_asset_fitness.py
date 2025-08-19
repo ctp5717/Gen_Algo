@@ -101,8 +101,9 @@ def test_no_assets_traded_sets_default_details(monkeypatch):
 
     evaluator = fitness.MultiAssetFitnessEvaluator({'A': df}, {}, {}, {})
     score = evaluator(None, [], 0)
-    assert score == 0.0
+    assert score == -999.0
     assert evaluator.last_details['total_trades'] == 0
+    assert evaluator.last_details['penalties']['trade_floor'] == 'hard_floor'
 
 
 def test_aggregation_math():
