@@ -252,8 +252,11 @@ class MultiAssetFitnessEvaluator:
 
                 penalties = {}
 
-                if trades < self.settings.get("per_asset_min_trades", 1):
-                    if self.settings.get("zero_trade_policy") == "penalize":
+                min_trades = self.settings.get("per_asset_min_trades", 1)
+                zero_policy = self.settings.get("zero_trade_policy")
+                insufficient = trades < min_trades or (trades == 0 and zero_policy == "ignore")
+                if insufficient:
+                    if zero_policy == "penalize" and trades < min_trades:
                         val = self.settings.get("zero_trade_penalty", -1.0)
                         penalties["zero_trades"] = val
                         per_asset_metrics.append(val)
