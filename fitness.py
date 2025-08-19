@@ -11,6 +11,7 @@ import numpy as np
 import vectorbt as vbt
 import strategy_engine as engine
 import config
+from utils import _norm_freq
 
 
 def weighted_mean_std(values, weights):
@@ -108,9 +109,9 @@ class FitnessEvaluator:
                 exits=time_based_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
+                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
                 fees=0.001,
-                freq=config.TIMEFRAME
+                freq=_norm_freq(config.TIMEFRAME)
             )
             
             stats = portfolio.stats()
@@ -200,7 +201,7 @@ class MultiAssetFitnessEvaluator:
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=0.001,
-            freq=config.TIMEFRAME,
+            freq=_norm_freq(config.TIMEFRAME),
         )
 
         trades = int(portfolio.trades.count())
