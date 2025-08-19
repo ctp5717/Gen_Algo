@@ -126,6 +126,15 @@ def test_aggregation_math():
     assert np.isclose(score, 0.8775, atol=1e-4)
 
 
+def test_weighted_mean_std_deterministic():
+    mu, sigma = fitness.weighted_mean_std([1.6, 1.0, 0.4], [1, 1, 1])
+    assert np.isclose(mu, 1.0)
+    assert np.isclose(sigma, 0.4898979, atol=1e-6)
+    lam = 0.25
+    F = mu - lam * sigma
+    assert np.isclose(F, 0.8775255, atol=1e-6)
+
+
 def test_trade_floor_policies():
     stats = [
         {'total_return': 1.0, 'trades': 5},
@@ -148,6 +157,44 @@ def test_trade_floor_policies():
     }
     ev_soft = _make_evaluator(settings_soft, stats)
     assert np.isclose(ev_soft(None, [], 0), 0.5)
+
+
+def test_hard_floor_returns_poor_score_with_zero_trade_penalize():
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'penalize',
+        'zero_trade_penalty': -1.0,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 30,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    assert ev(None, [], 0) == -999.0
+
+
+def test_hard_floor_returns_poor_score_with_zero_trade_ignore():
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty_weight': 0.0,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 30,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    assert ev(None, [], 0) == -999.0
 
 
 def test_zero_trade_policy_penalize_vs_ignore():
@@ -224,6 +271,28 @@ def test_weight_renormalization():
     assert np.isclose(ev(None, [], 0), 0.65, atol=1e-6)
 
 
+def test_weight_renormalization_multiple_exclusions():
+    stats = [
+        {'total_return': 0.5, 'trades': 5},
+        {'total_return': 1.0, 'trades': 0},
+        {'total_return': 1.5, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty_weight': 0.0,
+        'per_asset_min_trades': 1,
+        'asset_weights': {'A': 0.2, 'B': 0.3, 'C': 0.5},
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 0.5)
+    assert ev.last_details['assets_included'] == 1
+
+
 def test_soft_penalty_additive():
     stats = [
         {'total_return': 1.0, 'trades': 5},
@@ -240,6 +309,27 @@ def test_soft_penalty_additive():
     ev = _make_evaluator(settings, stats)
     # Mean = 1.0, total trades = 15 => penalty 2*(1-0.5)=1 => fitness 0
     assert np.isclose(ev(None, [], 0), 0.0)
+
+
+def test_soft_penalty_multiplicative_scaling():
+    stats = [
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty_weight': 0.0,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'soft_penalty',
+        'soft_penalty_strength': 2.0,
+        'min_total_trades': 20,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=1 => fitness=0.25
+    assert np.isclose(ev(None, [], 0), 0.25)
 
 
 def test_min_total_trades_per_year_scaling():
