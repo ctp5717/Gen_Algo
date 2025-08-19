@@ -17,6 +17,35 @@ import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
+
+def _normalize_ticker(ticker: str, source: str) -> str:
+    """Normalize ticker symbols for different data sources.
+
+    For Binance, tickers may be provided in formats like ``BTC-USD`` or
+    ``BTCUSD``. Binance expects the dash to be removed and uses ``USDT`` as the
+    USD trading pair. This helper converts tickers accordingly so that cache
+    filenames and API calls use a consistent symbol.
+
+    Parameters
+    ----------
+    ticker : str
+        The original ticker symbol.
+    source : str
+        Lowercase name of the data source (e.g. ``"binance"``).
+
+    Returns
+    -------
+    str
+        Normalized ticker symbol appropriate for the requested source.
+    """
+
+    if source == 'binance':
+        # Remove any dashes and ensure USD pairs use USDT unless already USDT
+        ticker = ticker.replace('-', '')
+        if ticker.endswith('USD') and not ticker.endswith('USDT'):
+            ticker = ticker[:-3] + 'USDT'
+    return ticker
+
 def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
     """ Fetches historical kline data from Binance and formats it. """
     print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
@@ -59,13 +88,18 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
     Acts as a router to fetch data from the selected source (yfinance or binance).
     """
     source = config.DATA_SOURCE.lower()
-    
-    # Include the source in the cache filename to prevent conflicts
-    cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
+    normalized_ticker = _normalize_ticker(ticker, source)
+
+    # Include the source in the cache filename to prevent conflicts. Use the
+    # normalized ticker so that differently formatted equivalents map to the
+    # same cache entry.
+    cache_filename = (
+        f"{normalized_ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
+    )
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
 
     if os.path.exists(cache_filepath):
-        print(f"Loading '{ticker}' data from local cache: {cache_filename}")
+        print(f"Loading '{normalized_ticker}' data from local cache: {cache_filename}")
         try:
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
@@ -78,22 +112,32 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
     # --- Router Logic ---
     try:
         if source == 'binance':
-            data = _get_binance_data(ticker, start_date, end_date, interval)
+            data = _get_binance_data(normalized_ticker, start_date, end_date, interval)
         elif source == 'yfinance':
-            print(f"Cache not found. Downloading '{ticker}' data from Yahoo Finance...")
-            data = yf.download(ticker, start=start_date, end=end_date, interval=interval, progress=False)
+            print(
+                f"Cache not found. Downloading '{ticker}' data from Yahoo Finance..."
+            )
+            data = yf.download(
+                normalized_ticker,
+                start=start_date,
+                end=end_date,
+                interval=interval,
+                progress=False,
+            )
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
         else:
             raise ValueError(f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'.")
 
         if data.empty:
-            print(f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters.")
+            print(
+                f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters."
+            )
             return pd.DataFrame()
 
         # Standardize column names
         data.columns = [col.capitalize() for col in data.columns]
-        
+
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
