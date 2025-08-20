@@ -443,6 +443,7 @@ class MultiAssetFitnessEvaluator:
                 "per_asset": per_asset_details,
                 "mu": mu,
                 "sigma": sigma,
+                "lambda": lam,
                 "lambda_sigma": lam * sigma,
                 "total_trades": total_trades,
                 "assets_included": len(included_assets),

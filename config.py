@@ -170,10 +170,14 @@ GA_MUTATION_NUM_GENES = 1
 AUTO_TUNE_ENABLED = True
 GENERATIONS_PER_TUNE = 10
 HYPERPARAMETER_SEARCH_SPACE = [
-    {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1},
-    {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
-    {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3},
-    {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4},
+    {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1, "lambda_dispersion": 0.25},
+    {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1, "lambda_dispersion": 0.5},
+    {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2, "lambda_dispersion": 0.25},
+    {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2, "lambda_dispersion": 0.5},
+    {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3, "lambda_dispersion": 0.25},
+    {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3, "lambda_dispersion": 0.5},
+    {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4, "lambda_dispersion": 0.25},
+    {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4, "lambda_dispersion": 0.5},
 ]
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---

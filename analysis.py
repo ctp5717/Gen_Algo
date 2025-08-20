@@ -225,13 +225,15 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     mu = details.get("mu")
     sigma = details.get("sigma")
     lam_sigma = details.get("lambda_sigma")
+    lam = details.get("lambda")
     total_trades = details.get("total_trades", 0)
     cov_pen = details.get("penalties", {}).get("coverage")
     cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
     assets_incl = details.get("assets_included")
     total_assets = len(group_data)
     mu_str = f"{mu:.3f}" if isinstance(mu, (int, float)) else "nan"
-    lam_str = f"{lam_sigma:.3f}" if isinstance(lam_sigma, (int, float)) else "nan"
+    lam_str = f"{lam:.3f}" if isinstance(lam, (int, float)) else "nan"
+    lam_sig_str = f"{lam_sigma:.3f}" if isinstance(lam_sigma, (int, float)) else "nan"
     sigma_str = (
         f"{sigma:.3f}"
         if isinstance(sigma, (int, float))
@@ -239,12 +241,13 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     )
     assets_str = f"{assets_incl}/{total_assets}"
     print(
-        "Fitness: {f:.3f} | mu={mu} | sigma={sigma} | lambda*sigma={lam} | "
+        "Fitness: {f:.3f} | mu={mu} | sigma={sigma} | lambda={lam} | lambda*sigma={lam_sig} | "
         "coverage_penalty={cov:.3f} | total_trades={trades} | assets={assets}".format(
             f=F,
             mu=mu_str,
             sigma=sigma_str,
             lam=lam_str,
+            lam_sig=lam_sig_str,
             cov=cov_pen,
             trades=total_trades,
             assets=assets_str,
@@ -410,8 +413,10 @@ def _plot_multi_asset_overview(
     ax0.axis("off")
     sigma_str = f"{sigma:.2f}" if isinstance(sigma, (int, float)) else "nan"
     floor = settings.get("min_total_trades")
+    lam = settings.get("lambda_dispersion")
+    lam_str = f"{lam:.2f}" if isinstance(lam, (int, float)) else "nan"
     kpi = (
-        f"F={F:.2f} | μ={mu:.2f} | σ={sigma_str} | λσ={lam_sigma:.2f} | "
+        f"F={F:.2f} | μ={mu:.2f} | σ={sigma_str} | λ={lam_str} | λσ={lam_sigma:.2f} | "
         f"Trades={total_trades} | Floor={floor} | Assets={assets_included}/{total_assets}"
     )
     ax0.text(0.5, 0.5, kpi, ha="center", va="center", fontsize=10)
