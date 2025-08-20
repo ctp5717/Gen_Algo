@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 import pandas as pd
+import warnings
 
 # Ensure repository root is on the import path
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,4 +64,9 @@ def test_process_strategy_rules_simple(monkeypatch):
 
 
 def test_norm_freq_minutes():
-    assert _norm_freq('15m') == '15T'
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        freq = _norm_freq('15m')
+        pd.Timedelta(freq)
+    assert freq == '15min'
+    assert not any('deprecated' in str(warn.message) for warn in w)
