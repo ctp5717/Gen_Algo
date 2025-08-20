@@ -15,7 +15,7 @@ def _norm_freq(freq: Union[str, None]) -> Union[str, None]:
 
     Examples
     --------
-    "15m" -> "15T"
+    "15m" -> "15min"
     "1h"  -> "1H"
     "1wk" -> "1W"
     "1mo" -> "1M"
@@ -24,7 +24,7 @@ def _norm_freq(freq: Union[str, None]) -> Union[str, None]:
         return freq
     f = freq.strip().lower()
     mapping = {
-        "m": "T",
+        "m": "min",
         "h": "H",
         "d": "D",
         "wk": "W",

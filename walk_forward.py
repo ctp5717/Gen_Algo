@@ -94,26 +94,44 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     return pool
 
 
+_wf_on_gen_best: dict | None = None
+_wf_on_gen_eval = None
+_wf_on_gen_func = None
+
+
+def _wf_on_generation_cb(ga_instance):
+    """Module-level ``on_generation`` callback for walk-forward runs.
+
+    Storing required state in module-level globals keeps the callback picklable
+    when the GA instance is serialized for process-based parallel fitness
+    evaluation.
+    """
+
+    if _wf_on_gen_best is None:
+        return
+
+    best_sol, fit, _ = ga_instance.best_solution(
+        pop_fitness=ga_instance.last_generation_fitness
+    )
+    if fit > _wf_on_gen_best["fitness"]:
+        _wf_on_gen_best["fitness"] = fit
+        try:
+            _wf_on_gen_func(None, best_sol, 0)
+            analysis.log_asset_extremes(
+                getattr(_wf_on_gen_eval, "last_details", {})
+            )
+        except Exception:
+            pass
+
+
 def _make_on_generation(fitness_eval, fitness_func):
-    """Return an ``on_generation`` callback that logs asset extremes."""
+    """Return a picklable ``on_generation`` callback that logs asset extremes."""
 
-    best = {"fitness": -float("inf")}
-
-    def _cb(ga_instance):
-        best_sol, fit, _ = ga_instance.best_solution(
-            pop_fitness=ga_instance.last_generation_fitness
-        )
-        if fit > best["fitness"]:
-            best["fitness"] = fit
-            try:
-                fitness_func(None, best_sol, 0)
-                analysis.log_asset_extremes(
-                    getattr(fitness_eval, "last_details", {})
-                )
-            except Exception:
-                pass
-
-    return _cb
+    global _wf_on_gen_best, _wf_on_gen_eval, _wf_on_gen_func
+    _wf_on_gen_best = {"fitness": -float("inf")}
+    _wf_on_gen_eval = fitness_eval
+    _wf_on_gen_func = fitness_func
+    return _wf_on_generation_cb
 
 
 def run_walk_forward(initial_champions=None):

@@ -79,26 +79,45 @@ def _evaluate_on_validation(solution, gene_map):
     return -np.inf if np.isnan(score) else score
 
 
+_on_gen_best: dict | None = None
+_on_gen_eval = None
+_on_gen_func = None
+
+
+def _on_generation_cb(ga_instance):
+    """Module-level callback used by ``_make_on_generation``.
+
+    Defining the callback at the module level keeps it picklable when the
+    :class:`pygad.GA` instance is sent to worker processes during parallel
+    fitness evaluation. Any state required by the callback is stored in module
+    globals which are initialised by ``_make_on_generation``.
+    """
+
+    if _on_gen_best is None:
+        return
+
+    best_sol, fit, _ = ga_instance.best_solution(
+        pop_fitness=ga_instance.last_generation_fitness
+    )
+    if fit > _on_gen_best["fitness"]:
+        _on_gen_best["fitness"] = fit
+        try:
+            _on_gen_func(None, best_sol, 0)
+            analysis.log_asset_extremes(
+                getattr(_on_gen_eval, "last_details", {})
+            )
+        except Exception:
+            pass
+
+
 def _make_on_generation(fitness_eval, fitness_func):
-    """Create an ``on_generation`` callback that logs asset extremes."""
+    """Create a picklable ``on_generation`` callback that logs asset extremes."""
 
-    best = {"fitness": -float("inf")}
-
-    def _cb(ga_instance):
-        best_sol, fit, _ = ga_instance.best_solution(
-            pop_fitness=ga_instance.last_generation_fitness
-        )
-        if fit > best["fitness"]:
-            best["fitness"] = fit
-            try:
-                fitness_func(None, best_sol, 0)
-                analysis.log_asset_extremes(
-                    getattr(fitness_eval, "last_details", {})
-                )
-            except Exception:
-                pass
-
-    return _cb
+    global _on_gen_best, _on_gen_eval, _on_gen_func
+    _on_gen_best = {"fitness": -float("inf")}
+    _on_gen_eval = fitness_eval
+    _on_gen_func = fitness_func
+    return _on_generation_cb
 
 
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
