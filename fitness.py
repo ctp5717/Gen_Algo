@@ -241,13 +241,34 @@ class MultiAssetFitnessEvaluator:
                 trades = stats.get("trades", 0)
                 total_trades += trades
 
-                # Pre-compute capped profit factor and drawdown score for storage
+                # Pre-compute capped metrics and drawdown score for storage
                 pf_raw = stats.get("profit_factor")
-                cap = self.settings.get("winsorize_pf_cap", 5.0)
+                pf_cap = self.settings.get(
+                    "pf_cap", self.settings.get("winsorize_pf_cap")
+                )
                 if pf_raw is None or np.isnan(pf_raw):
                     pf_capped = self.settings.get("nan_fallback", 0.0)
                 else:
-                    pf_capped = min(cap, pf_raw) if not np.isinf(pf_raw) else cap
+                    if pf_cap is not None:
+                        pf_capped = (
+                            min(pf_cap, pf_raw) if not np.isinf(pf_raw) else pf_cap
+                        )
+                    else:
+                        pf_capped = pf_raw
+
+                sortino_raw = stats.get("sortino")
+                sortino_cap = self.settings.get("sortino_cap")
+                if sortino_raw is None or np.isnan(sortino_raw):
+                    sortino_capped = self.settings.get("nan_fallback", 0.0)
+                else:
+                    if sortino_cap is not None:
+                        sortino_capped = (
+                            min(sortino_cap, sortino_raw)
+                            if not np.isinf(sortino_raw)
+                            else sortino_cap
+                        )
+                    else:
+                        sortino_capped = sortino_raw
 
                 dd_raw = stats.get("max_drawdown")
                 if dd_raw is None or np.isnan(dd_raw):
@@ -270,6 +291,7 @@ class MultiAssetFitnessEvaluator:
                             **stats,
                             "score": val,
                             "included": True,
+                            "sortino_capped": sortino_capped,
                             "profit_factor_capped": pf_capped,
                             "drawdown_score": drawdown_score,
                             "penalties": penalties,
@@ -280,6 +302,7 @@ class MultiAssetFitnessEvaluator:
                             "score": None,
                             "included": False,
                             "ignored_reason": "insufficient_trades",
+                            "sortino_capped": sortino_capped,
                             "profit_factor_capped": pf_capped,
                             "drawdown_score": drawdown_score,
                             "penalties": penalties or None,
@@ -298,6 +321,7 @@ class MultiAssetFitnessEvaluator:
                             **stats,
                             "score": val,
                             "included": True,
+                            "sortino_capped": sortino_capped,
                             "profit_factor_capped": pf_capped,
                             "drawdown_score": drawdown_score,
                             "penalties": penalties,
@@ -308,6 +332,7 @@ class MultiAssetFitnessEvaluator:
                             "score": None,
                             "included": False,
                             "ignored_reason": "insufficient_trades",
+                            "sortino_capped": sortino_capped,
                             "profit_factor_capped": pf_capped,
                             "drawdown_score": drawdown_score,
                             "penalties": penalties or None,
@@ -316,19 +341,15 @@ class MultiAssetFitnessEvaluator:
 
                 metric_type = self.settings.get("metric", "composite")
                 if metric_type == "sortino":
-                    val = stats.get("sortino", self.settings.get("nan_fallback", 0.0))
+                    val = sortino_capped
                 elif metric_type == "profit_factor":
                     val = pf_capped
                 elif metric_type == "return":
                     val = stats.get("total_return", self.settings.get("nan_fallback", 0.0))
                 else:  # composite metric
-                    sortino = stats.get("sortino")
-                    if sortino is None or np.isnan(sortino):
-                        sortino = self.settings.get("nan_fallback", 0.0)
-
                     w = config.FITNESS_WEIGHTS
                     val = (
-                        sortino * w["sortino_ratio"]
+                        sortino_capped * w["sortino_ratio"]
                         + pf_capped * w["profit_factor"]
                         + drawdown_score * w["max_drawdown"]
                     )
@@ -340,6 +361,9 @@ class MultiAssetFitnessEvaluator:
                     trade_scale = (trades / k) ** s
                     val *= trade_scale
 
+                c = self.settings.get("tanh_c")
+                if c:
+                    val = float(np.tanh(val / c))
                 if clip_range is not None:
                     val = float(np.clip(val, clip_range[0], clip_range[1]))
 
@@ -349,6 +373,7 @@ class MultiAssetFitnessEvaluator:
                     **stats,
                     "score": val,
                     "included": True,
+                    "sortino_capped": sortino_capped,
                     "profit_factor_capped": pf_capped,
                     "drawdown_score": drawdown_score,
                     "trade_scale": trade_scale,
