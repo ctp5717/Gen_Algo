@@ -541,6 +541,28 @@ def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
     assert np.isclose(b.get("shrinkage_multiplier"), 0.0)
 
 
+def test_caps_logged():
+    stats = [
+        {"sortino": 12.0, "profit_factor": 8.0, "max_drawdown": 5.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "composite",
+        "per_asset_min_trades": 1,
+        "min_total_trades": 0,
+        "lambda_dispersion": 0.0,
+        "trade_floor_strength": 0,
+    }
+    df = pd.DataFrame({"Close": [1, 2, 3]})
+    ev = _make_evaluator(settings, stats, {"A": df})
+    ev(None, [], 0)
+    caps = ev.last_details["per_asset"]["A"]["caps"]
+    import config as cfg
+    assert caps["profit_factor"]["cap"] == cfg.PF_CAP
+    assert caps["profit_factor"]["capped"] == cfg.PF_CAP
+    assert caps["sortino"]["cap"] == cfg.SORTINO_CAP
+    assert caps["sortino"]["capped"] == cfg.SORTINO_CAP
+
+
 def test_diagnostics_and_factory(monkeypatch):
     stats = [
         {'total_return': 1.0, 'trades': 5},

@@ -121,10 +121,16 @@ class FitnessEvaluator:
             profit_factor = stats['Profit Factor']
             max_drawdown = stats['Max Drawdown [%]']
             
-            if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
-            if np.isnan(sortino): sortino = 0
-            if np.isnan(profit_factor): profit_factor = 0
-            if np.isnan(max_drawdown): max_drawdown = 100.0
+            if np.isinf(profit_factor) or profit_factor > config.PF_CAP:
+                profit_factor = config.PF_CAP
+            if np.isnan(sortino):
+                sortino = 0
+            elif np.isinf(sortino) or sortino > config.SORTINO_CAP:
+                sortino = config.SORTINO_CAP
+            if np.isnan(profit_factor):
+                profit_factor = 0
+            if np.isnan(max_drawdown):
+                max_drawdown = 100.0
 
             drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
@@ -354,6 +360,18 @@ class MultiAssetFitnessEvaluator:
                     "drawdown_score": drawdown_score,
                     "shrinkage_multiplier": shrinkage_multiplier,
                     "penalties": penalties or None,
+                    "caps": {
+                        "profit_factor": {
+                            "raw": pf_raw,
+                            "cap": pf_cap,
+                            "capped": pf_capped,
+                        },
+                        "sortino": {
+                            "raw": sortino_raw,
+                            "cap": sortino_cap,
+                            "capped": sortino_capped,
+                        },
+                    },
                 }
 
             if not per_asset_metrics:
