@@ -307,6 +307,7 @@ def run_walk_forward(initial_champions=None):
             mu = details.get('mu')
             sigma = details.get('sigma')
             lam_sig = details.get('lambda_sigma')
+            lam = details.get('lambda')
             assets_incl = details.get('assets_included')
             total_assets = len(test_data)
             mu_str = f"{mu:.4f}" if isinstance(mu, (int, float)) else "nan"
@@ -318,16 +319,18 @@ def run_walk_forward(initial_champions=None):
             lam_sig_str = (
                 f"{lam_sig:.4f}" if isinstance(lam_sig, (int, float)) else "nan"
             )
+            lam_str = f"{lam:.4f}" if isinstance(lam, (int, float)) else "nan"
             assets_str = f"{assets_incl}/{total_assets}"
             floor = test_eval.settings.get('min_total_trades')
             print(
                 "Validation fitness: {val:.4f} | floor={floor} | mu={mu} | sigma={sig} | "
-                "lambda*sigma={lam} | coverage_penalty={cov:.4f} | assets={assets}".format(
+                "lambda={lam} | lambda*sigma={lam_sig} | coverage_penalty={cov:.4f} | assets={assets}".format(
                     val=validation_score,
                     floor=floor,
                     mu=mu_str,
                     sig=sigma_str,
-                    lam=lam_sig_str,
+                    lam=lam_str,
+                    lam_sig=lam_sig_str,
                     cov=cov_pen,
                     assets=assets_str,
                 )
@@ -368,6 +371,7 @@ def run_walk_forward(initial_champions=None):
                 'Fitness': validation_score,
                 'Mu': details.get('mu'),
                 'Sigma': details.get('sigma'),
+                'Lambda': details.get('lambda'),
                 'Lambda Sigma': details.get('lambda_sigma'),
                 'Total Trades': details.get('total_trades'),
                 'Coverage Penalty': cov_pen,
@@ -489,6 +493,7 @@ def run_walk_forward(initial_champions=None):
         median_fit = valid['Fitness'].median()
         median_mu = pd.to_numeric(valid['Mu'], errors='coerce').median()
         median_sigma = pd.to_numeric(valid['Sigma'], errors='coerce').median()
+        median_lambda = pd.to_numeric(valid['Lambda'], errors='coerce').median()
         median_lambda_sigma = pd.to_numeric(valid['Lambda Sigma'], errors='coerce').median()
         print("\nAggregate Metrics:")
         print(f"Average Fitness: {avg_fitness:.4f}")
@@ -497,6 +502,7 @@ def run_walk_forward(initial_champions=None):
         print(f"Median Fitness (excl poor): {median_fit:.4f}")
         print(f"Median mu: {median_mu:.4f}")
         print(f"Median sigma: {median_sigma:.4f}")
+        print(f"Median lambda: {median_lambda:.4f}")
         print(f"Median lambda*sigma: {median_lambda_sigma:.4f}")
         combined_eq = None
         if 'Equity Curve' in results_df.columns:
@@ -518,6 +524,7 @@ def run_walk_forward(initial_champions=None):
             'median_fitness': median_fit,
             'median_mu': median_mu,
             'median_sigma': median_sigma,
+            'median_lambda': median_lambda,
             'median_lambda_sigma': median_lambda_sigma,
         }
 

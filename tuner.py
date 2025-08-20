@@ -140,8 +140,13 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
 
     results = []
 
+    original_lambda = getattr(config, "MULTI_ASSET", {}).get("lambda_dispersion")
+
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
         print(f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}")
+        lam = params.get("lambda_dispersion")
+        if lam is not None and hasattr(config, "MULTI_ASSET"):
+            config.MULTI_ASSET["lambda_dispersion"] = lam
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],
@@ -161,6 +166,9 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
         score = _evaluate_on_validation(best_solution, gene_map)
         results.append({"params": params, "score": score})
         print(f"Validation score: {score}")
+
+    if original_lambda is not None and hasattr(config, "MULTI_ASSET"):
+        config.MULTI_ASSET["lambda_dispersion"] = original_lambda
 
     print("\n-- Tuning Summary --")
     for r in results:
