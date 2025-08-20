@@ -104,7 +104,8 @@ def test_no_assets_traded_sets_default_details(monkeypatch):
     score = evaluator(None, [], 0)
     assert score == -999.0
     assert evaluator.last_details['total_trades'] == 0
-    assert evaluator.last_details['penalties']['trade_floor'] == 'hard_floor'
+    assert evaluator.last_details['penalties']['trade_floor'] is None
+    assert evaluator.last_details['penalties']['floor_ratio'] == 0.0
 
 
 def test_aggregation_math():
@@ -116,8 +117,8 @@ def test_aggregation_math():
     settings = {
         'metric': 'return',
         'lambda_dispersion': 0.25,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
+        'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -143,17 +144,16 @@ def test_trade_floor_policies():
     ]
     settings_hard = {
         'metric': 'return',
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 20,
+        'mode': 'walk_forward',
     }
     ev_hard = _make_evaluator(settings_hard, stats)
     assert ev_hard(None, [], 0) == -999.0
 
     settings_soft = {
         'metric': 'return',
-        'trade_floor_policy': 'soft_penalty',
         'min_total_trades': 30,
-        'soft_penalty_strength': 1.0,
+        'trade_floor_strength': 1.0,
     }
     ev_soft = _make_evaluator(settings_soft, stats)
     assert np.isclose(ev_soft(None, [], 0), 0.5)
@@ -170,9 +170,9 @@ def test_hard_floor_returns_poor_score_with_zero_trade_penalize():
         'zero_trade_policy': 'penalize',
         'zero_trade_penalty': -1.0,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 30,
         'lambda_dispersion': 0.0,
+        'mode': 'walk_forward',
     }
     ev = _make_evaluator(settings, stats)
     assert ev(None, [], 0) == -999.0
@@ -189,9 +189,9 @@ def test_hard_floor_returns_poor_score_with_zero_trade_ignore():
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 30,
         'lambda_dispersion': 0.0,
+        'mode': 'walk_forward',
     }
     ev = _make_evaluator(settings, stats)
     assert ev(None, [], 0) == -999.0
@@ -208,9 +208,9 @@ def test_zero_trade_policy_penalize_vs_ignore():
         'zero_trade_policy': 'penalize',
         'zero_trade_penalty': -1.0,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev_pen = _make_evaluator(penalize_settings, stats)
     assert np.isclose(ev_pen(None, [], 0), 1/3, atol=1e-6)
@@ -220,9 +220,9 @@ def test_zero_trade_policy_penalize_vs_ignore():
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev_ign = _make_evaluator(ignore_settings, stats)
     assert np.isclose(ev_ign(None, [], 0), 0.9)
@@ -243,9 +243,9 @@ def test_zero_trade_assets_excluded_with_coverage_penalty(min_trades):
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': min_trades,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -269,9 +269,9 @@ def test_coverage_penalty_formula():
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': kappa,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -293,9 +293,9 @@ def test_coverage_penalty_kappa_monotonic(kappa, expected):
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': kappa,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     assert np.isclose(ev(None, [], 0), expected)
@@ -313,9 +313,9 @@ def test_weight_renormalization():
         'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     assert np.isclose(ev(None, [], 0), 0.65, atol=1e-6)
@@ -333,9 +333,9 @@ def test_weight_renormalization_multiple_exclusions():
         'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.2, 'B': 0.3, 'C': 0.5},
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -343,7 +343,7 @@ def test_weight_renormalization_multiple_exclusions():
     assert ev.last_details['assets_included'] == 1
 
 
-def test_soft_penalty_additive():
+def test_floor_strength_scaling():
     stats = [
         {'total_return': 1.0, 'trades': 5},
         {'total_return': 1.0, 'trades': 5},
@@ -351,17 +351,15 @@ def test_soft_penalty_additive():
     ]
     settings = {
         'metric': 'return',
-        'trade_floor_policy': 'soft_penalty',
-        'soft_penalty_mode': 'additive',
-        'soft_penalty_strength': 2.0,
+        'trade_floor_strength': 2.0,
         'min_total_trades': 30,
     }
     ev = _make_evaluator(settings, stats)
-    # Mean = 1.0, total trades = 15 => penalty 2*(1-0.5)=1 => fitness 0
-    assert np.isclose(ev(None, [], 0), 0.0)
+    # Mean = 1.0, total trades = 15 -> floor_ratio=0.5 -> fitness=0.25
+    assert np.isclose(ev(None, [], 0), 0.25)
 
 
-def test_soft_penalty_multiplicative_scaling():
+def test_floor_strength_with_zero_trades():
     stats = [
         {'total_return': 1.0, 'trades': 5},
         {'total_return': 1.0, 'trades': 5},
@@ -372,8 +370,7 @@ def test_soft_penalty_multiplicative_scaling():
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
-        'trade_floor_policy': 'soft_penalty',
-        'soft_penalty_strength': 2.0,
+        'trade_floor_strength': 2.0,
         'min_total_trades': 20,
         'lambda_dispersion': 0.0,
     }
@@ -389,8 +386,8 @@ def test_min_total_trades_per_year_scaling():
     ]
     settings = {
         'metric': 'return',
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades_per_year': 12,
+        'trade_floor_strength': 0,
     }
     idx = pd.to_datetime(['2020-01-01', '2020-07-01'])
     group_data = {
@@ -425,9 +422,9 @@ def test_per_asset_min_trades_threshold():
         'per_asset_min_trades': 3,
         'zero_trade_policy': 'penalize',
         'zero_trade_penalty': -1.0,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev_pen = _make_evaluator(penalize_settings, stats)
     assert np.isclose(ev_pen(None, [], 0), 1/3, atol=1e-6)
@@ -437,9 +434,9 @@ def test_per_asset_min_trades_threshold():
         'per_asset_min_trades': 3,
         'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.0,
-        'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
     }
     ev_ign = _make_evaluator(ignore_settings, stats)
     assert np.isclose(ev_ign(None, [], 0), 1.0)
@@ -467,9 +464,9 @@ def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
         "per_asset_min_trades": 1,
         "zero_trade_policy": "penalize",
         "zero_trade_penalty": -1.0,
-        "trade_floor_policy": "hard_floor",
         "min_total_trades": 0,
         "lambda_dispersion": 0.0,
+        "trade_floor_strength": 0,
     }
     df = pd.DataFrame({"Close": [1, 2, 3]})
     group_data = {"A": df, "B": df}
@@ -496,11 +493,9 @@ def test_diagnostics_and_factory(monkeypatch):
         'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
-        'trade_floor_policy': 'soft_penalty',
-        'soft_penalty_mode': 'additive',
-        'soft_penalty_strength': 1.0,
         'min_total_trades': 30,
         'lambda_dispersion': 0.25,
+        'trade_floor_strength': 1.0,
     }
     ev = _make_evaluator(settings, stats)
     score1 = ev(None, [], 0)
@@ -546,8 +541,8 @@ def test_metric_options():
             {
                 "metric": metric,
                 "lambda_dispersion": 0.0,
-                "trade_floor_policy": "hard_floor",
                 "min_total_trades": 0,
+                "trade_floor_strength": 0,
             },
             stats,
         )
@@ -563,9 +558,9 @@ def test_lambda_with_unequal_weights():
     settings = {
         "metric": "return",
         "lambda_dispersion": 0.25,
-        "trade_floor_policy": "hard_floor",
         "min_total_trades": 0,
         "asset_weights": {"A": 0.6, "B": 0.3, "C": 0.1},
+        "trade_floor_strength": 0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -583,8 +578,8 @@ def test_score_clipping_stabilises_mu_sigma():
     settings = {
         "metric": "return",
         "lambda_dispersion": 0.0,
-        "trade_floor_policy": "hard_floor",
         "min_total_trades": 0,
+        "trade_floor_strength": 0,
     }
     ev = _make_evaluator(settings, stats)
     ev(None, [], 0)
@@ -626,7 +621,7 @@ def test_ga_and_tuner_consistency(monkeypatch):
     monkeypatch.setitem(cfg.MULTI_ASSET, 'metric', 'return')
     monkeypatch.setitem(cfg.MULTI_ASSET, 'lambda_dispersion', 0.0)
     monkeypatch.setitem(cfg.MULTI_ASSET, 'min_total_trades', 0)
-    monkeypatch.setitem(cfg.MULTI_ASSET, 'trade_floor_policy', 'hard_floor')
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'trade_floor_strength', 0)
 
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {})
     ga = pygad.GA(

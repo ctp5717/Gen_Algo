@@ -206,9 +206,9 @@ MULTI_ASSET = {
     # reduce false positives.  Individual assets are permitted to contribute
     # zero trades by default; the overall floor enforces sufficient activity.
     "min_total_trades": 10,
-    "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
-    "soft_penalty_strength": 1.0,
-    "soft_penalty_mode": "multiplicative",  # multiplicative | additive
+    "trade_floor_policy": "hard_floor",  # retained for backwards compatibility
+    "trade_floor_strength": 1.0,
+    "mode": None,
     # How to handle assets with zero trades
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
