@@ -20,6 +20,11 @@ import config as cfg  # noqa: E402
 import pytest  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    fitness._EVAL_CACHE.clear()
+
+
 def _make_evaluator(settings=None, stats_list=None, group_data=None):
     """Utility to construct a MultiAssetFitnessEvaluator with patched stats."""
     group_data = group_data or {
@@ -176,6 +181,44 @@ def test_trade_floor_policies():
     }
     ev_soft = _make_evaluator(settings_soft, stats)
     assert np.isclose(ev_soft(None, [], 0), 0.5)
+
+
+def test_caches_single_asset_results(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_eval(self, ohlc, rules):
+        calls["n"] += 1
+        return {
+            "sortino": 1.0,
+            "profit_factor": 1.0,
+            "max_drawdown": 10.0,
+            "trades": 1,
+            "total_return": 1.0,
+            "equity_curve": pd.Series([1, 1.1, 1.2]),
+        }
+
+    monkeypatch.setattr(
+        fitness.MultiAssetFitnessEvaluator,
+        "_evaluate_single_asset",
+        fake_eval,
+        raising=False,
+    )
+    fitness._EVAL_CACHE.clear()
+    group_data = {"A": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev1 = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, {})
+    ev1(None, [], 0)
+    assert calls["n"] == 1
+    # Re-evaluating with the same rules should hit the cache
+    ev1(None, [], 0)
+    assert calls["n"] == 1
+    # A new evaluator instance should also reuse the cache
+    ev2 = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, {})
+    ev2(None, [], 0)
+    assert calls["n"] == 1
+    # Changing the rules invalidates the cache
+    ev2.base_rules = {"foo": 1}
+    ev2(None, [], 0)
+    assert calls["n"] == 2
 
 
 def test_hard_floor_returns_poor_score_with_zero_trade_penalize():
@@ -378,19 +421,21 @@ def test_dynamic_trade_floor_tracks_recent_generations():
         "trade_floor_window": 5,
     }
     ev = _make_evaluator(settings, stats, {"A": pd.DataFrame({"Close": [1, 2, 3]})})
+    ev.base_rules = {"p": 0}
+    ev.gene_map = {0: {"path": ["p"]}}
 
     class GA:
         def __init__(self):
             self.generations_completed = 0
 
     ga = GA()
-    ev(ga, [], 0)  # gen0 sol1
-    ev(ga, [], 0)  # gen0 sol2
+    ev(ga, [0], 0)  # gen0 sol1
+    ev(ga, [1], 0)  # gen0 sol2
     ga.generations_completed = 1
-    ev(ga, [], 0)  # triggers floor update from gen0 -> 20
+    ev(ga, [2], 0)  # triggers floor update from gen0 -> 20
     assert ev.settings["min_total_trades"] == 20
     ga.generations_completed = 2
-    ev(ga, [], 0)  # triggers floor update from gen1 -> median([20,30])=25 but clamp to max 25
+    ev(ga, [3], 0)  # triggers floor update from gen1 -> median([20,30])=25 but clamp to max 25
     assert ev.settings["min_total_trades"] == 25
     assert list(ev._recent_totals) == [20, 30]
 
