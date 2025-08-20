@@ -187,7 +187,7 @@ def test_hard_floor_returns_poor_score_with_zero_trade_ignore():
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.0,
+        'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 30,
@@ -218,7 +218,7 @@ def test_zero_trade_policy_penalize_vs_ignore():
     ignore_settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.3,
+        'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
@@ -241,7 +241,7 @@ def test_zero_trade_assets_excluded_with_coverage_penalty(min_trades):
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.3,
+        'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': min_trades,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
@@ -257,8 +257,32 @@ def test_zero_trade_assets_excluded_with_coverage_penalty(min_trades):
     assert np.isclose(ev.last_details['penalties']['coverage'], 0.1)
 
 
-@pytest.mark.parametrize("weight,expected", [(None, 1.0), (0.0, 1.0), (0.3, 0.9)])
-def test_coverage_penalty_weight_monotonic(weight, expected):
+def test_coverage_penalty_formula():
+    stats = [
+        {'total_return': 0.5, 'trades': 5},
+        {'total_return': 1.5, 'trades': 5},
+        {'total_return': 0.0, 'trades': 0},
+    ]
+    kappa = 0.4
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty_kappa': kappa,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    mu = np.mean([0.5, 1.5])
+    expected_penalty = kappa * (1 - 2 / 3)
+    assert np.isclose(ev.last_details['penalties']['coverage'], expected_penalty)
+    assert np.isclose(score, mu - expected_penalty)
+
+
+@pytest.mark.parametrize("kappa,expected", [(None, 1.0), (0.0, 1.0), (0.3, 0.9)])
+def test_coverage_penalty_kappa_monotonic(kappa, expected):
     stats = [
         {'total_return': 0.0, 'trades': 0},
         {'total_return': 1.0, 'trades': 5},
@@ -267,7 +291,7 @@ def test_coverage_penalty_weight_monotonic(weight, expected):
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': weight,
+        'coverage_penalty_kappa': kappa,
         'per_asset_min_trades': 1,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
@@ -286,7 +310,7 @@ def test_weight_renormalization():
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.3,
+        'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
         'trade_floor_policy': 'hard_floor',
@@ -306,7 +330,7 @@ def test_weight_renormalization_multiple_exclusions():
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.0,
+        'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.2, 'B': 0.3, 'C': 0.5},
         'trade_floor_policy': 'hard_floor',
@@ -346,7 +370,7 @@ def test_soft_penalty_multiplicative_scaling():
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.0,
+        'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'trade_floor_policy': 'soft_penalty',
         'soft_penalty_strength': 2.0,
@@ -412,7 +436,7 @@ def test_per_asset_min_trades_threshold():
         'metric': 'return',
         'per_asset_min_trades': 3,
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.0,
+        'coverage_penalty_kappa': 0.0,
         'trade_floor_policy': 'hard_floor',
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
@@ -469,7 +493,7 @@ def test_diagnostics_and_factory(monkeypatch):
     settings = {
         'metric': 'return',
         'zero_trade_policy': 'ignore',
-        'coverage_penalty_weight': 0.3,
+        'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
         'trade_floor_policy': 'soft_penalty',
