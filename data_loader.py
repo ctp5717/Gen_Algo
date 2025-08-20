@@ -170,7 +170,7 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
         Timeframe to request from the data source.
     coverage_threshold : float, optional
         Minimum fraction of bars required for an asset to be kept. Default is
-        ``0.8`` (80%).
+        ``0.85`` (85%).
 
     Returns
     -------
@@ -180,7 +180,7 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
     """
 
     if coverage_threshold is None:
-        coverage_threshold = getattr(config, "COVERAGE_THRESHOLD", 0.8)
+        coverage_threshold = getattr(config, "COVERAGE_THRESHOLD", 0.85)
 
     raw_data = {}
     for _, ticker in asset_group:
@@ -198,12 +198,17 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
 
     # Filter out assets with insufficient data coverage.
     filtered = {}
+    possible_bars = len(union_index)
     for ticker, df in raw_data.items():
-        coverage = len(df.index) / len(union_index)
+        bars_present = len(df.index)
+        coverage = bars_present / possible_bars
+        print(f"{ticker}: {bars_present}/{possible_bars} bars ({coverage:.0%} coverage)")
         if coverage >= coverage_threshold:
             filtered[ticker] = df
         else:
-            print(f"Excluding {ticker} due to insufficient coverage ({coverage:.0%})")
+            print(
+                f"WARNING: {ticker} below coverage threshold ({coverage_threshold:.0%})"
+            )
 
     if not filtered:
         return {}
