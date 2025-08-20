@@ -78,11 +78,13 @@ ASSET_GROUP = [
     ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
     ("Ethereum", CRYPTO_UNIVERSE["Ethereum"]),
     ("Solana", CRYPTO_UNIVERSE["Solana"]),
+    ("XRP", CRYPTO_UNIVERSE["XRP"]),
     ("Cardano", CRYPTO_UNIVERSE["Cardano"]),
+    ("Avalanche", CRYPTO_UNIVERSE["Avalanche"]),
     ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
     ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
+    ("TRON", CRYPTO_UNIVERSE["TRON"]),
     ("Dai", CRYPTO_UNIVERSE["Dai"]),
-    ("Near_Protocol", CRYPTO_UNIVERSE["Near_Protocol"]),
 ]
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
@@ -216,7 +218,7 @@ MULTI_ASSET = {
     # are ignored unless explicitly penalised.
     "per_asset_min_trades": 1,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 24,
+    "min_total_trades_per_year": 52,
     # Fitness score returned when the hard floor triggers or an error occurs
     "poor_score": -999.0,
 }
@@ -257,7 +259,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'price_is_above_indicator'}
             },
             {
-                'is_active': False, # This rule is ON
+                'is_active': True, # This rule is ON
                 'rule_name': 'RSI_Momentum_Filter',
                 'indicator': 'rsi',
                 'params': {
@@ -269,7 +271,7 @@ STRATEGY_RULES = {
                 }
             },
             {
-                'is_active': True,
+                'is_active': False,
                 'rule_name': 'MACD_Momentum_Cross',
                 'indicator': 'macd',
                 'params': {
