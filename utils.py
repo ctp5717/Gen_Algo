@@ -1,5 +1,13 @@
 """Utility functions for the project."""
 from typing import Union
+import random
+import numpy as np
+
+
+def set_global_seed(seed: int) -> None:
+    """Seed Python and NumPy RNGs for reproducible behaviour."""
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 def _norm_freq(freq: Union[str, None]) -> Union[str, None]:

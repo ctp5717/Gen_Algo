@@ -9,7 +9,7 @@ import data_loader
 import fitness
 import strategy_engine as engine
 import analysis
-from utils import _norm_freq
+from utils import _norm_freq, set_global_seed
 
 
 def _evaluate_on_validation(solution, gene_map):
@@ -82,6 +82,11 @@ def _evaluate_on_validation(solution, gene_map):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
+    seed = None
+    if getattr(config, "DETERMINISTIC", False):
+        seed = getattr(config, "RANDOM_SEED", 42)
+        set_global_seed(seed)
+        print(f"Deterministic mode enabled. Seed={seed}")
     fitness_evaluator = fitness.get_fitness_evaluator(
         ohlc_data, config.STRATEGY_RULES, gene_map
     )
@@ -106,6 +111,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
+            random_seed=seed,
         )
         ga.run()
         analysis.persist_details(fitness_evaluator)

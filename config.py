@@ -10,6 +10,12 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import os
 
+# Enable deterministic behaviour across the project. When set to True the
+# random number generators for Python's `random` module, NumPy and PyGAD will
+# be seeded using `RANDOM_SEED` below.
+DETERMINISTIC = True
+RANDOM_SEED = 42
+
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"

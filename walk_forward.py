@@ -7,6 +7,7 @@ import os
 import numpy as np
 import pygad
 import vectorbt as vbt
+from utils import set_global_seed
 
 import config
 import data_loader
@@ -105,6 +106,11 @@ def run_walk_forward(initial_champions=None):
     print("\n=== Running Walk-Forward Validation ===")
     num_cores = os.cpu_count()
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
+    seed = None
+    if getattr(config, "DETERMINISTIC", False):
+        seed = getattr(config, "RANDOM_SEED", 42)
+        set_global_seed(seed)
+        print(f"Deterministic mode enabled. Seed={seed}")
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
@@ -188,6 +194,7 @@ def run_walk_forward(initial_champions=None):
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
+            random_seed=seed,
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
