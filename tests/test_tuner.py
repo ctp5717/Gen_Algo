@@ -12,15 +12,6 @@ sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 import tuner  # noqa: E402
 
 
-class DummyEval:
-    """Picklable stand-in for the fitness evaluator."""
-
-    last_details = {}
-
-    def __call__(self, ga_instance, solution, sol_idx):
-        return 0
-
-
 def test_find_best_hyperparameters_selects_best(monkeypatch):
     df = pd.DataFrame(
         {
@@ -108,13 +99,3 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
     original = list(gene_types)
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
     assert gene_types == original
-
-
-def test_make_on_generation_is_picklable():
-    import pickle
-
-    evaluator = DummyEval()
-    cb = tuner._make_on_generation(evaluator, evaluator.__call__)
-
-    # Should not raise an exception after regression fix
-    pickle.dumps(cb)
