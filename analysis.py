@@ -55,6 +55,62 @@ def persist_details(fitness_evaluator, charts_cfg=None):
         json.dump(details, f, default=str)
     return out_path
 
+
+def log_asset_extremes(details: dict | None):
+    """Print top and bottom three assets with key metrics.
+
+    Parameters
+    ----------
+    details : dict or None
+        The ``last_details`` structure produced by
+        :class:`MultiAssetFitnessEvaluator`. If missing or empty the
+        function quietly returns.
+    """
+
+    if not details:
+        return
+
+    per_asset = details.get("per_asset")
+    if not per_asset:
+        return
+
+    scored = []
+    for ticker, info in per_asset.items():
+        if not info.get("included") or info.get("score") is None:
+            continue
+        scored.append(
+            (
+                ticker,
+                info.get("score"),
+                info.get("profit_factor_capped"),
+                info.get("sortino"),
+                info.get("max_drawdown"),
+                info.get("trades"),
+            )
+        )
+
+    if not scored:
+        print("No assets were scored in this evaluation.")
+        return
+
+    scored.sort(key=lambda x: x[1])
+    top = scored[-3:][::-1]
+    bottom = scored[:3]
+
+    def fmt(x):
+        return f"{x:.2f}" if isinstance(x, (int, float)) else "nan"
+
+    print("Top assets:")
+    for t, _, pf, srt, dd, tr in top:
+        print(
+            f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
+        )
+    print("Bottom assets:")
+    for t, _, pf, srt, dd, tr in bottom:
+        print(
+            f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
+        )
+
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
     if getattr(config, "MULTI_ASSET", {}).get("enabled") and any(

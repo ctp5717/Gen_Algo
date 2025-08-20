@@ -21,19 +21,35 @@ import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
 
-# --- NEW: Callback function for progress tracking ---
+# --- NEW: Callback function for progress tracking and logging ---
 start_time = 0.0
+_best_fitness_seen = float("-inf")
+_fitness_func_ref = None
+_fitness_eval_ref = None
+
+
 def on_generation(ga_instance):
+    """Progress callback passed to ``pygad.GA``.
+
+    When a new global best fitness is observed it re-evaluates the
+    champion to obtain per-asset diagnostics and logs the top and bottom
+    performers.
     """
-    This function is called by PyGAD after each generation completes.
-    It prints a progress update to the console.
-    """
+
+    global _best_fitness_seen
+
     generation = ga_instance.generations_completed
     total_generations = ga_instance.num_generations
-    fitness = ga_instance.best_solution(pop_fitness=ga_instance.last_generation_fitness)[1]
-    
+    best_solution, fitness, _ = ga_instance.best_solution(
+        pop_fitness=ga_instance.last_generation_fitness
+    )
+
     elapsed_time = time.time() - start_time
-    est_time_remaining = (elapsed_time / generation) * (total_generations - generation) if generation > 0 else 0
+    est_time_remaining = (
+        (elapsed_time / generation) * (total_generations - generation)
+        if generation > 0
+        else 0
+    )
     remaining_seconds = int(est_time_remaining)
     if remaining_seconds == 0:
         time_left_str = "0s"
@@ -41,12 +57,22 @@ def on_generation(ga_instance):
         unit = "sec" if remaining_seconds == 1 else "secs"
         time_left_str = f"{remaining_seconds} {unit}"
 
-    # Use carriage return `\r` and `end=''` to keep the output on a single, updating line.
+    # Use carriage return to update progress on a single line.
     print(
         "Generation "
         f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {time_left_str}",
         end="\r",
     )
+
+    if fitness > _best_fitness_seen and _fitness_func_ref and _fitness_eval_ref:
+        _best_fitness_seen = fitness
+        try:
+            _fitness_func_ref(None, best_solution, 0)
+            analysis.log_asset_extremes(
+                getattr(_fitness_eval_ref, "last_details", {})
+            )
+        except Exception:
+            pass
 
 def main():
     """ The main execution function. """
@@ -105,6 +131,11 @@ def main():
     print(f"Active evaluator: {evaluator_name} | Objective: {objective}")
     assert objective, "Objective must be defined"
     fitness_function = fitness_evaluator.__call__
+
+    global _fitness_func_ref, _fitness_eval_ref, _best_fitness_seen
+    _fitness_func_ref = fitness_function
+    _fitness_eval_ref = fitness_evaluator
+    _best_fitness_seen = float("-inf")
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
         tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)

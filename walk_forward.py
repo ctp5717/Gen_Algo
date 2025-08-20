@@ -94,6 +94,28 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     return pool
 
 
+def _make_on_generation(fitness_eval, fitness_func):
+    """Return an ``on_generation`` callback that logs asset extremes."""
+
+    best = {"fitness": -float("inf")}
+
+    def _cb(ga_instance):
+        best_sol, fit, _ = ga_instance.best_solution(
+            pop_fitness=ga_instance.last_generation_fitness
+        )
+        if fit > best["fitness"]:
+            best["fitness"] = fit
+            try:
+                fitness_func(None, best_sol, 0)
+                analysis.log_asset_extremes(
+                    getattr(fitness_eval, "last_details", {})
+                )
+            except Exception:
+                pass
+
+    return _cb
+
+
 def run_walk_forward(initial_champions=None):
     """Execute walk-forward validation across the available data.
 
@@ -131,6 +153,7 @@ def run_walk_forward(initial_champions=None):
         sample_df = next(iter(all_data.values()))
         start = sample_df.index[0]
         end = sample_df.index[-1]
+        inclusion_counts = {t: 0 for t in all_data.keys()}
     else:
         all_data = data_loader.get_data(
             ticker=config.TICKER,
@@ -143,6 +166,7 @@ def run_walk_forward(initial_champions=None):
             return
         start = all_data.index[0]
         end = all_data.index[-1]
+        inclusion_counts = {config.TICKER: 0}
     train_months = wf_settings.get(
         "training_period_length",
         getattr(config, "WALK_FORWARD_TRAINING_MONTHS", 12),
@@ -195,6 +219,7 @@ def run_walk_forward(initial_champions=None):
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
             random_seed=seed,
+            on_generation=_make_on_generation(evaluator, evaluator.__call__),
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
@@ -267,23 +292,10 @@ def run_walk_forward(initial_champions=None):
                 else:
                     reason = "unspecified reason"
                 print(f"Fitness equals poor_score ({poor}) due to {reason}.")
-            scored = [
-                (t, d['score'], d.get('trades', 0))
-                for t, d in details['per_asset'].items()
-                if d['score'] is not None
-            ]
-            if not scored:
-                print("No assets were scored in this window.")
-            else:
-                scored.sort(key=lambda x: x[1])
-                top = scored[-3:][::-1]
-                bottom = scored[:3]
-                print("Top assets:")
-                for t, s, tr in top:
-                    print(f"  {t}: score={s:.3f}, trades={tr}")
-                print("Bottom assets:")
-                for t, s, tr in bottom:
-                    print(f"  {t}: score={s:.3f}, trades={tr}")
+            analysis.log_asset_extremes(details)
+            for t, d in details.get('per_asset', {}).items():
+                if d.get('included'):
+                    inclusion_counts[t] += 1
             # Compute combined equity curve for optional sparkline later
             equity_curves = [
                 d.get('equity_curve')
@@ -409,6 +421,12 @@ def run_walk_forward(initial_champions=None):
         print(results_df.to_string(index=False))
 
     if multi:
+        traded = sum(1 for c in inclusion_counts.values() if c > 0)
+        total_assets = len(inclusion_counts)
+        print("\nInclusion Counts:")
+        print(f"assets_traded = {traded}/{total_assets}")
+        for t, c in inclusion_counts.items():
+            print(f"  {t}: {c}")
         avg_fitness = results_df['Fitness'].mean()
         poor = config.MULTI_ASSET.get("poor_score", -999.0)
         total_folds = len(results_df)
