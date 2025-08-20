@@ -258,9 +258,8 @@ class MultiAssetFitnessEvaluator:
 
                 min_trades = self.settings.get("per_asset_min_trades", 1)
                 zero_policy = self.settings.get("zero_trade_policy")
-                insufficient = trades < min_trades or (trades == 0 and zero_policy == "ignore")
-                if insufficient:
-                    if zero_policy == "penalize" and trades < min_trades:
+                if trades == 0:
+                    if zero_policy == "penalize":
                         val = self.settings.get("zero_trade_penalty", -1.0)
                         if clip_range is not None:
                             val = float(np.clip(val, clip_range[0], clip_range[1]))
@@ -285,40 +284,76 @@ class MultiAssetFitnessEvaluator:
                             "drawdown_score": drawdown_score,
                             "penalties": penalties or None,
                         }
-                        continue
-                else:
-                    metric_type = self.settings.get("metric", "composite")
-                    if metric_type == "sortino":
-                        val = stats.get("sortino", self.settings.get("nan_fallback", 0.0))
-                    elif metric_type == "profit_factor":
-                        val = pf_capped
-                    elif metric_type == "return":
-                        val = stats.get("total_return", self.settings.get("nan_fallback", 0.0))
-                    else:  # composite metric
-                        sortino = stats.get("sortino")
-                        if sortino is None or np.isnan(sortino):
-                            sortino = self.settings.get("nan_fallback", 0.0)
+                    continue
 
-                        w = config.FITNESS_WEIGHTS
-                        val = (
-                            sortino * w["sortino_ratio"]
-                            + pf_capped * w["profit_factor"]
-                            + drawdown_score * w["max_drawdown"]
-                        )
+                if trades < min_trades:
+                    if zero_policy == "penalize":
+                        val = self.settings.get("zero_trade_penalty", -1.0)
+                        if clip_range is not None:
+                            val = float(np.clip(val, clip_range[0], clip_range[1]))
+                        penalties["zero_trades"] = val
+                        per_asset_metrics.append(val)
+                        included_assets.append(ticker)
+                        per_asset_details[ticker] = {
+                            **stats,
+                            "score": val,
+                            "included": True,
+                            "profit_factor_capped": pf_capped,
+                            "drawdown_score": drawdown_score,
+                            "penalties": penalties,
+                        }
+                    else:
+                        per_asset_details[ticker] = {
+                            **stats,
+                            "score": None,
+                            "included": False,
+                            "ignored_reason": "insufficient_trades",
+                            "profit_factor_capped": pf_capped,
+                            "drawdown_score": drawdown_score,
+                            "penalties": penalties or None,
+                        }
+                    continue
 
-                    if clip_range is not None:
-                        val = float(np.clip(val, clip_range[0], clip_range[1]))
+                metric_type = self.settings.get("metric", "composite")
+                if metric_type == "sortino":
+                    val = stats.get("sortino", self.settings.get("nan_fallback", 0.0))
+                elif metric_type == "profit_factor":
+                    val = pf_capped
+                elif metric_type == "return":
+                    val = stats.get("total_return", self.settings.get("nan_fallback", 0.0))
+                else:  # composite metric
+                    sortino = stats.get("sortino")
+                    if sortino is None or np.isnan(sortino):
+                        sortino = self.settings.get("nan_fallback", 0.0)
 
-                    per_asset_metrics.append(val)
-                    included_assets.append(ticker)
-                    per_asset_details[ticker] = {
-                        **stats,
-                        "score": val,
-                        "included": True,
-                        "profit_factor_capped": pf_capped,
-                        "drawdown_score": drawdown_score,
-                        "penalties": penalties or None,
-                    }
+                    w = config.FITNESS_WEIGHTS
+                    val = (
+                        sortino * w["sortino_ratio"]
+                        + pf_capped * w["profit_factor"]
+                        + drawdown_score * w["max_drawdown"]
+                    )
+
+                k = self.settings.get("partial_trades_threshold", 1)
+                s = self.settings.get("partial_trades_exponent", 1.0)
+                trade_scale = None
+                if trades > 0 and k and trades < k:
+                    trade_scale = (trades / k) ** s
+                    val *= trade_scale
+
+                if clip_range is not None:
+                    val = float(np.clip(val, clip_range[0], clip_range[1]))
+
+                per_asset_metrics.append(val)
+                included_assets.append(ticker)
+                per_asset_details[ticker] = {
+                    **stats,
+                    "score": val,
+                    "included": True,
+                    "profit_factor_capped": pf_capped,
+                    "drawdown_score": drawdown_score,
+                    "trade_scale": trade_scale,
+                    "penalties": penalties or None,
+                }
 
             if not per_asset_metrics:
                 poor = self.settings.get("poor_score", -999.0)
