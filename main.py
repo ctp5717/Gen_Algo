@@ -11,6 +11,7 @@ import tuner
 import traceback
 import time  # <-- NEW: Import the time module
 import matplotlib.pyplot as plt  # For non-blocking plot display
+from utils import set_global_seed
 
 # Import our custom modules
 import config
@@ -55,6 +56,12 @@ def main():
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
+
+    seed = None
+    if getattr(config, "DETERMINISTIC", False):
+        seed = getattr(config, "RANDOM_SEED", 42)
+        set_global_seed(seed)
+        print(f"Deterministic mode enabled. Seed={seed}")
 
     # Load price data.  When multi-asset mode is enabled we fetch and align data
     # for each asset in the configured group; otherwise fall back to the single
@@ -123,7 +130,8 @@ def main():
         fitness_func=fitness_function,
         parallel_processing=['process', num_cores],
         # --- NEW: Pass the callback function to the GA instance ---
-        on_generation=on_generation
+        on_generation=on_generation,
+        random_seed=seed
     )
 
     ga_instance.run()
