@@ -102,7 +102,7 @@ def test_no_assets_traded_sets_default_details(monkeypatch):
 
     evaluator = fitness.MultiAssetFitnessEvaluator({'A': df}, {}, {}, {})
     score = evaluator(None, [], 0)
-    assert score == -999.0
+    assert score == 0.0
     assert evaluator.last_details['total_trades'] == 0
     assert evaluator.last_details['penalties']['trade_floor'] is None
     assert evaluator.last_details['penalties']['floor_ratio'] == 0.0
@@ -167,8 +167,6 @@ def test_hard_floor_returns_poor_score_with_zero_trade_penalize():
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'penalize',
-        'zero_trade_penalty': -1.0,
         'per_asset_min_trades': 1,
         'min_total_trades': 30,
         'lambda_dispersion': 0.0,
@@ -186,7 +184,6 @@ def test_hard_floor_returns_poor_score_with_zero_trade_ignore():
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'min_total_trades': 30,
@@ -197,42 +194,7 @@ def test_hard_floor_returns_poor_score_with_zero_trade_ignore():
     assert ev(None, [], 0) == -999.0
 
 
-def test_zero_trade_policy_penalize_vs_ignore():
-    stats = [
-        {'total_return': 0.0, 'trades': 0},
-        {'total_return': 1.0, 'trades': 5},
-        {'total_return': 1.0, 'trades': 5},
-    ]
-    penalize_settings = {
-        'metric': 'return',
-        'zero_trade_policy': 'penalize',
-        'zero_trade_penalty': -1.0,
-        'per_asset_min_trades': 1,
-        'min_total_trades': 0,
-        'lambda_dispersion': 0.0,
-        'trade_floor_strength': 0,
-    }
-    ev_pen = _make_evaluator(penalize_settings, stats)
-    assert np.isclose(ev_pen(None, [], 0), 1/3, atol=1e-6)
-
-    ignore_settings = {
-        'metric': 'return',
-        'zero_trade_policy': 'ignore',
-        'coverage_penalty_kappa': 0.3,
-        'per_asset_min_trades': 1,
-        'min_total_trades': 0,
-        'lambda_dispersion': 0.0,
-        'trade_floor_strength': 0,
-    }
-    ev_ign = _make_evaluator(ignore_settings, stats)
-    assert np.isclose(ev_ign(None, [], 0), 0.9)
-    ignored = ev_ign.last_details['per_asset']['A']
-    assert ignored['included'] is False
-    assert ignored.get('ignored_reason') == 'insufficient_trades'
-
-
-@pytest.mark.parametrize("min_trades", [0, 1])
-def test_zero_trade_assets_excluded_with_coverage_penalty(min_trades):
+def test_zero_trade_assets_shrinkage():
     stats = [
         {'total_return': 0.0, 'trades': 0},
         {'total_return': 1.0, 'trades': 5},
@@ -240,21 +202,39 @@ def test_zero_trade_assets_excluded_with_coverage_penalty(min_trades):
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
-        'coverage_penalty_kappa': 0.3,
-        'per_asset_min_trades': min_trades,
+        'per_asset_min_trades': 1,
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    assert np.isclose(score, 0.9)
-    per_asset = ev.last_details['per_asset']
-    ignored = per_asset['A']
-    assert ignored['included'] is False
-    assert ignored.get('ignored_reason') == 'insufficient_trades'
-    assert np.isclose(ev.last_details['penalties']['coverage'], 0.1)
+    assert np.isclose(score, 2/3, atol=1e-6)
+    asset = ev.last_details['per_asset']['A']
+    assert asset['included'] is True
+    assert np.isclose(asset.get('shrinkage_multiplier'), 0.0)
+
+
+def test_zero_trade_assets_no_coverage_penalty():
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+    ]
+    settings = {
+        'metric': 'return',
+        'coverage_penalty_kappa': 0.3,
+        'per_asset_min_trades': 1,
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 2/3, atol=1e-6)
+    asset = ev.last_details['per_asset']['A']
+    assert asset['included'] is True
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
 
 
 def test_coverage_penalty_formula():
@@ -266,7 +246,6 @@ def test_coverage_penalty_formula():
     kappa = 0.4
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': kappa,
         'per_asset_min_trades': 1,
         'min_total_trades': 0,
@@ -275,14 +254,13 @@ def test_coverage_penalty_formula():
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    mu = np.mean([0.5, 1.5])
-    expected_penalty = kappa * (1 - 2 / 3)
-    assert np.isclose(ev.last_details['penalties']['coverage'], expected_penalty)
-    assert np.isclose(score, mu - expected_penalty)
+    mu = np.mean([0.5, 1.5, 0.0])
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
+    assert np.isclose(score, mu)
 
 
-@pytest.mark.parametrize("kappa,expected", [(None, 1.0), (0.0, 1.0), (0.3, 0.9)])
-def test_coverage_penalty_kappa_monotonic(kappa, expected):
+@pytest.mark.parametrize("kappa", [None, 0.0, 0.3])
+def test_coverage_penalty_kappa_monotonic(kappa):
     stats = [
         {'total_return': 0.0, 'trades': 0},
         {'total_return': 1.0, 'trades': 5},
@@ -290,7 +268,6 @@ def test_coverage_penalty_kappa_monotonic(kappa, expected):
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': kappa,
         'per_asset_min_trades': 1,
         'min_total_trades': 0,
@@ -298,7 +275,8 @@ def test_coverage_penalty_kappa_monotonic(kappa, expected):
         'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
-    assert np.isclose(ev(None, [], 0), expected)
+    assert np.isclose(ev(None, [], 0), 2/3, atol=1e-6)
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
 
 
 def test_weight_renormalization():
@@ -309,8 +287,6 @@ def test_weight_renormalization():
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
-        'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},
         'min_total_trades': 0,
@@ -318,7 +294,7 @@ def test_weight_renormalization():
         'trade_floor_strength': 0,
     }
     ev = _make_evaluator(settings, stats)
-    assert np.isclose(ev(None, [], 0), 0.65, atol=1e-6)
+    assert np.isclose(ev(None, [], 0), 0.6, atol=1e-6)
 
 
 def test_weight_renormalization_multiple_exclusions():
@@ -329,8 +305,6 @@ def test_weight_renormalization_multiple_exclusions():
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
-        'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.2, 'B': 0.3, 'C': 0.5},
         'min_total_trades': 0,
@@ -339,8 +313,8 @@ def test_weight_renormalization_multiple_exclusions():
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    assert np.isclose(score, 0.5)
-    assert ev.last_details['assets_included'] == 1
+    assert np.isclose(score, 0.1)
+    assert ev.last_details['assets_included'] == 3
 
 
 def test_floor_strength_scaling():
@@ -367,16 +341,14 @@ def test_floor_strength_with_zero_trades():
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
-        'coverage_penalty_kappa': 0.0,
         'per_asset_min_trades': 1,
         'trade_floor_strength': 2.0,
         'min_total_trades': 20,
         'lambda_dispersion': 0.0,
     }
     ev = _make_evaluator(settings, stats)
-    # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=1 => fitness=0.25
-    assert np.isclose(ev(None, [], 0), 0.25)
+    # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=2/3 => fitness≈0.1667
+    assert np.isclose(ev(None, [], 0), (2/3) * 0.25)
 
 
 def test_min_total_trades_per_year_scaling():
@@ -417,29 +389,19 @@ def test_per_asset_min_trades_threshold():
         {'total_return': 1.0, 'trades': 5},
         {'total_return': 1.0, 'trades': 5},
     ]
-    penalize_settings = {
+    settings = {
         'metric': 'return',
         'per_asset_min_trades': 3,
-        'zero_trade_policy': 'penalize',
-        'zero_trade_penalty': -1.0,
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'trade_floor_strength': 0,
     }
-    ev_pen = _make_evaluator(penalize_settings, stats)
-    assert np.isclose(ev_pen(None, [], 0), 1/3, atol=1e-6)
-
-    ignore_settings = {
-        'metric': 'return',
-        'per_asset_min_trades': 3,
-        'zero_trade_policy': 'ignore',
-        'coverage_penalty_kappa': 0.0,
-        'min_total_trades': 0,
-        'lambda_dispersion': 0.0,
-        'trade_floor_strength': 0,
-    }
-    ev_ign = _make_evaluator(ignore_settings, stats)
-    assert np.isclose(ev_ign(None, [], 0), 1.0)
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    expected = ((2/3) + 1.0 + 1.0) / 3
+    assert np.isclose(score, expected)
+    asset = ev.last_details['per_asset']['A']
+    assert np.isclose(asset.get('shrinkage_multiplier'), 2/3)
 
 
 def test_low_trade_scaling_and_total_trades_contribution():
@@ -483,8 +445,6 @@ def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
     settings = {
         "metric": "composite",
         "per_asset_min_trades": 1,
-        "zero_trade_policy": "penalize",
-        "zero_trade_penalty": -1.0,
         "min_total_trades": 0,
         "lambda_dispersion": 0.0,
         "trade_floor_strength": 0,
@@ -499,7 +459,8 @@ def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
     assert np.isclose(a["drawdown_score"], 0.9)
     assert a.get("penalties") in (None, {})
     b = details["B"]
-    assert b.get("penalties", {}).get("zero_trades") == -1.0
+    assert b["included"] is True
+    assert np.isclose(b.get("shrinkage_multiplier"), 0.0)
 
 
 def test_diagnostics_and_factory(monkeypatch):
@@ -510,7 +471,6 @@ def test_diagnostics_and_factory(monkeypatch):
     ]
     settings = {
         'metric': 'return',
-        'zero_trade_policy': 'ignore',
         'coverage_penalty_kappa': 0.3,
         'per_asset_min_trades': 1,
         'asset_weights': {'A': 0.6, 'B': 0.2, 'C': 0.2},

@@ -277,67 +277,8 @@ class MultiAssetFitnessEvaluator:
 
                 penalties = {}
 
-                min_trades = self.settings.get("per_asset_min_trades", 1)
-                zero_policy = self.settings.get("zero_trade_policy")
-                if trades == 0:
-                    if zero_policy == "penalize":
-                        val = self.settings.get("zero_trade_penalty", -1.0)
-                        if clip_range is not None:
-                            val = float(np.clip(val, clip_range[0], clip_range[1]))
-                        penalties["zero_trades"] = val
-                        per_asset_metrics.append(val)
-                        included_assets.append(ticker)
-                        per_asset_details[ticker] = {
-                            **stats,
-                            "score": val,
-                            "included": True,
-                            "sortino_capped": sortino_capped,
-                            "profit_factor_capped": pf_capped,
-                            "drawdown_score": drawdown_score,
-                            "penalties": penalties,
-                        }
-                    else:
-                        per_asset_details[ticker] = {
-                            **stats,
-                            "score": None,
-                            "included": False,
-                            "ignored_reason": "insufficient_trades",
-                            "sortino_capped": sortino_capped,
-                            "profit_factor_capped": pf_capped,
-                            "drawdown_score": drawdown_score,
-                            "penalties": penalties or None,
-                        }
-                    continue
-
-                if trades < min_trades:
-                    if zero_policy == "penalize":
-                        val = self.settings.get("zero_trade_penalty", -1.0)
-                        if clip_range is not None:
-                            val = float(np.clip(val, clip_range[0], clip_range[1]))
-                        penalties["zero_trades"] = val
-                        per_asset_metrics.append(val)
-                        included_assets.append(ticker)
-                        per_asset_details[ticker] = {
-                            **stats,
-                            "score": val,
-                            "included": True,
-                            "sortino_capped": sortino_capped,
-                            "profit_factor_capped": pf_capped,
-                            "drawdown_score": drawdown_score,
-                            "penalties": penalties,
-                        }
-                    else:
-                        per_asset_details[ticker] = {
-                            **stats,
-                            "score": None,
-                            "included": False,
-                            "ignored_reason": "insufficient_trades",
-                            "sortino_capped": sortino_capped,
-                            "profit_factor_capped": pf_capped,
-                            "drawdown_score": drawdown_score,
-                            "penalties": penalties or None,
-                        }
-                    continue
+                per_asset_min_trades = self.settings.get("per_asset_min_trades", 1)
+                insufficient = trades < per_asset_min_trades
 
                 metric_type = self.settings.get("metric", "composite")
                 if metric_type == "sortino":
@@ -355,11 +296,12 @@ class MultiAssetFitnessEvaluator:
                     )
 
                 k = self.settings.get("partial_trades_threshold", 1)
+                k = max(k, per_asset_min_trades)
                 s = self.settings.get("partial_trades_exponent", 1.0)
-                trade_scale = None
-                if trades > 0 and k and trades < k:
-                    trade_scale = (trades / k) ** s
-                    val *= trade_scale
+                shrinkage_multiplier = None
+                if k > 0 and trades < k:
+                    shrinkage_multiplier = (trades / k) ** s
+                    val *= shrinkage_multiplier
 
                 c = self.settings.get("tanh_c")
                 if c:
@@ -373,10 +315,11 @@ class MultiAssetFitnessEvaluator:
                     **stats,
                     "score": val,
                     "included": True,
+                    "insufficient": insufficient,
                     "sortino_capped": sortino_capped,
                     "profit_factor_capped": pf_capped,
                     "drawdown_score": drawdown_score,
-                    "trade_scale": trade_scale,
+                    "shrinkage_multiplier": shrinkage_multiplier,
                     "penalties": penalties or None,
                 }
 
