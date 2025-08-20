@@ -136,6 +136,25 @@ def test_weighted_mean_std_deterministic():
     assert np.isclose(F, 0.8775255, atol=1e-6)
 
 
+def test_all_equal_scores_yield_mean():
+    stats = [
+        {"total_return": 2.0, "trades": 5},
+        {"total_return": 2.0, "trades": 5},
+        {"total_return": 2.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 0.5,
+        "min_total_trades": 0,
+        "trade_floor_strength": 0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 2.0)
+    assert np.isclose(ev.last_details["mu"], 2.0)
+    assert np.isclose(ev.last_details["sigma"], 0.0)
+
+
 def test_trade_floor_policies():
     stats = [
         {'total_return': 1.0, 'trades': 5},
@@ -276,6 +295,33 @@ def test_coverage_penalty_kappa_monotonic(kappa):
     }
     ev = _make_evaluator(settings, stats)
     assert np.isclose(ev(None, [], 0), 2/3, atol=1e-6)
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
+
+
+def test_empty_group_returns_poor_score():
+    ev = _make_evaluator({'metric': 'return', 'poor_score': -123.0}, group_data={})
+    score = ev(None, [], 0)
+    assert score == -123.0
+    assert ev.last_details['assets_included'] == 0
+    assert ev.last_details['penalties']['coverage'] is None
+
+
+def test_all_zero_trade_assets_apply_coverage_penalty():
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 0.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'lambda_dispersion': 0.0,
+        'coverage_penalty_kappa': 0.5,
+        'min_total_trades': 0,
+        'trade_floor_strength': 0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 0.0)
     assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
 
 
