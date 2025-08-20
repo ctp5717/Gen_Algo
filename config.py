@@ -194,13 +194,17 @@ MULTI_ASSET = {
     "lambda_dispersion": 0.25,
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
-    # Profit factor cap to avoid outliers
-    "winsorize_pf_cap": 5.0,
+    # Caps for individual metrics to dampen outliers
+    "pf_cap": 5.0,
+    "sortino_cap": 10.0,
+    # Optional non-linear scaling of the composite via ``tanh(x / c)``
+    # Set to a float to enable, or ``None`` to disable
+    "tanh_c": None,
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Clip per-asset scores before aggregation to stabilise statistics
     # Provide [min, max] or set to None to disable
-    "score_clip": [-20, 20],
+    "score_clip": None,
     # Group trade floor configuration
     # Require a slightly larger sample of trades across the entire basket to
     # reduce false positives.  Individual assets are permitted to contribute
