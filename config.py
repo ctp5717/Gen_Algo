@@ -217,6 +217,10 @@ MULTI_ASSET = {
     # Minimal trades to consider an asset as traded. Assets with no trades
     # are ignored unless explicitly penalised.
     "per_asset_min_trades": 1,
+    # Soft scaling for assets with few trades; assets with trades below this
+    # threshold have their scores multiplied by ``(trades/threshold)**power``.
+    "partial_trades_threshold": 1,
+    "partial_trades_exponent": 1.0,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 52,
     # Fitness score returned when the hard floor triggers or an error occurs

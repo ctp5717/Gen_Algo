@@ -442,6 +442,27 @@ def test_per_asset_min_trades_threshold():
     assert np.isclose(ev_ign(None, [], 0), 1.0)
 
 
+def test_low_trade_scaling_and_total_trades_contribution():
+    stats = [
+        {'total_return': 1.0, 'trades': 2},
+        {'total_return': 1.0, 'trades': 4},
+        {'total_return': 1.0, 'trades': 4},
+    ]
+    settings = {
+        'metric': 'return',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+        'trade_floor_strength': 0,
+        'partial_trades_threshold': 4,
+        'partial_trades_exponent': 1.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, (0.5 + 1.0 + 1.0) / 3)
+    assert ev.last_details['total_trades'] == 10
+    assert np.isclose(ev.last_details['per_asset']['A']['score'], 0.5)
+
+
 def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
     stats = [
         {
