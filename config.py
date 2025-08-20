@@ -190,6 +190,9 @@ MULTI_ASSET = {
     "winsorize_pf_cap": 5.0,
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
+    # Clip per-asset scores before aggregation to stabilise statistics
+    # Provide [min, max] or set to None to disable
+    "score_clip": [-20, 20],
     # Group trade floor configuration
     # Require a slightly larger sample of trades across the entire basket to
     # reduce false positives.  Individual assets are permitted to contribute
