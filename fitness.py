@@ -234,6 +234,7 @@ class MultiAssetFitnessEvaluator:
             included_assets = []
             per_asset_details = {}
             total_trades = 0
+            clip_range = self.settings.get("score_clip")
 
             for ticker, ohlc in self.group_data.items():
                 stats = self._evaluate_single_asset(ohlc, rules)
@@ -261,6 +262,8 @@ class MultiAssetFitnessEvaluator:
                 if insufficient:
                     if zero_policy == "penalize" and trades < min_trades:
                         val = self.settings.get("zero_trade_penalty", -1.0)
+                        if clip_range is not None:
+                            val = float(np.clip(val, clip_range[0], clip_range[1]))
                         penalties["zero_trades"] = val
                         per_asset_metrics.append(val)
                         included_assets.append(ticker)
@@ -302,6 +305,9 @@ class MultiAssetFitnessEvaluator:
                             + pf_capped * w["profit_factor"]
                             + drawdown_score * w["max_drawdown"]
                         )
+
+                    if clip_range is not None:
+                        val = float(np.clip(val, clip_range[0], clip_range[1]))
 
                     per_asset_metrics.append(val)
                     included_assets.append(ticker)

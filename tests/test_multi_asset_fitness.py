@@ -574,6 +574,26 @@ def test_lambda_with_unequal_weights():
     assert np.isclose(score, expected)
 
 
+def test_score_clipping_stabilises_mu_sigma():
+    stats = [
+        {"total_return": 1.0, "trades": 5},
+        {"total_return": 2.0, "trades": 5},
+        {"total_return": 1000.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 0.0,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+    }
+    ev = _make_evaluator(settings, stats)
+    ev(None, [], 0)
+    expected_mu, expected_sigma = fitness.weighted_mean_std([1.0, 2.0, 20.0], [1, 1, 1])
+    assert np.isclose(ev.last_details["mu"], expected_mu)
+    assert np.isclose(ev.last_details["sigma"], expected_sigma)
+    assert ev.last_details["per_asset"]["C"]["score"] == 20.0
+
+
 def test_ga_and_tuner_consistency(monkeypatch):
     stats = {
         'total_return': 1.0,
