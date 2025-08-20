@@ -79,26 +79,40 @@ def _evaluate_on_validation(solution, gene_map):
     return -np.inf if np.isnan(score) else score
 
 
-def _make_on_generation(fitness_eval, fitness_func):
-    """Create an ``on_generation`` callback that logs asset extremes."""
+class _GenerationCallback:
+    """Callable helper used as PyGAD's ``on_generation`` callback.
 
-    best = {"fitness": -float("inf")}
+    PyGAD pickles the GA instance when using process-based parallelism.
+    Local functions or closures cannot be pickled which previously caused
+    ``AttributeError: Can't get local object`` during hyperparameter tuning.
+    Defining this helper as a top-level class makes it picklable and allows
+    GA instances to be distributed across worker processes without error.
+    """
 
-    def _cb(ga_instance):
+    def __init__(self, fitness_eval, fitness_func):
+        self.fitness_eval = fitness_eval
+        self.fitness_func = fitness_func
+        self.best_fitness = -float("inf")
+
+    def __call__(self, ga_instance):
         best_sol, fit, _ = ga_instance.best_solution(
             pop_fitness=ga_instance.last_generation_fitness
         )
-        if fit > best["fitness"]:
-            best["fitness"] = fit
+        if fit > self.best_fitness:
+            self.best_fitness = fit
             try:
-                fitness_func(None, best_sol, 0)
+                self.fitness_func(None, best_sol, 0)
                 analysis.log_asset_extremes(
-                    getattr(fitness_eval, "last_details", {})
+                    getattr(self.fitness_eval, "last_details", {})
                 )
             except Exception:
                 pass
 
-    return _cb
+
+def _make_on_generation(fitness_eval, fitness_func):
+    """Return a picklable ``on_generation`` callback for PyGAD."""
+
+    return _GenerationCallback(fitness_eval, fitness_func)
 
 
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
