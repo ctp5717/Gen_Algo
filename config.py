@@ -72,7 +72,7 @@ CRYPTO_UNIVERSE = {
 # group data across multiple tickers. Assets with coverage below this threshold
 # are dropped. Used consistently across training, tuning, analysis and
 # walk-forward phases.
-COVERAGE_THRESHOLD = 0.8
+COVERAGE_THRESHOLD = 0.85
 
 ASSET_GROUP = [
     ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
