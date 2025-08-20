@@ -2,19 +2,22 @@
 
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import pandas as pd
+import json
 import os
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pygad
 import vectorbt as vbt
 from utils import set_global_seed
 
+import analysis
 import config
 import data_loader
+import fitness
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
-import fitness
-import analysis
 from utils import _norm_freq
 
 
@@ -199,6 +202,10 @@ def run_walk_forward(initial_champions=None):
         print("Insufficient data for the requested walk-forward windows.")
         return
 
+    run_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    base_out = Path("reports") / run_ts
+    base_out.mkdir(parents=True, exist_ok=True)
+
     results = []
     champion_pool = list(initial_champions or [])
 
@@ -266,8 +273,35 @@ def run_walk_forward(initial_champions=None):
             print(f"[WalkForward] Validation evaluator: {ev_name} | Objective: {objective}")
             assert objective, "Objective must be defined"
             validation_score = test_eval(None, best_solution, 0)
-            analysis.persist_details(test_eval)
+            analysis.persist_details(
+                test_eval, charts_cfg={"run_ts": run_ts, "sha": f"window_{idx:02d}"}
+            )
             details = test_eval.last_details
+            per_asset = details.get("per_asset") or {}
+            if per_asset:
+                rows = []
+                for t, d in per_asset.items():
+                    rows.append(
+                        {
+                            "Ticker": t,
+                            "Trades": d.get("trades"),
+                            "Score": d.get("score"),
+                            "PF": d.get("profit_factor_capped"),
+                            "Sortino": d.get("sortino_capped"),
+                            "Drawdown": d.get("max_drawdown"),
+                            "Included": d.get("included"),
+                            "Penalties": d.get("penalties"),
+                        }
+                    )
+                df = pd.DataFrame(rows)
+                print("\nPer-Asset Results:")
+                with pd.option_context("display.max_colwidth", None, "display.width", None):
+                    print(df.to_string(index=False))
+                window_dir = base_out / f"window_{idx:02d}"
+                window_dir.mkdir(parents=True, exist_ok=True)
+                with open(window_dir / "details.json", "w") as f:
+                    json.dump(details, f, default=str)
+                df.to_csv(window_dir / "details.csv", index=False)
             cov_pen = details.get('penalties', {}).get('coverage')
             cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
             mu = details.get('mu')
