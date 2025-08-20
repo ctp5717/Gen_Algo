@@ -389,11 +389,11 @@ class MultiAssetFitnessEvaluator:
 
                 if (
                     self.settings.get("zero_trade_policy") == "ignore"
-                    and self.settings.get("coverage_penalty_weight") is not None
+                    and self.settings.get("coverage_penalty_kappa") is not None
                 ):
-                    weight = self.settings.get("coverage_penalty_weight")
+                    kappa = self.settings.get("coverage_penalty_kappa")
                     coverage = len(included_assets) / max(1, len(self.group_data))
-                    coverage_penalty = weight * (1 - coverage)
+                    coverage_penalty = kappa * (1 - coverage)
                     F -= coverage_penalty
 
             # store diagnostics for optional inspection

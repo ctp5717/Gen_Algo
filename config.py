@@ -202,7 +202,7 @@ MULTI_ASSET = {
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
-    "coverage_penalty_weight": 0.3,
+    "coverage_penalty_kappa": 0.3,
     # Minimal trades to consider an asset as traded. Assets with no trades
     # are ignored unless explicitly penalised.
     "per_asset_min_trades": 1,
