@@ -181,6 +181,10 @@ FITNESS_WEIGHTS = {
     "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 0
 }
 
+# Global caps for key metrics to dampen extreme values
+PF_CAP = 5.0
+SORTINO_CAP = 10.0
+
 # --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
 # These options control the behaviour of the multi-asset fitness evaluator.  By
 # default the framework behaves exactly as before (single asset) until
@@ -195,8 +199,8 @@ MULTI_ASSET = {
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
     # Caps for individual metrics to dampen outliers
-    "pf_cap": 5.0,
-    "sortino_cap": 10.0,
+    "pf_cap": PF_CAP,
+    "sortino_cap": SORTINO_CAP,
     # Optional non-linear scaling of the composite via ``tanh(x / c)``
     # Set to a float to enable, or ``None`` to disable
     "tanh_c": None,
