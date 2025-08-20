@@ -322,24 +322,15 @@ class MultiAssetFitnessEvaluator:
 
             if not per_asset_metrics:
                 poor = self.settings.get("poor_score", -999.0)
-                min_trades = self.settings.get("min_total_trades", 0)
-                policy = self.settings.get("trade_floor_policy", "hard_floor")
+                trade_floor = self.settings.get("min_total_trades", 0)
+                floor_ratio = total_trades / max(1, trade_floor)
                 trade_penalty = None
-                F = poor
-                if total_trades < min_trades:
-                    if policy == "hard_floor":
-                        trade_penalty = "hard_floor"
-                    elif policy == "soft_penalty":
-                        mode = self.settings.get("soft_penalty_mode", "multiplicative")
-                        strength = self.settings.get("soft_penalty_strength", 1.0)
-                        if mode == "additive":
-                            penalty = strength * (1 - total_trades / max(1, min_trades))
-                            F -= penalty
-                            trade_penalty = {"mode": "additive", "penalty": penalty}
-                        else:
-                            scale = (total_trades / max(1, min_trades)) ** strength
-                            F *= scale
-                            trade_penalty = {"mode": "multiplicative", "scale": scale}
+                mode = self.settings.get("mode")
+                if mode == "walk_forward" and total_trades < trade_floor:
+                    F = poor
+                    trade_penalty = "hard_floor"
+                else:
+                    F = poor
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": None,
@@ -348,7 +339,7 @@ class MultiAssetFitnessEvaluator:
                     "total_trades": total_trades,
                     "assets_included": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {"trade_floor": trade_penalty, "coverage": None},
+                    "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": None},
                     "fitness": F,
                 }
                 return F
@@ -369,38 +360,28 @@ class MultiAssetFitnessEvaluator:
             lam = self.settings.get("lambda_dispersion", 0.0)
             F = mu - lam * sigma
 
-            min_trades = self.settings.get("min_total_trades", 0)
-            policy = self.settings.get("trade_floor_policy", "hard_floor")
+            # Coverage penalty is computed regardless of trade floor policy
+            coverage_penalty = 0.0
+            if (
+                self.settings.get("zero_trade_policy") == "ignore"
+                and self.settings.get("coverage_penalty_kappa") is not None
+            ):
+                kappa = self.settings.get("coverage_penalty_kappa")
+                coverage = len(included_assets) / max(1, len(self.group_data))
+                coverage_penalty = kappa * (1 - coverage)
+                F -= coverage_penalty
+
+            trade_floor = self.settings.get("min_total_trades", 0)
+            floor_ratio = total_trades / max(1, trade_floor)
+            strength = self.settings.get("trade_floor_strength", 1.0)
+            F *= floor_ratio ** strength
+
             poor_score = self.settings.get("poor_score", -999.0)
             trade_penalty = None
-            coverage_penalty = 0.0
-
-            if policy == "hard_floor" and total_trades < min_trades:
+            mode = self.settings.get("mode")
+            if mode == "walk_forward" and total_trades < trade_floor:
                 F = poor_score
                 trade_penalty = "hard_floor"
-            else:
-                if policy == "soft_penalty" and total_trades < min_trades:
-                    mode = self.settings.get("soft_penalty_mode", "multiplicative")
-                    strength = self.settings.get("soft_penalty_strength", 1.0)
-                    if mode == "additive":
-                        penalty = strength * (
-                            1 - total_trades / max(1, min_trades)
-                        )
-                        F -= penalty
-                        trade_penalty = {"mode": "additive", "penalty": penalty}
-                    else:
-                        scale = (total_trades / max(1, min_trades)) ** strength
-                        F *= scale
-                        trade_penalty = {"mode": "multiplicative", "scale": scale}
-
-                if (
-                    self.settings.get("zero_trade_policy") == "ignore"
-                    and self.settings.get("coverage_penalty_kappa") is not None
-                ):
-                    kappa = self.settings.get("coverage_penalty_kappa")
-                    coverage = len(included_assets) / max(1, len(self.group_data))
-                    coverage_penalty = kappa * (1 - coverage)
-                    F -= coverage_penalty
 
             # store diagnostics for optional inspection
             self.last_details = {
@@ -413,6 +394,7 @@ class MultiAssetFitnessEvaluator:
                 "assets_ignored": len(self.group_data) - len(included_assets),
                 "penalties": {
                     "trade_floor": trade_penalty,
+                    "floor_ratio": floor_ratio,
                     "coverage": coverage_penalty,
                 },
                 "fitness": F,
