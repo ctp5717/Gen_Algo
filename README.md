@@ -16,7 +16,7 @@ The core philosophy is a modular, "batteries-included" design that separates the
   * **Robust Backtesting:** Utilizes the `vectorbt` library for high-speed, vectorized backtesting.
   * **Advanced Risk Management:** Includes optimizable stop-loss, take-profit, trailing stop loss, and a static max hold period.
   * **Composite Fitness Function:** The GA optimizes for a blended score of multiple metrics (Sortino Ratio, Profit Factor, Max Drawdown) to find more balanced strategies.
-  * **Multi-Asset Fitness with Robustness Penalty:** Evaluate strategies across a group of assets using the weighted mean minus λ·standard deviation of per-asset scores with a configurable trade floor.
+  * **Multi-Asset Fitness with Robustness Penalty:** Evaluate strategies across a group of assets using the weighted mean minus λ·standard deviation of per-asset scores with a configurable, dynamically-adjusted trade floor.
   * **Automated Validation:** After optimization, the "champion" strategy is automatically tested on a separate, unseen out-of-sample dataset.
   * **Progress Tracking:** A live progress bar provides real-time feedback during optimization runs.
 
@@ -37,7 +37,7 @@ This is the single most important file for the user. It is the central "control 
       as days converted into bars based on the selected `TIMEFRAME`.
     * **GA Tuning:** Holds all parameters for the Genetic Algorithm (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, etc.).
     * **Fitness Criteria:** Defines the `FITNESS_WEIGHTS` for the composite score, telling the AI what characteristics of a "good" strategy to prioritize.
-    * **Multi-Asset Settings:** The `MULTI_ASSET` block controls group evaluation including asset weights, dispersion penalty `lambda_dispersion`, trade-floor policies, zero-trade handling and per-asset trade requirements. A global `COVERAGE_THRESHOLD` setting decides how much historical data an asset must have to be included, and the `poor_score` value defines the sentinel fitness used when the trade floor fails.
+    * **Multi-Asset Settings:** The `MULTI_ASSET` block controls group evaluation including asset weights, dispersion penalty `lambda_dispersion`, trade-floor policies, zero-trade handling and per-asset trade requirements. It now also supports a dynamic trade floor that tracks recent generations' total trades and clamps the median within `[min_total_trades, max_total_trades]`. A global `COVERAGE_THRESHOLD` setting decides how much historical data an asset must have to be included, and the `poor_score` value defines the sentinel fitness used when the trade floor fails.
 
 ---
 ### `data_loader.py` - The Data Handler

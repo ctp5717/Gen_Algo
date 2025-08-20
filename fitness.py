@@ -6,6 +6,8 @@ Fitness Function for Genetic Algorithm
 """
 import copy
 import math
+from collections import deque
+
 import pandas as pd
 import numpy as np
 import vectorbt as vbt
@@ -157,6 +159,16 @@ class MultiAssetFitnessEvaluator:
         self.settings = copy.deepcopy(defaults)
         if settings:
             self.settings.update(settings)
+        # Store original floor and trade history settings for dynamic scaling
+        self._base_min_total_trades = self.settings.get("min_total_trades", 0)
+        self._max_total_trades = self.settings.get("max_total_trades")
+        window = self.settings.get("trade_floor_window", 5)
+        try:
+            self._recent_totals: deque[int] = deque(maxlen=int(window) if window else 0)
+        except Exception:
+            self._recent_totals = deque(maxlen=0)
+        self._current_generation = None
+        self._current_gen_scores: list[tuple[float, int]] = []
         rate = self.settings.get("min_total_trades_per_year")
         if rate:
             try:
@@ -228,6 +240,27 @@ class MultiAssetFitnessEvaluator:
     # ------------------------------------------------------------------
     def __call__(self, ga_instance, solution, sol_idx):
         try:
+            # Detect generation boundaries and update the dynamic trade floor
+            gen = getattr(ga_instance, "generations_completed", self._current_generation)
+            if self._current_generation is None:
+                self._current_generation = gen
+            elif gen != self._current_generation:
+                if self._current_gen_scores:
+                    best_trades = max(self._current_gen_scores, key=lambda x: x[0])[1]
+                    if self._recent_totals.maxlen:
+                        self._recent_totals.append(best_trades)
+                if self._recent_totals:
+                    arr = np.array(self._recent_totals, dtype=float)
+                    lo, hi = np.percentile(arr, [40, 60])
+                    mid = arr[(arr >= lo) & (arr <= hi)]
+                    candidate = np.median(mid) if mid.size else np.median(arr)
+                    candidate = max(self._base_min_total_trades, candidate)
+                    if self._max_total_trades is not None:
+                        candidate = min(candidate, self._max_total_trades)
+                    self.settings["min_total_trades"] = int(round(candidate))
+                self._current_gen_scores.clear()
+                self._current_generation = gen
+
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
 
             per_asset_metrics = []
@@ -345,6 +378,7 @@ class MultiAssetFitnessEvaluator:
                     "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": None},
                     "fitness": F,
                 }
+                self._current_gen_scores.append((F, total_trades))
                 return F
 
             # Determine weights for included assets and renormalise
@@ -402,7 +436,7 @@ class MultiAssetFitnessEvaluator:
                 },
                 "fitness": F,
             }
-
+            self._current_gen_scores.append((F, total_trades))
             return F
 
         except Exception as e:

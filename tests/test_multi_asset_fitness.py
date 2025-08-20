@@ -317,6 +317,38 @@ def test_weight_renormalization_multiple_exclusions():
     assert ev.last_details['assets_included'] == 3
 
 
+def test_dynamic_trade_floor_tracks_recent_generations():
+    stats = [
+        {"total_return": 1.0, "trades": 10},  # gen0 sol1
+        {"total_return": 2.0, "trades": 20},  # gen0 sol2 (best)
+        {"total_return": 1.0, "trades": 30},  # gen1 sol1
+        {"total_return": 1.0, "trades": 5},   # gen2 sol1
+    ]
+    settings = {
+        "metric": "return",
+        "min_total_trades": 5,
+        "max_total_trades": 25,
+        "trade_floor_strength": 0,
+        "trade_floor_window": 5,
+    }
+    ev = _make_evaluator(settings, stats, {"A": pd.DataFrame({"Close": [1, 2, 3]})})
+
+    class GA:
+        def __init__(self):
+            self.generations_completed = 0
+
+    ga = GA()
+    ev(ga, [], 0)  # gen0 sol1
+    ev(ga, [], 0)  # gen0 sol2
+    ga.generations_completed = 1
+    ev(ga, [], 0)  # triggers floor update from gen0 -> 20
+    assert ev.settings["min_total_trades"] == 20
+    ga.generations_completed = 2
+    ev(ga, [], 0)  # triggers floor update from gen1 -> median([20,30])=25 but clamp to max 25
+    assert ev.settings["min_total_trades"] == 25
+    assert list(ev._recent_totals) == [20, 30]
+
+
 def test_floor_strength_scaling():
     stats = [
         {'total_return': 1.0, 'trades': 5},
