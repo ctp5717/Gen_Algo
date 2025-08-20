@@ -7,6 +7,8 @@ Fitness Function for Genetic Algorithm
 import copy
 import math
 from collections import deque
+import hashlib
+import json
 
 import pandas as pd
 import numpy as np
@@ -14,6 +16,15 @@ import vectorbt as vbt
 import strategy_engine as engine
 import config
 from utils import _norm_freq
+
+
+_EVAL_CACHE: dict[tuple[str, str], dict] = {}
+
+
+def _hash_rules(rules: dict) -> str:
+    """Create a stable hash for a nested rules dictionary."""
+    dumped = json.dumps(rules, sort_keys=True, default=str)
+    return hashlib.sha256(dumped.encode()).hexdigest()
 
 
 def weighted_mean_std(values, weights):
@@ -268,6 +279,7 @@ class MultiAssetFitnessEvaluator:
                 self._current_generation = gen
 
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
+            rules_hash = _hash_rules(rules)
 
             per_asset_metrics = []
             included_assets = []
@@ -276,7 +288,11 @@ class MultiAssetFitnessEvaluator:
             clip_range = self.settings.get("score_clip")
 
             for ticker, ohlc in self.group_data.items():
-                stats = self._evaluate_single_asset(ohlc, rules)
+                cache_key = (ticker, rules_hash)
+                stats = _EVAL_CACHE.get(cache_key)
+                if stats is None:
+                    stats = self._evaluate_single_asset(ohlc, rules)
+                    _EVAL_CACHE[cache_key] = stats
                 trades = stats.get("trades", 0)
                 total_trades += trades
 
