@@ -79,6 +79,28 @@ def _evaluate_on_validation(solution, gene_map):
     return -np.inf if np.isnan(score) else score
 
 
+def _make_on_generation(fitness_eval, fitness_func):
+    """Create an ``on_generation`` callback that logs asset extremes."""
+
+    best = {"fitness": -float("inf")}
+
+    def _cb(ga_instance):
+        best_sol, fit, _ = ga_instance.best_solution(
+            pop_fitness=ga_instance.last_generation_fitness
+        )
+        if fit > best["fitness"]:
+            best["fitness"] = fit
+            try:
+                fitness_func(None, best_sol, 0)
+                analysis.log_asset_extremes(
+                    getattr(fitness_eval, "last_details", {})
+                )
+            except Exception:
+                pass
+
+    return _cb
+
+
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
@@ -112,6 +134,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
             random_seed=seed,
+            on_generation=_make_on_generation(fitness_evaluator, fitness_func),
         )
         ga.run()
         analysis.persist_details(fitness_evaluator)
