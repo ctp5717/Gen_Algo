@@ -6,6 +6,7 @@ Analysis & Reporting Module
 """
 
 import json
+import csv
 import vectorbt as vbt
 import config
 import data_loader
@@ -56,8 +57,11 @@ def persist_details(fitness_evaluator, charts_cfg=None):
     return out_path
 
 
-def log_asset_extremes(details: dict | None):
-    """Print top and bottom three assets with key metrics.
+def log_asset_extremes(details: dict | None, save_path: str | Path | None = None, quiet: bool = False):
+    """Log top and bottom three assets with key metrics.
+
+    When ``save_path`` is provided the results are appended to that
+    JSON/CSV file. Output is printed to stdout unless ``quiet`` is True.
 
     Parameters
     ----------
@@ -65,6 +69,10 @@ def log_asset_extremes(details: dict | None):
         The ``last_details`` structure produced by
         :class:`MultiAssetFitnessEvaluator`. If missing or empty the
         function quietly returns.
+    save_path : str or Path, optional
+        Location of a JSON or CSV file to append the extremes to.
+    quiet : bool, default False
+        If True suppress printing to stdout.
     """
 
     if not details:
@@ -90,7 +98,8 @@ def log_asset_extremes(details: dict | None):
         )
 
     if not scored:
-        print("No assets were scored in this evaluation.")
+        if not quiet:
+            print("No assets were scored in this evaluation.")
         return
 
     scored.sort(key=lambda x: x[1])
@@ -100,16 +109,82 @@ def log_asset_extremes(details: dict | None):
     def fmt(x):
         return f"{x:.2f}" if isinstance(x, (int, float)) else "nan"
 
-    print("Top assets:")
-    for t, _, pf, srt, dd, tr in top:
-        print(
-            f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
-        )
-    print("Bottom assets:")
-    for t, _, pf, srt, dd, tr in bottom:
-        print(
-            f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
-        )
+    if not quiet:
+        print("Top assets:")
+        for t, _, pf, srt, dd, tr in top:
+            print(
+                f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
+            )
+        print("Bottom assets:")
+        for t, _, pf, srt, dd, tr in bottom:
+            print(
+                f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
+            )
+
+    if save_path:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        entry = {
+            "top": [
+                {
+                    "ticker": t,
+                    "score": sc,
+                    "profit_factor": pf,
+                    "sortino": srt,
+                    "max_drawdown": dd,
+                    "trades": tr,
+                }
+                for t, sc, pf, srt, dd, tr in top
+            ],
+            "bottom": [
+                {
+                    "ticker": t,
+                    "score": sc,
+                    "profit_factor": pf,
+                    "sortino": srt,
+                    "max_drawdown": dd,
+                    "trades": tr,
+                }
+                for t, sc, pf, srt, dd, tr in bottom
+            ],
+        }
+
+        if save_path.suffix.lower() == ".json":
+            existing = []
+            if save_path.exists():
+                try:
+                    with open(save_path, "r") as f:
+                        existing = json.load(f)
+                except Exception:
+                    existing = []
+            existing.append(entry)
+            with open(save_path, "w") as f:
+                json.dump(existing, f, default=str)
+        elif save_path.suffix.lower() == ".csv":
+            rows = []
+            for idx, row in enumerate(entry["top"], 1):
+                rows.append({"group": "top", "rank": idx, **row})
+            for idx, row in enumerate(entry["bottom"], 1):
+                rows.append({"group": "bottom", "rank": idx, **row})
+
+            header = [
+                "group",
+                "rank",
+                "ticker",
+                "score",
+                "profit_factor",
+                "sortino",
+                "max_drawdown",
+                "trades",
+            ]
+            file_exists = save_path.exists() and save_path.stat().st_size > 0
+            with open(save_path, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=header)
+                if not file_exists:
+                    writer.writeheader()
+                for r in rows:
+                    writer.writerow(r)
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
