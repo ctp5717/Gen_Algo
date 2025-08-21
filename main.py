@@ -19,6 +19,8 @@ import data_loader
 import fitness
 import analysis
 from gene_parser import parse_genes_from_config  # now defined in its own module
+from datetime import datetime
+from pathlib import Path
 
 
 # --- NEW: Callback function for progress tracking and logging ---
@@ -68,9 +70,15 @@ def on_generation(ga_instance):
         _best_fitness_seen = fitness
         try:
             _fitness_func_ref(None, best_solution, 0)
-            analysis.log_asset_extremes(
-                getattr(_fitness_eval_ref, "last_details", {})
-            )
+            details = getattr(_fitness_eval_ref, "last_details", {})
+            if details:
+                charts_cfg = getattr(config, "CHARTS", {})
+                run_ts = charts_cfg.get("run_ts")
+                if not run_ts:
+                    run_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    charts_cfg["run_ts"] = run_ts
+                out_path = Path("reports") / run_ts / "opt_extremes.json"
+                analysis.log_asset_extremes(details, save_path=out_path, quiet=True)
         except Exception:
             pass
 
@@ -166,6 +174,7 @@ def main():
     )
 
     ga_instance.run()
+    analysis.log_asset_extremes(fitness_evaluator.last_details)
     analysis.persist_details(fitness_evaluator)
 
     # Print a newline character to move off the progress line.
