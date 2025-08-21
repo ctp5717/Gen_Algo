@@ -57,6 +57,33 @@ def persist_details(fitness_evaluator, charts_cfg=None):
     return out_path
 
 
+def asset_extremes_path(phase: str, run_ts: str | None = None) -> Path:
+    """Return the save path for asset extremes within ``reports``.
+
+    Parameters
+    ----------
+    phase : str
+        Name of the execution phase (e.g. ``"tuning"``, ``"optimize"``,
+        ``"walk-forward"``).
+    run_ts : str, optional
+        Timestamp identifier for the run. When omitted the function will
+        reuse ``config.CHARTS['run_ts']`` if available or create a new
+        timestamp and store it back to that config.
+
+    Returns
+    -------
+    Path
+        Path pointing to ``reports/<run_ts>/asset_extremes/<phase>.json``.
+    """
+
+    charts_cfg = getattr(config, "CHARTS", {})
+    run_ts = run_ts or charts_cfg.get("run_ts")
+    if not run_ts:
+        run_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    charts_cfg["run_ts"] = run_ts
+    return Path("reports") / run_ts / "asset_extremes" / f"{phase}.json"
+
+
 def log_asset_extremes(details: dict | None, save_path: str | Path | None = None, quiet: bool = False):
     """Log top and bottom three assets with key metrics.
 
