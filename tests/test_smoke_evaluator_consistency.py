@@ -54,7 +54,11 @@ def test_tuner_and_ga_consistency(monkeypatch):
     evaluator = fitness.FitnessEvaluator(df, {}, gene_map)
     ga_score = evaluator(None, solution, 0)
 
-    monkeypatch.setattr(tuner.data_loader, 'get_data', lambda **kwargs: df)
+    monkeypatch.setattr(
+        tuner.data_loader,
+        'get_data',
+        lambda *a, **k: (df, 'cache') if k.get('return_source') else df,
+    )
     monkeypatch.setattr(tuner.config, 'TICKER', 'T', raising=False)
     monkeypatch.setattr(
         tuner.config,

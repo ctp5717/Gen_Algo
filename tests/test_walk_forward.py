@@ -88,7 +88,11 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
-    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "get_data",
+        lambda *a, **k: (df, 'cache') if k.get('return_source') else df,
+    )
 
     monkeypatch.setattr(
         walk_forward,
@@ -155,7 +159,11 @@ def test_walk_forward_returns_summary(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
-    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: df)
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "get_data",
+        lambda *a, **k: (df, 'cache') if k.get('return_source') else df,
+    )
     monkeypatch.setattr(
         walk_forward,
         "_generate_periods",

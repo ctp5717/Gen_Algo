@@ -105,6 +105,9 @@ def test_no_assets_traded_sets_default_details(monkeypatch):
         raising=False,
     )
 
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'min_total_trades', 0)
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'poor_score', 0.0)
+
     evaluator = fitness.MultiAssetFitnessEvaluator({'A': df}, {}, {}, {})
     score = evaluator(None, [], 0)
     assert score == 0.0
@@ -178,6 +181,7 @@ def test_trade_floor_policies():
         'metric': 'return',
         'min_total_trades': 30,
         'trade_floor_strength': 1.0,
+        'mode': None,
     }
     ev_soft = _make_evaluator(settings_soft, stats)
     assert np.isclose(ev_soft(None, [], 0), 0.5)
@@ -450,6 +454,7 @@ def test_floor_strength_scaling():
         'metric': 'return',
         'trade_floor_strength': 2.0,
         'min_total_trades': 30,
+        'mode': None,
     }
     ev = _make_evaluator(settings, stats)
     # Mean = 1.0, total trades = 15 -> floor_ratio=0.5 -> fitness=0.25
@@ -468,6 +473,7 @@ def test_floor_strength_with_zero_trades():
         'trade_floor_strength': 2.0,
         'min_total_trades': 20,
         'lambda_dispersion': 0.0,
+        'mode': None,
     }
     ev = _make_evaluator(settings, stats)
     # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=2/3 => fitness≈0.1667
@@ -518,6 +524,8 @@ def test_per_asset_min_trades_threshold():
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'trade_floor_strength': 0,
+        'mode': None,
+        'partial_trades_threshold': 3,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)

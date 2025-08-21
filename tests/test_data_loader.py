@@ -35,3 +35,56 @@ def test_get_data_uses_cache(monkeypatch):
     result = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
 
     pd.testing.assert_frame_equal(result, df)
+
+
+def test_get_data_return_source(monkeypatch):
+    df = pd.DataFrame({'Close': [1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    monkeypatch.setattr(data_loader.os.path, 'exists', lambda path: True)
+    monkeypatch.setattr(data_loader.pd, 'read_csv', lambda *a, **k: df)
+    monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance')
+
+    data, source = data_loader.get_data(
+        'TEST', '2020-01-01', '2020-01-02', return_source=True
+    )
+
+    assert source == 'cache'
+    pd.testing.assert_frame_equal(data, df)
+
+
+def test_get_data_verbose_false_suppresses_output(monkeypatch, capsys):
+    df = pd.DataFrame({'Close': [1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    monkeypatch.setattr(data_loader.os.path, 'exists', lambda path: False)
+    monkeypatch.setattr(data_loader.os, 'makedirs', lambda *a, **k: None)
+    monkeypatch.setattr(data_loader.pd.DataFrame, 'to_csv', lambda self, *a, **k: None)
+    monkeypatch.setattr(data_loader.yf, 'download', lambda *a, **k: df)
+    monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance')
+
+    data_loader.get_data(
+        'TEST', '2020-01-01', '2020-01-02', verbose=False
+    )
+
+    out = capsys.readouterr().out
+    assert out == ''
+
+
+def test_get_group_data_summary(monkeypatch, capsys):
+    data_loader._group_load_count = 0
+    df = pd.DataFrame({'Close': [1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    def fake_get_data(*args, **kwargs):
+        return df, 'cache'
+
+    monkeypatch.setattr(data_loader, 'get_data', fake_get_data)
+
+    assets = [('A', 'A'), ('B', 'B')]
+
+    data_loader.get_group_data(assets, '2020-01-01', '2020-01-02', '1d')
+    capsys.readouterr()  # clear output from first call
+    data_loader.get_group_data(assets, '2020-01-01', '2020-01-02', '1d')
+    out = capsys.readouterr().out
+
+    assert 'Loading asset data for 2 assets (2020-01-01–2020-01-02) from cache' in out
+    assert 'A:' not in out
+    assert 'B:' not in out
