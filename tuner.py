@@ -1,6 +1,4 @@
 import os
-from datetime import datetime
-from pathlib import Path
 import numpy as np
 import pygad
 import vectorbt as vbt
@@ -107,12 +105,7 @@ def _on_generation_cb(ga_instance):
             _on_gen_func(None, best_sol, 0)
             details = getattr(_on_gen_eval, "last_details", {})
             if details:
-                charts_cfg = getattr(config, "CHARTS", {})
-                run_ts = charts_cfg.get("run_ts")
-                if not run_ts:
-                    run_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                    charts_cfg["run_ts"] = run_ts
-                out_path = Path("reports") / run_ts / "tune_extremes.json"
+                out_path = analysis.asset_extremes_path("tuning")
                 analysis.log_asset_extremes(
                     details,
                     save_path=out_path,
@@ -173,7 +166,10 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             on_generation=_make_on_generation(fitness_evaluator, fitness_func),
         )
         ga.run()
-        analysis.log_asset_extremes(getattr(fitness_evaluator, "last_details", None))
+        analysis.log_asset_extremes(
+            getattr(fitness_evaluator, "last_details", None),
+            save_path=analysis.asset_extremes_path("tuning"),
+        )
         analysis.persist_details(fitness_evaluator)
         best_solution, _, _ = ga.best_solution()
         score = _evaluate_on_validation(best_solution, gene_map)

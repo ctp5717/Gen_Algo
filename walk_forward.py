@@ -139,7 +139,7 @@ def _make_on_generation(fitness_eval, fitness_func, run_ts=None):
     _wf_on_gen_eval = fitness_eval
     _wf_on_gen_func = fitness_func
     if run_ts is not None:
-        _wf_on_gen_extremes_path = Path("reports") / run_ts / "wf_extremes.json"
+        _wf_on_gen_extremes_path = analysis.asset_extremes_path("walk-forward", run_ts)
     else:
         _wf_on_gen_extremes_path = None
     return _wf_on_generation_cb
@@ -478,7 +478,10 @@ def run_walk_forward(initial_champions=None):
         })
 
     if final_evaluator is not None:
-        analysis.log_asset_extremes(getattr(final_evaluator, "last_details", None))
+        analysis.log_asset_extremes(
+            getattr(final_evaluator, "last_details", None),
+            save_path=analysis.asset_extremes_path("walk-forward", run_ts),
+        )
 
     if not results:
         print("\nNo walk-forward runs produced trades.")
