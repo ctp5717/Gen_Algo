@@ -219,6 +219,8 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
         * *This is an upgrade to the `strategy_engine.py` to handle more complex ways of combining indicator signals. Currently, our engine can only combine entry rules with a logical `AND`. This feature will add support for **`OR`** logic (e.g., "enter if EMA is bullish OR RSI is oversold") and **`VOTE`** systems (e.g., "enter if at least 3 out of 5 conditions are true"), dramatically increasing the strategic flexibility of the framework.*
     * **Complete Indicator Library:** (Planned)
         * *This is the process of building out the remaining functions in `indicator_library.py` to include all 25 indicators we originally planned. This gives the AI the widest possible set of tools to build strategies with, increasing the potential for discovering novel patterns.*
+    * **Advanced Tuning Phase:** (Planned)
+        * *Convert the initial hyper-parameter tune and optimization phase into a process that optimizaes solutions, parents mating, gene mutation, and lambda dispersion, to end up with a system that starts with optimizing the space, then optimizes the strategy.*
 
 ---
 #### **V3.0: Advanced Framework & Future Vision**
