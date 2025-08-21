@@ -83,7 +83,7 @@ ASSET_GROUP = [
     ("Avalanche", CRYPTO_UNIVERSE["Avalanche"]),
     ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
     ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
-    ("TRON", CRYPTO_UNIVERSE["TRON"]),
+    ("Near_Protocol", CRYPTO_UNIVERSE["Near_Protocol"]),
     ("Dai", CRYPTO_UNIVERSE["Dai"]),
 ]
 
@@ -168,14 +168,18 @@ GA_MUTATION_NUM_GENES = 1
 
 # --- AUTO-TUNER SETTINGS ---
 AUTO_TUNE_ENABLED = True
-GENERATIONS_PER_TUNE = 10
+GENERATIONS_PER_TUNE = 5
 HYPERPARAMETER_SEARCH_SPACE = [
+    {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1, "lambda_dispersion": 0},
     {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1, "lambda_dispersion": 0.25},
     {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1, "lambda_dispersion": 0.5},
+    {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2, "lambda_dispersion": 0},
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2, "lambda_dispersion": 0.25},
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2, "lambda_dispersion": 0.5},
+    {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3, "lambda_dispersion": 0},
     {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3, "lambda_dispersion": 0.25},
     {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3, "lambda_dispersion": 0.5},
+    {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4, "lambda_dispersion": 0},
     {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4, "lambda_dispersion": 0.25},
     {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4, "lambda_dispersion": 0.5},
 ]
@@ -222,21 +226,21 @@ MULTI_ASSET = {
     "trade_floor_window": 5,
     "trade_floor_policy": "hard_floor",  # retained for backwards compatibility
     "trade_floor_strength": 1.0,
-    "mode": None,
+    "mode": "walk_forward",
     # How to handle assets with zero trades
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
-    "coverage_penalty_kappa": 0.3,
+    "coverage_penalty_kappa": 0.5,
     # Minimal trades to consider an asset as traded. Assets with no trades
     # are ignored unless explicitly penalised.
     "per_asset_min_trades": 1,
     # Soft scaling for assets with few trades; assets with trades below this
     # threshold have their scores multiplied by ``(trades/threshold)**power``.
-    "partial_trades_threshold": 1,
+    "partial_trades_threshold": 5,
     "partial_trades_exponent": 1.0,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 52,
+    "min_total_trades_per_year": 24,
     # Fitness score returned when the hard floor triggers or an error occurs
     "poor_score": -999.0,
 }
@@ -300,7 +304,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'indicator_crosses_above_value', 'value': 0}
             },
             {
-                'is_active': True,
+                'is_active': False,
                 'rule_name': 'Bollinger_Band_Breakout',
                 'indicator': 'bbands',
                 'params': {
