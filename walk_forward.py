@@ -100,6 +100,7 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
 _wf_on_gen_best: dict | None = None
 _wf_on_gen_eval = None
 _wf_on_gen_func = None
+_wf_on_gen_extremes_path = None
 
 
 def _wf_on_generation_cb(ga_instance):
@@ -120,20 +121,27 @@ def _wf_on_generation_cb(ga_instance):
         _wf_on_gen_best["fitness"] = fit
         try:
             _wf_on_gen_func(None, best_sol, 0)
-            analysis.log_asset_extremes(
-                getattr(_wf_on_gen_eval, "last_details", {})
-            )
+            if _wf_on_gen_extremes_path:
+                analysis.log_asset_extremes(
+                    getattr(_wf_on_gen_eval, "last_details", {}),
+                    save_path=_wf_on_gen_extremes_path,
+                    quiet=True,
+                )
         except Exception:
             pass
 
 
-def _make_on_generation(fitness_eval, fitness_func):
+def _make_on_generation(fitness_eval, fitness_func, run_ts=None):
     """Return a picklable ``on_generation`` callback that logs asset extremes."""
 
-    global _wf_on_gen_best, _wf_on_gen_eval, _wf_on_gen_func
+    global _wf_on_gen_best, _wf_on_gen_eval, _wf_on_gen_func, _wf_on_gen_extremes_path
     _wf_on_gen_best = {"fitness": -float("inf")}
     _wf_on_gen_eval = fitness_eval
     _wf_on_gen_func = fitness_func
+    if run_ts is not None:
+        _wf_on_gen_extremes_path = Path("reports") / run_ts / "wf_extremes.json"
+    else:
+        _wf_on_gen_extremes_path = None
     return _wf_on_generation_cb
 
 
@@ -208,6 +216,7 @@ def run_walk_forward(initial_champions=None):
 
     results = []
     champion_pool = list(initial_champions or [])
+    final_evaluator = None
 
     for idx, p in enumerate(periods, start=1):
         print(f"\n--- Window {idx} ---")
@@ -244,7 +253,7 @@ def run_walk_forward(initial_champions=None):
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
             random_seed=seed,
-            on_generation=_make_on_generation(evaluator, evaluator.__call__),
+            on_generation=_make_on_generation(evaluator, evaluator.__call__, run_ts),
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
@@ -347,7 +356,7 @@ def run_walk_forward(initial_champions=None):
                 else:
                     reason = "unspecified reason"
                 print(f"Fitness equals poor_score ({poor}) due to {reason}.")
-            analysis.log_asset_extremes(details)
+            final_evaluator = test_eval
             for t, d in details.get('per_asset', {}).items():
                 if d.get('included'):
                     inclusion_counts[t] += 1
@@ -453,6 +462,7 @@ def run_walk_forward(initial_champions=None):
         champion_pool = _update_champion_pool(
             champion_pool, best_solution, validation_score, gene_space, champion_settings
         )
+        final_evaluator = val_evaluator
 
         total_trades = int(entries.sum())
         results.append({
@@ -466,6 +476,9 @@ def run_walk_forward(initial_champions=None):
             'Win Rate [%]': win_rate,
             'Params': winning_params,
         })
+
+    if final_evaluator is not None:
+        analysis.log_asset_extremes(getattr(final_evaluator, "last_details", None))
 
     if not results:
         print("\nNo walk-forward runs produced trades.")
