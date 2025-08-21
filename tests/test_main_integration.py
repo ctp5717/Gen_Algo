@@ -28,7 +28,11 @@ def test_main_runs(monkeypatch):
     )
 
     # Patch data loader to avoid network requests
-    monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(
+        main.data_loader,
+        'get_data',
+        lambda *a, **k: (df, 'cache') if k.get('return_source') else df,
+    )
 
     # Patch gene parser to return a single gene definition
     gene_space = [{'low': 0, 'high': 1}]
@@ -102,7 +106,11 @@ def test_main_uses_tuner(monkeypatch):
         index=pd.date_range('2020-01-01', periods=2)
     )
 
-    monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(
+        main.data_loader,
+        'get_data',
+        lambda *a, **k: (df, 'cache') if k.get('return_source') else df,
+    )
 
     gene_space = [{'low': 0, 'high': 1}]
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
@@ -189,7 +197,11 @@ def test_fitness_plot_non_blocking(monkeypatch):
         index=pd.date_range('2020-01-01', periods=2),
     )
 
-    monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(
+        main.data_loader,
+        'get_data',
+        lambda *a, **k: (df, 'cache') if k.get('return_source') else df,
+    )
 
     gene_space = [{'low': 0, 'high': 1}]
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
