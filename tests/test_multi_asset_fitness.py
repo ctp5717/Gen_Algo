@@ -282,7 +282,7 @@ def test_zero_trade_assets_shrinkage():
     assert np.isclose(score, 2/3, atol=1e-6)
     asset = ev.last_details['per_asset']['A']
     assert asset['included'] is True
-    assert np.isclose(asset.get('shrinkage_multiplier'), 0.0)
+    assert asset.get('shrinkage_multiplier') is None
 
 
 def test_zero_trade_assets_no_coverage_penalty():
@@ -443,7 +443,7 @@ def test_weight_renormalization_multiple_exclusions():
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    assert np.isclose(score, 0.1)
+    assert np.isclose(score, 1.15)
     assert ev.last_details['assets_included'] == 3
 
 
@@ -514,8 +514,8 @@ def test_floor_strength_with_zero_trades():
         'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
-    # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=2/3 => fitness≈0.1667
-    assert np.isclose(ev(None, [], 0), (2/3) * 0.25)
+    # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=1.0 => fitness=0.25
+    assert np.isclose(ev(None, [], 0), 0.25)
 
 
 def test_min_total_trades_per_year_scaling():
@@ -563,17 +563,17 @@ def test_per_asset_min_trades_threshold():
         'lambda_dispersion': 0.0,
         'soft_penalty_strength': 0,
         'mode': None,
-        'partial_trades_threshold': 3,
+        'low_trade_shrink': {'enabled': True, 'k': 3, 's': 1.0},
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
     expected = ((2/3) + 1.0 + 1.0) / 3
     assert np.isclose(score, expected)
     asset = ev.last_details['per_asset']['A']
-    assert np.isclose(asset.get('shrinkage_multiplier'), 2/3)
+    assert np.isclose(asset['shrinkage']['multiplier'], 2/3)
 
 
-def test_low_trade_scaling_and_total_trades_contribution():
+def test_low_trade_scaling_and_total_trades_contribution_legacy_keys():
     stats = [
         {'total_return': 1.0, 'trades': 2},
         {'total_return': 1.0, 'trades': 4},

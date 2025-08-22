@@ -333,6 +333,18 @@ class MultiAssetFitnessEvaluator:
             clip_abs = self.settings.get("clip_composite_abs")
             zero_trade_exclusions: list[dict] = []
 
+            shrink_cfg = self.settings.get("low_trade_shrink") or {}
+            shrink_enabled = shrink_cfg.get("enabled", False)
+            base_k = shrink_cfg.get("k")
+            s = shrink_cfg.get("s", 1.0)
+            override_k = self.settings.get("partial_trades_threshold")
+            if override_k is not None:
+                base_k = override_k
+                shrink_enabled = True
+                s = self.settings.get("partial_trades_exponent", s)
+            elif self.settings.get("partial_trades_exponent") is not None and base_k is None:
+                s = self.settings.get("partial_trades_exponent", s)
+
             for ticker, ohlc in self.group_data.items():
                 cache_key = (ticker, rules_hash)
                 stats = _EVAL_CACHE.get(cache_key)
@@ -341,6 +353,12 @@ class MultiAssetFitnessEvaluator:
                     _EVAL_CACHE[cache_key] = stats
                 trades = stats.get("trades", 0)
                 total_trades += trades
+
+                per_asset_min_trades = self.settings.get("per_asset_min_trades", 1)
+                k = base_k
+                if k is not None:
+                    k = max(k, per_asset_min_trades)
+                insufficient = trades < per_asset_min_trades
 
                 # Pre-compute capped metrics and drawdown score for storage
                 pf_raw = stats.get("profit_factor")
@@ -378,8 +396,13 @@ class MultiAssetFitnessEvaluator:
 
                 penalties = {}
 
-                per_asset_min_trades = self.settings.get("per_asset_min_trades", 1)
-                insufficient = trades < per_asset_min_trades
+                shrinkage_info = {
+                    "enabled": shrink_enabled,
+                    "k": k,
+                    "s": s,
+                    "applied": False,
+                    "multiplier": None,
+                }
 
                 # Skip aggregation if zero trades and policy is to ignore
                 if (
@@ -395,6 +418,7 @@ class MultiAssetFitnessEvaluator:
                         "profit_factor_capped": pf_capped,
                         "drawdown_score": drawdown_score,
                         "shrinkage_multiplier": None,
+                        "shrinkage": shrinkage_info,
                         "penalties": None,
                         "caps": {
                             "profit_factor": {
@@ -434,13 +458,12 @@ class MultiAssetFitnessEvaluator:
                         + drawdown_score * w["max_drawdown"]
                     )
 
-                k = self.settings.get("partial_trades_threshold", 1)
-                k = max(k, per_asset_min_trades)
-                s = self.settings.get("partial_trades_exponent", 1.0)
                 shrinkage_multiplier = None
-                if k > 0 and trades < k:
+                if shrink_enabled and k is not None and 1 <= trades < k:
                     shrinkage_multiplier = (trades / k) ** s
                     val *= shrinkage_multiplier
+                    shrinkage_info["applied"] = True
+                    shrinkage_info["multiplier"] = shrinkage_multiplier
 
                 if clip_abs is not None:
                     val = float(np.clip(val, -abs(clip_abs), abs(clip_abs)))
@@ -456,6 +479,7 @@ class MultiAssetFitnessEvaluator:
                     "profit_factor_capped": pf_capped,
                     "drawdown_score": drawdown_score,
                     "shrinkage_multiplier": shrinkage_multiplier,
+                    "shrinkage": shrinkage_info,
                     "penalties": penalties or None,
                     "caps": {
                         "profit_factor": {
