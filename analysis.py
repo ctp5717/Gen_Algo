@@ -57,6 +57,37 @@ def persist_details(fitness_evaluator, charts_cfg=None):
     return out_path
 
 
+def save_meta(info: dict, run_ts: str | None = None) -> Path:
+    """Persist run metadata as ``meta.json`` within ``reports``.
+
+    Parameters
+    ----------
+    info : dict
+        Arbitrary metadata to serialize.
+    run_ts : str, optional
+        Identifier for the run. When omitted a timestamp is reused or
+        generated and stored back to ``config.CHARTS``.
+
+    Returns
+    -------
+    Path
+        Location of the written ``meta.json`` file.
+    """
+
+    charts_cfg = getattr(config, "CHARTS", {})
+    run_ts = run_ts or charts_cfg.get("run_ts")
+    if not run_ts:
+        run_ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    charts_cfg["run_ts"] = run_ts
+
+    out_dir = Path("reports") / run_ts
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "meta.json"
+    with open(out_path, "w") as f:
+        json.dump(info, f, default=str)
+    return out_path
+
+
 def asset_extremes_path(phase: str, run_ts: str | None = None) -> Path:
     """Return the save path for asset extremes within ``reports``.
 

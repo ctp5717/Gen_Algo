@@ -162,6 +162,15 @@ def run_walk_forward(initial_champions=None):
         seed = getattr(config, "RANDOM_SEED", 42)
         set_global_seed(seed)
         print(f"Deterministic mode enabled. Seed={seed}")
+
+    lam = getattr(config, "MULTI_ASSET", {}).get("lambda_dispersion")
+    if lam is not None:
+        print(f"Using lambda_dispersion = {lam}")
+        try:
+            analysis.save_meta({"lambda_dispersion": lam})
+        except Exception:
+            pass
+
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])

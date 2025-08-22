@@ -137,6 +137,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     )
 
     monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setattr(walk_forward.analysis, "save_meta", lambda *a, **k: None)
 
     walk_forward.run_walk_forward_validation()
 
@@ -225,6 +226,7 @@ def test_walk_forward_returns_summary(monkeypatch):
     )
 
     monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setattr(walk_forward.analysis, "save_meta", lambda *a, **k: None)
 
     summary = walk_forward.run_walk_forward_validation()
 

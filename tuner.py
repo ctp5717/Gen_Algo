@@ -185,4 +185,11 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
 
     best = max(results, key=lambda x: x["score"]) if results else {"params": None}
     print(f"Best hyperparameters found: {best['params']}")
-    return best["params"]
+
+    # Persist the chosen dispersion penalty for subsequent phases
+    params = best.get("params") or {}
+    lam = params.get("lambda_dispersion")
+    if lam is not None and hasattr(config, "MULTI_ASSET"):
+        config.MULTI_ASSET["lambda_dispersion"] = lam
+
+    return params
