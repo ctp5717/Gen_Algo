@@ -557,14 +557,16 @@ def _plot_multi_asset_overview(
     combined_equity.plot(ax=ax1, title="Combined Equity Curve (visualisation only)")
     ax1.set_ylabel("Equity")
 
-    ax2.bar(tick_sorted, vals_sorted)
+    ax2.bar(tick_sorted, vals_sorted, label="Score")
     ax2.axhline(mu, color="red", linestyle="--", label="μ")
     ax2.axhspan(mu - sigma, mu + sigma, color="red", alpha=0.1, label="μ ± σ")
     ax2.set_title("Per-asset scores")
-    ax2.legend()
+    handles, labels = ax2.get_legend_handles_labels()
+    if labels:
+        ax2.legend()
 
     trades_sorted = [trades[t] for t in tick_sorted]
-    ax3.bar(tick_sorted, trades_sorted)
+    ax3.bar(tick_sorted, trades_sorted, label="Trades")
     if floor:
         ax3.axhline(
             floor / max(1, total_assets),
@@ -573,7 +575,9 @@ def _plot_multi_asset_overview(
             label=f"floor/N ({floor}/{total_assets})",
         )
     ax3.set_title("Trades per asset")
-    ax3.legend()
+    handles, labels = ax3.get_legend_handles_labels()
+    if labels:
+        ax3.legend()
 
     fig.tight_layout()
     fig.show()
