@@ -752,7 +752,7 @@ def test_score_clipping_stabilises_mu_sigma():
         "lambda_dispersion": 0.0,
         "min_total_trades": 0,
         "soft_penalty_strength": 0,
-        "score_clip": [-20, 20],
+        "clip_composite_abs": 20,
     }
     ev = _make_evaluator(settings, stats)
     ev(None, [], 0)

@@ -214,9 +214,14 @@ MULTI_ASSET = {
     "tanh_c": None,
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
+    # Apply tanh squashing to individual metrics before weighting
+    "squash": False,
+    "squash_params": {"sortino_c": 6.0, "pf_c": 3.0},
     # Clip per-asset scores before aggregation to stabilise statistics
     # Provide [min, max] or set to None to disable
     "score_clip": None,
+    # Optionally clip the final composite score to +/- this value
+    "clip_composite_abs": None,
     # Group trade floor configuration
     # Require a slightly larger sample of trades across the entire basket to
     # reduce false positives.  Individual assets are permitted to contribute

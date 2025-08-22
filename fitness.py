@@ -285,7 +285,7 @@ class MultiAssetFitnessEvaluator:
             included_assets = []
             per_asset_details = {}
             total_trades = 0
-            clip_range = self.settings.get("score_clip")
+            clip_abs = self.settings.get("clip_composite_abs")
 
             for ticker, ohlc in self.group_data.items():
                 cache_key = (ticker, rules_hash)
@@ -365,6 +365,13 @@ class MultiAssetFitnessEvaluator:
                     }
                     continue
 
+                if self.settings.get("squash"):
+                    params = self.settings.get("squash_params", {})
+                    sortino_c = params.get("sortino_c", 1.0)
+                    pf_c = params.get("pf_c", 1.0)
+                    sortino_capped = float(np.tanh(sortino_capped / sortino_c))
+                    pf_capped = float(np.tanh(pf_capped / pf_c))
+
                 metric_type = self.settings.get("metric", "composite")
                 if metric_type == "sortino":
                     val = sortino_capped
@@ -388,11 +395,8 @@ class MultiAssetFitnessEvaluator:
                     shrinkage_multiplier = (trades / k) ** s
                     val *= shrinkage_multiplier
 
-                c = self.settings.get("tanh_c")
-                if c:
-                    val = float(np.tanh(val / c))
-                if clip_range is not None:
-                    val = float(np.clip(val, clip_range[0], clip_range[1]))
+                if clip_abs is not None:
+                    val = float(np.clip(val, -abs(clip_abs), abs(clip_abs)))
 
                 per_asset_metrics.append(val)
                 included_assets.append(ticker)
