@@ -250,9 +250,13 @@ MULTI_ASSET = {
     # Minimal trades to consider an asset as traded. Assets with no trades
     # are ignored unless explicitly penalised.
     "per_asset_min_trades": 1,
-    # Soft scaling for assets with few trades; assets with trades below this
-    # threshold have their scores multiplied by ``(trades/threshold)**power``.
-    "partial_trades_threshold": 5,
+    # Soft scaling for assets with few trades; trades in ``[1, k)`` are
+    # multiplied by ``(trades / k)**s`` when enabled.
+    "low_trade_shrink": {"enabled": True, "k": 3, "s": 1.0},
+    # Legacy keys retained for backwards compatibility.  If
+    # ``partial_trades_threshold`` is provided in external settings, the
+    # evaluator will continue to honour it.
+    "partial_trades_threshold": None,
     "partial_trades_exponent": 1.0,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 24,
