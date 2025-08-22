@@ -71,6 +71,14 @@ COVERAGE_THRESHOLD = 0.8
 ASSET_GROUP = [
     ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
     ("Ethereum", CRYPTO_UNIVERSE["Ethereum"]),
+    ("Solana", CRYPTO_UNIVERSE["Solana"]),
+    ("XRP", CRYPTO_UNIVERSE["XRP"]),
+    ("Cardano", CRYPTO_UNIVERSE["Cardano"]),
+    ("Avalanche", CRYPTO_UNIVERSE["Avalanche"]),
+    ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
+    ("Chainlink", CRYPTO_UNIVERSE["Chainlink"]),
+    ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
+    ("Near_Protocol", CRYPTO_UNIVERSE["Near_Protocol"]),
 ]
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
@@ -154,7 +162,7 @@ GA_MUTATION_NUM_GENES = 1
 
 # --- AUTO-TUNER SETTINGS ---
 AUTO_TUNE_ENABLED = True
-GENERATIONS_PER_TUNE = 10
+GENERATIONS_PER_TUNE = 5
 HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 50, "num_parents_mating": 20, "mutation_num_genes": 1},
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
@@ -173,7 +181,7 @@ FITNESS_WEIGHTS = {
 # `MULTI_ASSET['enabled']` is set to True.
 MULTI_ASSET = {
     # Master switch
-    "enabled": False,
+    "enabled": True,
     # Optional per-ticker weights; if None, all assets are weighted equally
     "asset_weights": None,
     # Penalty multiplier for dispersion across assets
@@ -197,7 +205,7 @@ MULTI_ASSET = {
     # Minimal trades to consider an asset as traded
     "per_asset_min_trades": 1,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": None,
+    "min_total_trades_per_year": 24,
     # Fitness score returned when the hard floor triggers or an error occurs
     "poor_score": -999.0,
 }
@@ -205,7 +213,7 @@ MULTI_ASSET = {
 # Basic charting options for the multi-asset analysis overview.
 CHARTS = {
     "max_assets_in_overview": 20,
-    "save_pngs": False,
+    "save_pngs": True,
     "show_distribution": True,
 }
 
@@ -238,7 +246,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'price_is_above_indicator'}
             },
             {
-                'is_active': True, # This rule is ON
+                'is_active': False, # This rule is ON
                 'rule_name': 'RSI_Momentum_Filter',
                 'indicator': 'rsi',
                 'params': {
@@ -250,7 +258,7 @@ STRATEGY_RULES = {
                 }
             },
             {
-                'is_active': False,
+                'is_active': True,
                 'rule_name': 'MACD_Momentum_Cross',
                 'indicator': 'macd',
                 'params': {
@@ -261,7 +269,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'indicator_crosses_above_value', 'value': 0}
             },
             {
-                'is_active': False,
+                'is_active': True,
                 'rule_name': 'Bollinger_Band_Breakout',
                 'indicator': 'bbands',
                 'params': {
