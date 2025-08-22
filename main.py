@@ -148,6 +148,14 @@ def main():
         num_parents_mating = config.GA_PARENTS_MATING
         mutation_num_genes = config.GA_MUTATION_NUM_GENES
 
+    lam = getattr(config, "MULTI_ASSET", {}).get("lambda_dispersion")
+    if lam is not None:
+        print(f"Using lambda_dispersion = {lam}")
+        try:
+            analysis.save_meta({"lambda_dispersion": lam})
+        except Exception:
+            pass
+
     print("Initializing and running the Genetic Algorithm in parallel...")
     global start_time; start_time = time.time() # Start the timer right before the GA run
 
