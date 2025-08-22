@@ -107,6 +107,7 @@ def test_no_assets_traded_sets_default_details(monkeypatch):
 
     monkeypatch.setitem(cfg.MULTI_ASSET, 'min_total_trades', 0)
     monkeypatch.setitem(cfg.MULTI_ASSET, 'poor_score', 0.0)
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'coverage_penalty_kappa', 0.0)
 
     evaluator = fitness.MultiAssetFitnessEvaluator({'A': df}, {}, {}, {})
     score = evaluator(None, [], 0)
@@ -237,6 +238,7 @@ def test_hard_floor_returns_poor_score_with_zero_trade_penalize():
         'min_total_trades': 30,
         'lambda_dispersion': 0.0,
         'mode': 'walk_forward',
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     assert ev(None, [], 0) == -999.0
@@ -255,6 +257,7 @@ def test_hard_floor_returns_poor_score_with_zero_trade_ignore():
         'min_total_trades': 30,
         'lambda_dispersion': 0.0,
         'mode': 'walk_forward',
+        'zero_trade_policy': 'ignore',
     }
     ev = _make_evaluator(settings, stats)
     assert ev(None, [], 0) == -999.0
@@ -272,6 +275,7 @@ def test_zero_trade_assets_shrinkage():
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'soft_penalty_strength': 0,
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -294,6 +298,7 @@ def test_zero_trade_assets_no_coverage_penalty():
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'soft_penalty_strength': 0,
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -320,9 +325,10 @@ def test_coverage_penalty_formula():
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    mu = np.mean([0.5, 1.5, 0.0])
-    assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
-    assert np.isclose(score, mu)
+    mu = np.mean([0.5, 1.5])
+    coverage_penalty = kappa * (1 - (2 / 3))
+    assert np.isclose(ev.last_details['penalties']['coverage'], coverage_penalty)
+    assert np.isclose(score, mu - coverage_penalty)
 
 
 @pytest.mark.parametrize("kappa", [None, 0.0, 0.3])
@@ -339,10 +345,36 @@ def test_coverage_penalty_kappa_monotonic(kappa):
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'soft_penalty_strength': 0,
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     assert np.isclose(ev(None, [], 0), 2/3, atol=1e-6)
     assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
+
+
+def test_zero_trade_asset_ignored_triggers_coverage_penalty():
+    stats = [
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 0.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'coverage_penalty_kappa': 0.5,
+        'per_asset_min_trades': 1,
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+        'soft_penalty_strength': 0,
+    }
+    group_data = {
+        'A': pd.DataFrame({'Close': [1, 2, 3]}),
+        'B': pd.DataFrame({'Close': [1, 2, 3]}),
+    }
+    ev = _make_evaluator(settings, stats, group_data)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 0.75)
+    assert ev.last_details['assets_included'] == 1
+    assert ev.last_details['assets_ignored'] == 1
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.25)
 
 
 def test_empty_group_returns_poor_score():
@@ -365,11 +397,14 @@ def test_all_zero_trade_assets_apply_coverage_penalty():
         'coverage_penalty_kappa': 0.5,
         'min_total_trades': 0,
         'soft_penalty_strength': 0,
+        'poor_score': 0.0,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    assert np.isclose(score, 0.0)
-    assert np.isclose(ev.last_details['penalties']['coverage'], 0.0)
+    assert np.isclose(score, -0.5)
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.5)
+    assert ev.last_details['assets_included'] == 0
+    assert ev.last_details['assets_ignored'] == 3
 
 
 def test_weight_renormalization():
@@ -385,6 +420,7 @@ def test_weight_renormalization():
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'soft_penalty_strength': 0,
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     assert np.isclose(ev(None, [], 0), 0.6, atol=1e-6)
@@ -403,6 +439,7 @@ def test_weight_renormalization_multiple_exclusions():
         'min_total_trades': 0,
         'lambda_dispersion': 0.0,
         'soft_penalty_strength': 0,
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -474,6 +511,7 @@ def test_floor_strength_with_zero_trades():
         'min_total_trades': 20,
         'lambda_dispersion': 0.0,
         'mode': 'ga',
+        'zero_trade_policy': 'penalize',
     }
     ev = _make_evaluator(settings, stats)
     # Total trades = 10, floor = 20 -> scale=(0.5)**2=0.25, mean=2/3 => fitness≈0.1667
@@ -590,8 +628,8 @@ def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
     assert np.isclose(a["drawdown_score"], 0.9)
     assert a.get("penalties") in (None, {})
     b = details["B"]
-    assert b["included"] is True
-    assert np.isclose(b.get("shrinkage_multiplier"), 0.0)
+    assert b["included"] is False
+    assert b.get("shrinkage_multiplier") is None
 
 
 def test_caps_logged():

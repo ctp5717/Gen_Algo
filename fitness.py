@@ -335,6 +335,36 @@ class MultiAssetFitnessEvaluator:
                 per_asset_min_trades = self.settings.get("per_asset_min_trades", 1)
                 insufficient = trades < per_asset_min_trades
 
+                # Skip aggregation if zero trades and policy is to ignore
+                if (
+                    trades == 0
+                    and self.settings.get("zero_trade_policy") == "ignore"
+                ):
+                    per_asset_details[ticker] = {
+                        **stats,
+                        "score": None,
+                        "included": False,
+                        "insufficient": True,
+                        "sortino_capped": sortino_capped,
+                        "profit_factor_capped": pf_capped,
+                        "drawdown_score": drawdown_score,
+                        "shrinkage_multiplier": None,
+                        "penalties": None,
+                        "caps": {
+                            "profit_factor": {
+                                "raw": pf_raw,
+                                "cap": pf_cap,
+                                "capped": pf_capped,
+                            },
+                            "sortino": {
+                                "raw": sortino_raw,
+                                "cap": sortino_cap,
+                                "capped": sortino_capped,
+                            },
+                        },
+                    }
+                    continue
+
                 metric_type = self.settings.get("metric", "composite")
                 if metric_type == "sortino":
                     val = sortino_capped
@@ -403,6 +433,17 @@ class MultiAssetFitnessEvaluator:
                 F = poor
                 if mode == "walk_forward" and total_trades < trade_floor:
                     trade_penalty = "hard_floor"
+
+                coverage_penalty = None
+                if (
+                    self.group_data
+                    and self.settings.get("zero_trade_policy") == "ignore"
+                    and self.settings.get("coverage_penalty_kappa") is not None
+                ):
+                    kappa = self.settings.get("coverage_penalty_kappa")
+                    coverage_penalty = kappa * 1.0
+                    F -= coverage_penalty
+
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": None,
@@ -411,7 +452,7 @@ class MultiAssetFitnessEvaluator:
                     "total_trades": total_trades,
                     "assets_included": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": None},
+                    "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": coverage_penalty},
                     "fitness": F,
                     "effective_floor": trade_floor,
                     "floor_ratio": floor_ratio,
