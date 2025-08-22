@@ -295,6 +295,16 @@ def run_walk_forward(initial_champions=None):
                 test_eval, charts_cfg={"run_ts": run_ts, "sha": f"window_{idx:02d}"}
             )
             details = test_eval.last_details
+            excluded = details.get("excluded_assets") or []
+            if excluded:
+                print("\nExcluded assets:")
+                for item in excluded:
+                    cov = item.get("coverage")
+                    reason = item.get("reason")
+                    if cov is not None:
+                        print(f" - {item['ticker']}: {reason} ({cov}%)")
+                    else:
+                        print(f" - {item['ticker']}: {reason}")
             per_asset = details.get("per_asset") or {}
             if per_asset:
                 rows = []

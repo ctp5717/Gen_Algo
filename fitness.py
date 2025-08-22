@@ -15,6 +15,7 @@ import numpy as np
 import vectorbt as vbt
 import strategy_engine as engine
 import config
+import data_loader
 from utils import _norm_freq
 
 
@@ -203,6 +204,12 @@ class MultiAssetFitnessEvaluator:
             except Exception:
                 pass
         self.last_details = {}
+        # Store exclusions produced during data loading so they can be
+        # surfaced later in diagnostic reports.
+        try:
+            self.coverage_exclusions = data_loader.get_last_excluded_assets()
+        except Exception:
+            self.coverage_exclusions = []
 
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
@@ -286,6 +293,7 @@ class MultiAssetFitnessEvaluator:
             per_asset_details = {}
             total_trades = 0
             clip_abs = self.settings.get("clip_composite_abs")
+            zero_trade_exclusions: list[dict] = []
 
             for ticker, ohlc in self.group_data.items():
                 cache_key = (ticker, rules_hash)
@@ -363,6 +371,7 @@ class MultiAssetFitnessEvaluator:
                             },
                         },
                     }
+                    zero_trade_exclusions.append({"ticker": ticker, "reason": "zero_trades"})
                     continue
 
                 if self.settings.get("squash"):
@@ -456,6 +465,7 @@ class MultiAssetFitnessEvaluator:
                     "total_trades": total_trades,
                     "assets_included": 0,
                     "assets_ignored": len(self.group_data),
+                    "excluded_assets": self.coverage_exclusions + zero_trade_exclusions,
                     "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": coverage_penalty},
                     "fitness": F,
                     "effective_floor": trade_floor,
@@ -527,6 +537,7 @@ class MultiAssetFitnessEvaluator:
                 "total_trades": total_trades,
                 "assets_included": len(included_assets),
                 "assets_ignored": len(self.group_data) - len(included_assets),
+                "excluded_assets": self.coverage_exclusions + zero_trade_exclusions,
                 "penalties": {
                     "trade_floor": trade_penalty,
                     "floor_ratio": floor_ratio,
@@ -551,6 +562,7 @@ class MultiAssetFitnessEvaluator:
                 "total_trades": 0,
                 "assets_included": 0,
                 "assets_ignored": len(self.group_data),
+                "excluded_assets": self.coverage_exclusions,
                 "penalties": {"trade_floor": "error", "coverage": None},
                 "fitness": poor,
                 "effective_floor": self.settings.get("min_total_trades", 0),

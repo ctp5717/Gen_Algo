@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 import pandas as pd
+import pytest
 
 # Ensure repository root is on the import path
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,3 +89,27 @@ def test_get_group_data_summary(monkeypatch, capsys):
     assert 'Loading asset data for 2 assets (2020-01-01–2020-01-02) from cache' in out
     assert 'A:' not in out
     assert 'B:' not in out
+
+
+def test_get_group_data_exclusions(monkeypatch, capsys):
+    data_loader._group_load_count = 0
+    idx = pd.date_range('2020-01-01', periods=5, freq='1d')
+    df_full = pd.DataFrame({'Close': range(5)}, index=idx)
+    df_partial = pd.DataFrame({'Close': range(3)}, index=idx[:3])
+
+    def fake_get_data(ticker, *args, **kwargs):
+        return (df_full if ticker == 'FULL' else df_partial), 'cache'
+
+    monkeypatch.setattr(data_loader, 'get_data', fake_get_data)
+
+    assets = [('Full', 'FULL'), ('Part', 'PART')]
+
+    data_loader.get_group_data(assets, '2020-01-01', '2020-01-05', '1d', coverage_threshold=0.8)
+    out = capsys.readouterr().out
+    assert 'Excluded: PART (60%)' in out
+    excl = data_loader.get_last_excluded_assets()
+    assert excl == [{
+        'ticker': 'PART',
+        'coverage': pytest.approx(60.0),
+        'reason': 'low_coverage',
+    }]
