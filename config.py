@@ -246,7 +246,7 @@ MULTI_ASSET = {
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
-    "coverage_penalty_kappa": 0.5,
+    "coverage_penalty_kappa": 0.3,
     # Minimal trades to consider an asset as traded. Assets with no trades
     # are ignored unless explicitly penalised.
     "per_asset_min_trades": 1,
@@ -259,17 +259,31 @@ MULTI_ASSET = {
     "partial_trades_threshold": None,
     "partial_trades_exponent": 1.0,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 24,
+    "min_total_trades_per_year": None,
     # Fitness score returned when the hard floor triggers or an error occurs
     "poor_score": -999.0,
 }
+
+# Backwards compatibility aliases
+MULTI_ASSET["coverage_penalty_lambda"] = MULTI_ASSET["coverage_penalty_kappa"]
+MULTI_ASSET["min_trades_per_year"] = MULTI_ASSET["min_total_trades_per_year"]
 
 # Basic charting options for the multi-asset analysis overview.
 CHARTS = {
     "max_assets_in_overview": 20,
     "save_pngs": True,
     "show_distribution": True,
+    "per_asset_export_mode": "traded_only",
 }
+# Backwards compatibility alias
+CHARTS["export_all_assets"] = CHARTS["per_asset_export_mode"] == "all"
+
+# Diagnostics / persistence settings
+DIAG = {
+    "persist_json": True,
+}
+# Backwards compatibility
+DIAGNOSTICS = DIAG
 
 # Settings controlling how walk-forward champions are kept or discarded
 CHAMPION_SELECTION_SETTINGS = {
