@@ -229,6 +229,11 @@ MULTI_ASSET = {
     "min_total_trades": 10,
     "max_total_trades": None,
     "trade_floor_window": 5,
+    "adaptive_floor": {
+        "enabled": True,
+        "percentile": 50,
+        "bounds": {"min": 8, "max": 64},
+    },
     "trade_floor_policy": "hard_floor",  # retained for backwards compatibility
     "trade_floor_policy_by_phase": {
         "ga": "soft_penalty",
