@@ -812,3 +812,31 @@ def test_ga_and_tuner_consistency(monkeypatch):
 
     score_val = tuner._evaluate_on_validation(solution, {})
     assert np.isclose(fit, score_val)
+
+
+def test_last_details_include_config_fields():
+    stats = {
+        "sortino": 1.0,
+        "profit_factor": 2.0,
+        "max_drawdown": 10.0,
+        "trades": 5,
+        "total_return": 0.0,
+        "equity_curve": None,
+    }
+    settings = {
+        "pf_cap": 7.0,
+        "sortino_cap": 9.0,
+        "squash": True,
+        "squash_params": {"sortino_c": 2.0, "pf_c": 3.0},
+        "lambda_dispersion": 0.5,
+        "min_total_trades": 0,
+        "mode": "ga",
+    }
+    evaluator = _make_evaluator(settings=settings, stats_list=[stats, stats, stats])
+    evaluator(None, [], 0)
+    details = evaluator.last_details
+    assert details["pf_cap"] == 7.0
+    assert details["sortino_cap"] == 9.0
+    assert details["squash"] is True
+    assert details["squash_params"] == {"sortino_c": 2.0, "pf_c": 3.0}
+    assert details["coverage_threshold"] == cfg.COVERAGE_THRESHOLD

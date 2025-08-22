@@ -22,6 +22,34 @@ from utils import _norm_freq
 _EVAL_CACHE: dict[tuple[str, str], dict] = {}
 
 
+def format_settings_summary(settings: dict, coverage_threshold: float | None = None) -> str:
+    """Return a human-friendly summary of multi-asset settings."""
+
+    lam = settings.get("lambda_dispersion")
+    pf_cap = settings.get("pf_cap")
+    sortino_cap = settings.get("sortino_cap")
+    squash = settings.get("squash")
+    if squash:
+        params = settings.get("squash_params", {})
+        squash_repr = f"on {params}"
+    else:
+        squash_repr = "off"
+    floor = settings.get("min_total_trades")
+    cov = coverage_threshold
+    cov_str = f"{cov * 100:.0f}%" if cov is not None else "n/a"
+    return (
+        "objective=μ−λσ | "
+        f"λ={lam} | PF_CAP={pf_cap} | SORTINO_CAP={sortino_cap} | "
+        f"squash={squash_repr} | effective_floor={floor} | coverage_threshold={cov_str}"
+    )
+
+
+def print_settings_summary(settings: dict, coverage_threshold: float | None = None) -> None:
+    """Print a one-line summary of evaluator settings."""
+
+    print(format_settings_summary(settings, coverage_threshold))
+
+
 def _hash_rules(rules: dict) -> str:
     """Create a stable hash for a nested rules dictionary."""
     dumped = json.dumps(rules, sort_keys=True, default=str)
@@ -210,6 +238,7 @@ class MultiAssetFitnessEvaluator:
             self.coverage_exclusions = data_loader.get_last_excluded_assets()
         except Exception:
             self.coverage_exclusions = []
+        print_settings_summary(self.settings, getattr(config, "COVERAGE_THRESHOLD", None))
 
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
@@ -471,6 +500,11 @@ class MultiAssetFitnessEvaluator:
                     "effective_floor": trade_floor,
                     "floor_ratio": floor_ratio,
                     "floor_policy": floor_policy,
+                    "pf_cap": self.settings.get("pf_cap"),
+                    "sortino_cap": self.settings.get("sortino_cap"),
+                    "squash": self.settings.get("squash"),
+                    "squash_params": self.settings.get("squash_params"),
+                    "coverage_threshold": getattr(config, "COVERAGE_THRESHOLD", None),
                 }
                 self._current_gen_scores.append((F, total_trades))
                 return F
@@ -547,6 +581,11 @@ class MultiAssetFitnessEvaluator:
                 "effective_floor": trade_floor,
                 "floor_ratio": floor_ratio,
                 "floor_policy": floor_policy,
+                "pf_cap": self.settings.get("pf_cap"),
+                "sortino_cap": self.settings.get("sortino_cap"),
+                "squash": self.settings.get("squash"),
+                "squash_params": self.settings.get("squash_params"),
+                "coverage_threshold": getattr(config, "COVERAGE_THRESHOLD", None),
             }
             self._current_gen_scores.append((F, total_trades))
             return F
@@ -571,6 +610,11 @@ class MultiAssetFitnessEvaluator:
                     self.settings.get("mode"),
                     self.settings.get("trade_floor_policy", "hard_floor"),
                 ),
+                "pf_cap": self.settings.get("pf_cap"),
+                "sortino_cap": self.settings.get("sortino_cap"),
+                "squash": self.settings.get("squash"),
+                "squash_params": self.settings.get("squash_params"),
+                "coverage_threshold": getattr(config, "COVERAGE_THRESHOLD", None),
             }
             return poor
 
