@@ -862,3 +862,114 @@ def test_last_details_include_config_fields():
     assert details["squash"] is True
     assert details["squash_params"] == {"sortino_c": 2.0, "pf_c": 3.0}
     assert details["coverage_threshold"] == cfg.COVERAGE_THRESHOLD
+
+
+def test_floor_scaling_modes():
+    stats_below = [
+        {"total_return": 1.0, "trades": 10},
+        {"total_return": 1.0, "trades": 5},
+        {"total_return": 1.0, "trades": 5},
+    ]
+    stats_above = [
+        {"total_return": 1.0, "trades": 20},
+        {"total_return": 1.0, "trades": 20},
+        {"total_return": 1.0, "trades": 20},
+    ]
+    base = {
+        "metric": "return",
+        "min_total_trades": 30,
+        "soft_penalty_strength": 1.0,
+        "lambda_dispersion": 0.0,
+    }
+
+    fitness._EVAL_CACHE.clear()
+    ev = _make_evaluator({**base, "mode": "ga"}, stats_below)
+    assert np.isclose(ev(None, [], 0), 20 / 30)
+    fitness._EVAL_CACHE.clear()
+    ev = _make_evaluator({**base, "mode": "ga"}, stats_above)
+    assert np.isclose(ev(None, [], 0), 1.0)
+
+    fitness._EVAL_CACHE.clear()
+    ev = _make_evaluator({**base, "mode": "tuning"}, stats_below)
+    assert np.isclose(ev(None, [], 0), 20 / 30)
+    fitness._EVAL_CACHE.clear()
+    ev = _make_evaluator({**base, "mode": "tuning"}, stats_above)
+    assert np.isclose(ev(None, [], 0), 1.0)
+
+    fitness._EVAL_CACHE.clear()
+    ev = _make_evaluator({**base, "mode": "walk_forward", "poor_score": -123.0}, stats_below)
+    assert ev(None, [], 0) == -123.0
+    fitness._EVAL_CACHE.clear()
+    ev = _make_evaluator({**base, "mode": "walk_forward"}, stats_above)
+    assert np.isclose(ev(None, [], 0), 1.0)
+
+
+@pytest.mark.parametrize(
+    "metrics, lam, expected",
+    [
+        ([1.0, 1.0, 1.0], 0.25, 1.0),
+        ([1.6, 1.0, 0.4], 0.25, 0.8775),
+    ],
+)
+def test_mu_lambda_sigma_math_checks(metrics, lam, expected):
+    stats = [{"total_return": m, "trades": 5} for m in metrics]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": lam,
+        "min_total_trades": 0,
+        "soft_penalty_strength": 0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    mu, sigma = fitness.weighted_mean_std(metrics, [1, 1, 1])
+    assert np.isclose(score, mu - lam * sigma, atol=1e-4)
+    assert np.isclose(score, expected, atol=1e-4)
+
+
+def test_zero_trade_assets_excluded_and_penalised():
+    stats = [
+        {"total_return": 1.0, "trades": 5},
+        {"total_return": 0.0, "trades": 0},
+        {"total_return": 1.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "return",
+        "coverage_penalty_kappa": 0.5,
+        "zero_trade_policy": "ignore",
+        "min_total_trades": 0,
+        "lambda_dispersion": 0.0,
+        "soft_penalty_strength": 0,
+    }
+    ev = _make_evaluator(settings, stats)
+    ev(None, [], 0)
+    details = ev.last_details
+    assert details["per_asset"]["B"]["included"] is False
+    assert details["assets_ignored"] == 1
+    assert details["penalties"]["coverage"] > 0
+
+
+def test_squash_monotonic_and_bounded():
+    stats = [
+        {"sortino": 1.0, "profit_factor": 1.0, "max_drawdown": 10.0, "trades": 5},
+        {"sortino": 2.0, "profit_factor": 2.0, "max_drawdown": 10.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "sortino",
+        "lambda_dispersion": 0.0,
+        "min_total_trades": 0,
+        "soft_penalty_strength": 0,
+        "squash": True,
+        "squash_params": {"sortino_c": 1.0, "pf_c": 1.0},
+    }
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    ev = _make_evaluator(settings, stats, group_data)
+    ev(None, [], 0)
+    per_asset = ev.last_details["per_asset"]
+    s_vals = [per_asset[t]["sortino_capped"] for t in ("A", "B")]
+    pf_vals = [per_asset[t]["profit_factor_capped"] for t in ("A", "B")]
+    assert all(-1 <= v <= 1 for v in s_vals + pf_vals)
+    assert s_vals[0] < s_vals[1]
+    assert pf_vals[0] < pf_vals[1]
