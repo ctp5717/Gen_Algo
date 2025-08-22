@@ -21,12 +21,28 @@ from gene_parser import parse_genes_from_config
 from utils import _norm_freq
 
 
-def _sparkline(arr):
-    """Return a tiny sparkline for a sequence of numbers."""
+def _sparkline(arr, width: int = 80):
+    """Return a tiny sparkline for a sequence of numbers.
+
+    Parameters
+    ----------
+    arr : array-like
+        Sequence of numbers to convert into a sparkline.
+    width : int, optional
+        Maximum number of points to plot. If ``arr`` is longer than ``width``
+        it will be down-sampled. Defaults to 80.
+    """
+
     ticks = "▁▂▃▄▅▆▇█"
     arr = np.asarray(arr, dtype=float)
-    if arr.size == 0:
+
+    if arr.size == 0 or width <= 0:
         return ""
+
+    if arr.size > width:
+        idx = np.linspace(0, arr.size - 1, width).astype(int)
+        arr = arr[idx]
+
     mn, mx = np.nanmin(arr), np.nanmax(arr)
     if mx == mn:
         return ticks[0] * len(arr)
@@ -549,7 +565,7 @@ def run_walk_forward(initial_champions=None):
             except Exception:
                 combined_eq = None
         if combined_eq is not None and not combined_eq.empty:
-            print(f"Combined Equity: {_sparkline(combined_eq.values)}")
+            print(f"Combined Equity: {_sparkline(combined_eq.values, width=80)}")
         return {
             'folds': results_df,
             'average_fitness': avg_fitness,
