@@ -49,24 +49,41 @@ def main():
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
 
-    print(
-        "Loading TRAINING data from "
-        f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
-    )
-    ohlc_data = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=config.TRAINING_PERIOD['start'],
-        end_date=config.TRAINING_PERIOD['end'],
-        interval=config.TIMEFRAME
-    )
-    if ohlc_data.empty: return
+    # Load price data.  When multi-asset mode is enabled we fetch and align data
+    # for each asset in the configured group; otherwise fall back to the single
+    # selected asset as before.
+    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+        print("Loading TRAINING data for asset group...")
+        ohlc_data = data_loader.get_group_data(
+            asset_group=config.ASSET_GROUP,
+            start_date=config.TRAINING_PERIOD["start"],
+            end_date=config.TRAINING_PERIOD["end"],
+            interval=config.TIMEFRAME,
+            coverage_threshold=config.COVERAGE_THRESHOLD,
+        )
+        if not ohlc_data:
+            return
+    else:
+        print(
+            "Loading TRAINING data from "
+            f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
+        )
+        ohlc_data = data_loader.get_data(
+            ticker=config.TICKER,
+            start_date=config.TRAINING_PERIOD['start'],
+            end_date=config.TRAINING_PERIOD['end'],
+            interval=config.TIMEFRAME
+        )
+        if ohlc_data.empty:
+            return
 
     print("Parsing strategy rules to identify genes for optimization...")
     gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
     if not gene_space: print("No genes found. Exiting."); return
     print(f"Found {len(gene_space)} genes to optimize:"); pprint.pprint(gene_map); print("-" * 35)
 
-    fitness_evaluator = fitness.FitnessEvaluator(
+    # Build the appropriate fitness evaluator (single- or multi-asset)
+    fitness_evaluator = fitness.get_fitness_evaluator(
         ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
     )
     fitness_function = fitness_evaluator.__call__
