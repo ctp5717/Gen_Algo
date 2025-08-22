@@ -21,6 +21,11 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 # verbosity on subsequent calls.
 _group_load_count = 0
 
+# Keep track of assets excluded during the most recent ``get_group_data``
+# invocation so other modules (e.g. walk-forward diagnostics) can report them
+# in their summaries and persisted ``details.json`` files.
+_last_excluded_assets: list[dict] = []
+
 
 def _normalize_ticker(ticker: str, source: str) -> str:
     """Normalize ticker symbols for different data sources.
@@ -228,9 +233,11 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
         coverage filter an empty dict is returned.
     """
 
-    global _group_load_count
+    global _group_load_count, _last_excluded_assets
     _group_load_count += 1
     first_call = _group_load_count == 1
+    # Reset record of excluded assets each time the loader is invoked
+    _last_excluded_assets = []
 
     if coverage_threshold is None:
         coverage_threshold = getattr(config, "COVERAGE_THRESHOLD", 0.85)
@@ -269,6 +276,13 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
         if coverage >= coverage_threshold:
             filtered[ticker] = df
         else:
+            pct = round(coverage * 100, 2)
+            _last_excluded_assets.append({
+                "ticker": ticker,
+                "coverage": pct,
+                "reason": "low_coverage",
+            })
+            print(f"Excluded: {ticker} ({pct:.0f}%)")
             if first_call:
                 print(
                     f"WARNING: {ticker} below coverage threshold ({coverage_threshold:.0%})"
@@ -292,4 +306,10 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
         )
 
     return aligned
+
+
+def get_last_excluded_assets() -> list[dict]:
+    """Return assets excluded during the last :func:`get_group_data` call."""
+
+    return list(_last_excluded_assets)
 
