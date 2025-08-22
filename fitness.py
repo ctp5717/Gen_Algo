@@ -302,15 +302,24 @@ class MultiAssetFitnessEvaluator:
                     best_trades = max(self._current_gen_scores, key=lambda x: x[0])[1]
                     if self._recent_totals.maxlen:
                         self._recent_totals.append(best_trades)
-                if self._recent_totals:
+                adaptive = self.settings.get("adaptive_floor", {})
+                if adaptive.get("enabled") and self._recent_totals:
                     arr = np.array(self._recent_totals, dtype=float)
-                    lo, hi = np.percentile(arr, [40, 60])
-                    mid = arr[(arr >= lo) & (arr <= hi)]
-                    candidate = np.median(mid) if mid.size else np.median(arr)
+                    pct = adaptive.get("percentile", 50)
+                    candidate = np.percentile(arr, pct)
+                    bounds = adaptive.get("bounds", {})
+                    b_min = bounds.get("min")
+                    b_max = bounds.get("max")
+                    if b_min is not None:
+                        candidate = max(candidate, b_min)
                     candidate = max(self._base_min_total_trades, candidate)
+                    if b_max is not None:
+                        candidate = min(candidate, b_max)
                     if self._max_total_trades is not None:
                         candidate = min(candidate, self._max_total_trades)
-                    self.settings["min_total_trades"] = int(round(candidate))
+                    effective_floor = int(round(candidate))
+                    self.settings["min_total_trades"] = effective_floor
+                    print(f"[MultiAssetFitnessEvaluator] effective_floor={effective_floor}")
                 self._current_gen_scores.clear()
                 self._current_generation = gen
 
