@@ -394,13 +394,15 @@ class MultiAssetFitnessEvaluator:
                 poor = self.settings.get("poor_score", -999.0)
                 trade_floor = self.settings.get("min_total_trades", 0)
                 floor_ratio = total_trades / max(1, trade_floor)
-                trade_penalty = None
                 mode = self.settings.get("mode")
+                policy_map = self.settings.get("trade_floor_policy_by_phase", {})
+                floor_policy = policy_map.get(
+                    mode, self.settings.get("trade_floor_policy", "hard_floor")
+                )
+                trade_penalty = None
+                F = poor
                 if mode == "walk_forward" and total_trades < trade_floor:
-                    F = poor
                     trade_penalty = "hard_floor"
-                else:
-                    F = poor
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": None,
@@ -411,6 +413,9 @@ class MultiAssetFitnessEvaluator:
                     "assets_ignored": len(self.group_data),
                     "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": None},
                     "fitness": F,
+                    "effective_floor": trade_floor,
+                    "floor_ratio": floor_ratio,
+                    "floor_policy": floor_policy,
                 }
                 self._current_gen_scores.append((F, total_trades))
                 return F
@@ -444,15 +449,28 @@ class MultiAssetFitnessEvaluator:
 
             trade_floor = self.settings.get("min_total_trades", 0)
             floor_ratio = total_trades / max(1, trade_floor)
-            strength = self.settings.get("trade_floor_strength", 1.0)
-            F *= floor_ratio ** strength
-
             poor_score = self.settings.get("poor_score", -999.0)
-            trade_penalty = None
             mode = self.settings.get("mode")
-            if mode == "walk_forward" and total_trades < trade_floor:
-                F = poor_score
-                trade_penalty = "hard_floor"
+            policy_map = self.settings.get("trade_floor_policy_by_phase", {})
+            floor_policy = policy_map.get(
+                mode, self.settings.get("trade_floor_policy", "hard_floor")
+            )
+            strength = self.settings.get("soft_penalty_strength", 1.0)
+            trade_penalty = None
+            if mode == "walk_forward":
+                if total_trades < trade_floor:
+                    F = poor_score
+                    trade_penalty = "hard_floor"
+            elif mode in ("tuning", "ga") and total_trades < trade_floor:
+                F *= floor_ratio ** strength
+                trade_penalty = "soft_penalty"
+            elif total_trades < trade_floor:
+                if floor_policy == "soft_penalty":
+                    F *= floor_ratio ** strength
+                    trade_penalty = "soft_penalty"
+                elif floor_policy == "hard_floor":
+                    F = poor_score
+                    trade_penalty = "hard_floor"
 
             # store diagnostics for optional inspection
             self.last_details = {
@@ -470,6 +488,9 @@ class MultiAssetFitnessEvaluator:
                     "coverage": coverage_penalty,
                 },
                 "fitness": F,
+                "effective_floor": trade_floor,
+                "floor_ratio": floor_ratio,
+                "floor_policy": floor_policy,
             }
             self._current_gen_scores.append((F, total_trades))
             return F
@@ -487,6 +508,12 @@ class MultiAssetFitnessEvaluator:
                 "assets_ignored": len(self.group_data),
                 "penalties": {"trade_floor": "error", "coverage": None},
                 "fitness": poor,
+                "effective_floor": self.settings.get("min_total_trades", 0),
+                "floor_ratio": 0.0,
+                "floor_policy": self.settings.get("trade_floor_policy_by_phase", {}).get(
+                    self.settings.get("mode"),
+                    self.settings.get("trade_floor_policy", "hard_floor"),
+                ),
             }
             return poor
 
