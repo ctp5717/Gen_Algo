@@ -203,8 +203,16 @@ class MultiAssetFitnessEvaluator:
         self.gene_map = gene_map
         defaults = getattr(config, "MULTI_ASSET", {})
         self.settings = copy.deepcopy(defaults)
-        if settings:
-            self.settings.update(settings)
+        user_settings = settings or {}
+        if user_settings:
+            self.settings.update(user_settings)
+        legacy = {
+            "coverage_penalty_lambda": "coverage_penalty_kappa",
+            "min_trades_per_year": "min_total_trades_per_year",
+        }
+        for old, new in legacy.items():
+            if old in user_settings and new not in user_settings:
+                self.settings[new] = user_settings[old]
         # Store original floor and trade history settings for dynamic scaling
         self._base_min_total_trades = self.settings.get("min_total_trades", 0)
         self._max_total_trades = self.settings.get("max_total_trades")

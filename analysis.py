@@ -34,6 +34,10 @@ def persist_details(fitness_evaluator, charts_cfg=None):
     ``config.CHARTS`` and git metadata.
     """
 
+    diag_cfg = getattr(config, "DIAG", None) or getattr(config, "DIAGNOSTICS", {})
+    if not diag_cfg.get("persist_json", True):
+        return None
+
     details = getattr(fitness_evaluator, "last_details", None)
     if not details:
         return None
@@ -401,7 +405,14 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         for t, d in details["per_asset"].items()
         if d["score"] is not None
     ]
-    export_tickers = {t for t, tr in per_asset_trades.items() if tr > 0}
+    charts_cfg = getattr(config, "CHARTS", {}).copy()
+    mode = charts_cfg.get("per_asset_export_mode")
+    if mode is None and "export_all_assets" in charts_cfg:
+        mode = "all" if charts_cfg.get("export_all_assets") else "traded_only"
+    if mode == "all":
+        export_tickers = set(per_asset_trades.keys())
+    else:
+        export_tickers = {t for t, tr in per_asset_trades.items() if tr > 0}
     if scored:
         scored.sort(key=lambda x: x[1])
         bottom = scored[:3]
@@ -431,7 +442,6 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             print(f"  {t}: {reason}")
 
     if per_asset_scores:
-        charts_cfg = getattr(config, "CHARTS", {}).copy()
         if os.getenv("DISABLE_PNG_REPORTS") == "1":
             charts_cfg["save_pngs"] = False
         else:

@@ -22,3 +22,14 @@ def test_persist_details_creates_json(tmp_path, monkeypatch):
     assert expected.exists()
     with expected.open() as f:
         assert json.load(f) == {'a': 1}
+
+
+def test_persist_details_respects_diag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    dummy_eval = types.SimpleNamespace(last_details={'a': 1})
+    monkeypatch.setattr(analysis.subprocess, 'check_output', lambda *a, **k: 'abc123\n')
+    monkeypatch.delattr(analysis.config, 'DIAG', raising=False)
+    monkeypatch.setattr(analysis.config, 'DIAGNOSTICS', {'persist_json': False})
+    out = analysis.persist_details(dummy_eval, charts_cfg={'run_ts': '123'})
+    assert out is None
+    assert not Path('reports').exists()

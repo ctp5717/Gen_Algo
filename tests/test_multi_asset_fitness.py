@@ -407,6 +407,28 @@ def test_all_zero_trade_assets_apply_coverage_penalty():
     assert ev.last_details['assets_ignored'] == 3
 
 
+def test_coverage_penalty_lambda_alias():
+    stats = [
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 0.0, 'trades': 0},
+        {'total_return': 0.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'lambda_dispersion': 0.0,
+        'coverage_penalty_lambda': 0.5,
+        'min_total_trades': 0,
+        'soft_penalty_strength': 0,
+        'poor_score': 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert np.isclose(score, -0.5)
+    assert np.isclose(ev.last_details['penalties']['coverage'], 0.5)
+    assert ev.last_details['assets_included'] == 0
+    assert ev.last_details['assets_ignored'] == 3
+
+
 def test_weight_renormalization():
     stats = [
         {'total_return': 1.0, 'trades': 5},
