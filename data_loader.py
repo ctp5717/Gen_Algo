@@ -143,16 +143,24 @@ def get_data(
     source_used = 'api'
 
     if os.path.exists(cache_filepath):
-        if verbose:
-            print(f"Loading '{normalized_ticker}' data from local cache: {cache_filename}")
         try:
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
-            if verbose:
-                print("Cache loaded successfully.")
-            source_used = 'cache'
-            return (data, source_used) if return_source else data
+            start_ts = pd.to_datetime(start_date)
+            end_ts = pd.to_datetime(end_date)
+            if interval.endswith("d"):
+                tol = pd.Timedelta("1D")
+            else:
+                tol = pd.to_timedelta(interval)
+            if data.index.min() <= start_ts and data.index.max() >= end_ts - tol:
+                source_used = 'cache'
+                if verbose:
+                    print(f"Loading '{normalized_ticker}' data from cache: {cache_filepath}")
+                return (data, source_used) if return_source else data
+            else:
+                if verbose:
+                    print("Cache exists but does not cover requested range. Re-downloading.")
         except Exception as e:
             if verbose:
                 print(f"Error loading from cache file {cache_filepath}: {e}. Re-downloading.")
@@ -198,7 +206,9 @@ def get_data(
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
         if verbose:
-            print(f"Saved data to cache: {cache_filename}")
+            print(
+                f"Downloaded '{normalized_ticker}' from API; saved cache to {cache_filepath}"
+            )
 
         return (data, source_used) if return_source else data
 

@@ -19,10 +19,14 @@ import data_loader
 from utils import _norm_freq
 
 
-_EVAL_CACHE: dict[tuple[str, str], dict] = {}
+_EVAL_CACHE: dict[tuple[str, str, int], dict] = {}
 
 
-def format_settings_summary(settings: dict, coverage_threshold: float | None = None) -> str:
+def format_settings_summary(
+    settings: dict,
+    coverage_threshold: float | None = None,
+    sample_size: int | None = None,
+) -> str:
     """Return a human-friendly summary of multi-asset settings."""
 
     lam = settings.get("lambda_dispersion")
@@ -37,17 +41,30 @@ def format_settings_summary(settings: dict, coverage_threshold: float | None = N
     floor = settings.get("min_total_trades")
     cov = coverage_threshold
     cov_str = f"{cov * 100:.0f}%" if cov is not None else "n/a"
-    return (
+    msg = (
         "objective=μ−λσ | "
         f"λ={lam} | PF_CAP={pf_cap} | SORTINO_CAP={sortino_cap} | "
         f"squash={squash_repr} | effective_floor={floor} | coverage_threshold={cov_str}"
     )
+    adaptive = settings.get("adaptive_floor", {})
+    if adaptive.get("enabled"):
+        pct = adaptive.get("percentile")
+        bounds = adaptive.get("bounds", {})
+        b_min = bounds.get("min")
+        b_max = bounds.get("max")
+        n = sample_size or 0
+        msg += f" (percentile {pct} over {n} samples; bounds [{b_min}, {b_max}])"
+    return msg
 
 
-def print_settings_summary(settings: dict, coverage_threshold: float | None = None) -> None:
+def print_settings_summary(
+    settings: dict,
+    coverage_threshold: float | None = None,
+    sample_size: int | None = None,
+) -> None:
     """Print a one-line summary of evaluator settings."""
 
-    print(format_settings_summary(settings, coverage_threshold))
+    print(format_settings_summary(settings, coverage_threshold, sample_size))
 
 
 def _hash_rules(rules: dict) -> str:
@@ -206,6 +223,7 @@ class MultiAssetFitnessEvaluator:
         user_settings = settings or {}
         if user_settings:
             self.settings.update(user_settings)
+        self.settings.setdefault("mode", "ga")
         legacy = {
             "coverage_penalty_lambda": "coverage_penalty_kappa",
             "min_trades_per_year": "min_total_trades_per_year",
@@ -246,7 +264,11 @@ class MultiAssetFitnessEvaluator:
             self.coverage_exclusions = data_loader.get_last_excluded_assets()
         except Exception:
             self.coverage_exclusions = []
-        print_settings_summary(self.settings, getattr(config, "COVERAGE_THRESHOLD", None))
+        print_settings_summary(
+            self.settings,
+            getattr(config, "COVERAGE_THRESHOLD", None),
+            len(self._recent_totals),
+        )
 
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
@@ -301,6 +323,11 @@ class MultiAssetFitnessEvaluator:
     # ------------------------------------------------------------------
     def __call__(self, ga_instance, solution, sol_idx):
         try:
+            mode = self.settings.get("mode")
+            lam = self.settings.get("lambda_dispersion", 0.0)
+            settings_hash = hashlib.sha256(
+                json.dumps(self.settings, sort_keys=True, default=str).encode()
+            ).hexdigest()[:12]
             # Detect generation boundaries and update the dynamic trade floor
             gen = getattr(ga_instance, "generations_completed", self._current_generation)
             if self._current_generation is None:
@@ -327,7 +354,21 @@ class MultiAssetFitnessEvaluator:
                         candidate = min(candidate, self._max_total_trades)
                     effective_floor = int(round(candidate))
                     self.settings["min_total_trades"] = effective_floor
-                    print(f"[MultiAssetFitnessEvaluator] effective_floor={effective_floor}")
+                    adaptive = self.settings.get("adaptive_floor", {})
+                    if adaptive.get("enabled"):
+                        pct = adaptive.get("percentile")
+                        bounds = adaptive.get("bounds", {})
+                        b_min = bounds.get("min")
+                        b_max = bounds.get("max")
+                        n = len(self._recent_totals)
+                        print(
+                            f"[MultiAssetFitnessEvaluator] effective_floor={effective_floor} "
+                            f"(percentile {pct} over {n} samples; bounds [{b_min}, {b_max}])"
+                        )
+                    else:
+                        print(
+                            f"[MultiAssetFitnessEvaluator] effective_floor={effective_floor}"
+                        )
                 self._current_gen_scores.clear()
                 self._current_generation = gen
 
@@ -354,7 +395,7 @@ class MultiAssetFitnessEvaluator:
                 s = self.settings.get("partial_trades_exponent", s)
 
             for ticker, ohlc in self.group_data.items():
-                cache_key = (ticker, rules_hash)
+                cache_key = (ticker, rules_hash, int(config.MAX_HOLD_PERIOD))
                 stats = _EVAL_CACHE.get(cache_key)
                 if stats is None:
                     stats = self._evaluate_single_asset(ohlc, rules)
@@ -369,12 +410,14 @@ class MultiAssetFitnessEvaluator:
                 insufficient = trades < per_asset_min_trades
 
                 # Pre-compute capped metrics and drawdown score for storage
+                nan_replaced = False
                 pf_raw = stats.get("profit_factor")
                 pf_cap = self.settings.get(
                     "pf_cap", self.settings.get("winsorize_pf_cap")
                 )
                 if pf_raw is None or np.isnan(pf_raw):
                     pf_capped = self.settings.get("nan_fallback", 0.0)
+                    nan_replaced = True
                 else:
                     if pf_cap is not None:
                         pf_capped = (
@@ -387,6 +430,7 @@ class MultiAssetFitnessEvaluator:
                 sortino_cap = self.settings.get("sortino_cap")
                 if sortino_raw is None or np.isnan(sortino_raw):
                     sortino_capped = self.settings.get("nan_fallback", 0.0)
+                    nan_replaced = True
                 else:
                     if sortino_cap is not None:
                         sortino_capped = (
@@ -400,6 +444,7 @@ class MultiAssetFitnessEvaluator:
                 dd_raw = stats.get("max_drawdown")
                 if dd_raw is None or np.isnan(dd_raw):
                     dd_raw = 100.0
+                    nan_replaced = True
                 drawdown_score = 1 - (dd_raw / 100.0)
 
                 penalties = {}
@@ -428,6 +473,8 @@ class MultiAssetFitnessEvaluator:
                         "shrinkage_multiplier": None,
                         "shrinkage": shrinkage_info,
                         "penalties": None,
+                        "ignored_reason": "zero_trades",
+                        "nan_replaced": nan_replaced,
                         "caps": {
                             "profit_factor": {
                                 "raw": pf_raw,
@@ -471,7 +518,9 @@ class MultiAssetFitnessEvaluator:
                     shrinkage_multiplier = (trades / k) ** s
                     val *= shrinkage_multiplier
                     shrinkage_info["applied"] = True
-                    shrinkage_info["multiplier"] = shrinkage_multiplier
+                elif shrink_enabled and k is not None and trades >= k:
+                    shrinkage_multiplier = 1.0
+                shrinkage_info["multiplier"] = shrinkage_multiplier
 
                 if clip_abs is not None:
                     val = float(np.clip(val, -abs(clip_abs), abs(clip_abs)))
@@ -489,6 +538,7 @@ class MultiAssetFitnessEvaluator:
                     "shrinkage_multiplier": shrinkage_multiplier,
                     "shrinkage": shrinkage_info,
                     "penalties": penalties or None,
+                    "nan_replaced": nan_replaced,
                     "caps": {
                         "profit_factor": {
                             "raw": pf_raw,
@@ -507,15 +557,13 @@ class MultiAssetFitnessEvaluator:
                 poor = self.settings.get("poor_score", -999.0)
                 trade_floor = self.settings.get("min_total_trades", 0)
                 floor_ratio = total_trades / max(1, trade_floor)
-                mode = self.settings.get("mode")
                 policy_map = self.settings.get("trade_floor_policy_by_phase", {})
                 floor_policy = policy_map.get(
                     mode, self.settings.get("trade_floor_policy", "hard_floor")
                 )
-                trade_penalty = None
+                floor_fail = mode == "walk_forward" and total_trades < trade_floor
+                trade_penalty = "hard_floor" if floor_fail else None
                 F = poor
-                if mode == "walk_forward" and total_trades < trade_floor:
-                    trade_penalty = "hard_floor"
 
                 coverage_penalty = None
                 if (
@@ -525,18 +573,32 @@ class MultiAssetFitnessEvaluator:
                 ):
                     kappa = self.settings.get("coverage_penalty_kappa")
                     coverage_penalty = kappa * 1.0
-                    F -= coverage_penalty
+                    if not floor_fail:
+                        F -= coverage_penalty
+
+                comp_clip = self.settings.get("clip_composite_abs")
+                if comp_clip is not None and not floor_fail:
+                    F = float(np.clip(F, -abs(comp_clip), abs(comp_clip)))
+
+                nan_replaced_count = sum(
+                    1 for d in per_asset_details.values() if d.get("nan_replaced")
+                )
 
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": None,
                     "sigma": None,
+                    "lambda": lam,
                     "lambda_sigma": None,
                     "total_trades": total_trades,
                     "assets_included": 0,
                     "assets_ignored": len(self.group_data),
                     "excluded_assets": self.coverage_exclusions + zero_trade_exclusions,
-                    "penalties": {"trade_floor": trade_penalty, "floor_ratio": floor_ratio, "coverage": coverage_penalty},
+                    "penalties": {
+                        "trade_floor": trade_penalty,
+                        "floor_ratio": floor_ratio,
+                        "coverage": coverage_penalty,
+                    },
                     "fitness": F,
                     "effective_floor": trade_floor,
                     "floor_ratio": floor_ratio,
@@ -546,6 +608,12 @@ class MultiAssetFitnessEvaluator:
                     "squash": self.settings.get("squash"),
                     "squash_params": self.settings.get("squash_params"),
                     "coverage_threshold": getattr(config, "COVERAGE_THRESHOLD", None),
+                    "floor_fail": floor_fail,
+                    "phase": mode,
+                    "rules_hash": rules_hash,
+                    "settings_hash": settings_hash,
+                    "assets_total": len(self.group_data),
+                    "nan_replaced_count": nan_replaced_count,
                 }
                 self._current_gen_scores.append((F, total_trades))
                 return F
@@ -561,12 +629,18 @@ class MultiAssetFitnessEvaluator:
 
             m_arr = np.array(per_asset_metrics, dtype=float)
             w_arr = np.array(weights, dtype=float)
-            mu, sigma = weighted_mean_std(m_arr, w_arr)
-
-            lam = self.settings.get("lambda_dispersion", 0.0)
+            if len(per_asset_metrics) == 1:
+                mu = float(m_arr[0])
+                sigma = 0.0
+            else:
+                mu, sigma = weighted_mean_std(m_arr, w_arr)
+            nan_fallback = self.settings.get("nan_fallback", 0.0)
+            if np.isnan(mu):
+                mu = nan_fallback
+            if np.isnan(sigma):
+                sigma = 0.0
             F = mu - lam * sigma
 
-            # Coverage penalty is computed regardless of trade floor policy
             coverage_penalty = 0.0
             if (
                 self.settings.get("zero_trade_policy") == "ignore"
@@ -575,22 +649,22 @@ class MultiAssetFitnessEvaluator:
                 kappa = self.settings.get("coverage_penalty_kappa")
                 coverage = len(included_assets) / max(1, len(self.group_data))
                 coverage_penalty = kappa * (1 - coverage)
-                F -= coverage_penalty
 
             trade_floor = self.settings.get("min_total_trades", 0)
             floor_ratio = total_trades / max(1, trade_floor)
             poor_score = self.settings.get("poor_score", -999.0)
-            mode = self.settings.get("mode")
             policy_map = self.settings.get("trade_floor_policy_by_phase", {})
             floor_policy = policy_map.get(
                 mode, self.settings.get("trade_floor_policy", "hard_floor")
             )
             strength = self.settings.get("soft_penalty_strength", 1.0)
             trade_penalty = None
+            floor_fail = False
             if mode == "walk_forward":
                 if total_trades < trade_floor:
                     F = poor_score
                     trade_penalty = "hard_floor"
+                    floor_fail = True
             elif mode in ("tuning", "ga") and total_trades < trade_floor:
                 F *= floor_ratio ** strength
                 trade_penalty = "soft_penalty"
@@ -601,14 +675,26 @@ class MultiAssetFitnessEvaluator:
                 elif floor_policy == "hard_floor":
                     F = poor_score
                     trade_penalty = "hard_floor"
+                    floor_fail = True
 
-            # store diagnostics for optional inspection
+            if not floor_fail:
+                F -= coverage_penalty
+                comp_clip = self.settings.get("clip_composite_abs")
+                if comp_clip is not None:
+                    F = float(np.clip(F, -abs(comp_clip), abs(comp_clip)))
+            if np.isnan(F):
+                F = nan_fallback
+
+            nan_replaced_count = sum(
+                1 for d in per_asset_details.values() if d.get("nan_replaced")
+            )
+
             self.last_details = {
                 "per_asset": per_asset_details,
-                "mu": mu,
-                "sigma": sigma,
+                "mu": None if floor_fail else mu,
+                "sigma": None if floor_fail else sigma,
                 "lambda": lam,
-                "lambda_sigma": lam * sigma,
+                "lambda_sigma": None if floor_fail else lam * sigma,
                 "total_trades": total_trades,
                 "assets_included": len(included_assets),
                 "assets_ignored": len(self.group_data) - len(included_assets),
@@ -627,6 +713,12 @@ class MultiAssetFitnessEvaluator:
                 "squash": self.settings.get("squash"),
                 "squash_params": self.settings.get("squash_params"),
                 "coverage_threshold": getattr(config, "COVERAGE_THRESHOLD", None),
+                "floor_fail": floor_fail,
+                "phase": mode,
+                "rules_hash": rules_hash,
+                "settings_hash": settings_hash,
+                "assets_total": len(self.group_data),
+                "nan_replaced_count": nan_replaced_count,
             }
             self._current_gen_scores.append((F, total_trades))
             return F
@@ -638,6 +730,7 @@ class MultiAssetFitnessEvaluator:
                 "per_asset": {},
                 "mu": None,
                 "sigma": None,
+                "lambda": lam,
                 "lambda_sigma": None,
                 "total_trades": 0,
                 "assets_included": 0,
@@ -656,6 +749,12 @@ class MultiAssetFitnessEvaluator:
                 "squash": self.settings.get("squash"),
                 "squash_params": self.settings.get("squash_params"),
                 "coverage_threshold": getattr(config, "COVERAGE_THRESHOLD", None),
+                "floor_fail": False,
+                "phase": mode,
+                "rules_hash": locals().get("rules_hash"),
+                "settings_hash": locals().get("settings_hash"),
+                "assets_total": len(self.group_data),
+                "nan_replaced_count": 0,
             }
             return poor
 
@@ -670,7 +769,8 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
         mapping of ticker -> DataFrame.  Otherwise it is a single DataFrame.
     """
 
-    settings = getattr(config, "MULTI_ASSET", {})
+    settings = copy.deepcopy(getattr(config, "MULTI_ASSET", {}))
     if settings.get("enabled") and isinstance(ohlc_data, dict):
+        settings.setdefault("mode", "ga")
         return MultiAssetFitnessEvaluator(ohlc_data, base_rules, gene_map, settings)
     return FitnessEvaluator(ohlc_data, base_rules, gene_map)

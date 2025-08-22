@@ -639,6 +639,7 @@ def test_per_asset_diagnostics_include_pf_drawdown_and_penalties():
         "min_total_trades": 0,
         "lambda_dispersion": 0.0,
         "soft_penalty_strength": 0,
+        "squash": False,
     }
     df = pd.DataFrame({"Close": [1, 2, 3]})
     group_data = {"A": df, "B": df}
@@ -664,6 +665,7 @@ def test_caps_logged():
         "min_total_trades": 0,
         "lambda_dispersion": 0.0,
         "soft_penalty_strength": 0,
+        "squash": False,
     }
     df = pd.DataFrame({"Close": [1, 2, 3]})
     ev = _make_evaluator(settings, stats, {"A": df})
@@ -737,6 +739,7 @@ def test_metric_options():
                 "lambda_dispersion": 0.0,
                 "min_total_trades": 0,
                 "soft_penalty_strength": 0,
+                "squash": False,
             },
             stats,
         )
@@ -904,6 +907,61 @@ def test_floor_scaling_modes():
     assert np.isclose(ev(None, [], 0), 1.0)
 
 
+def test_walk_forward_floor_fail_records_penalty_without_applying():
+    stats = [
+        {"total_return": 1.0, "trades": 2},
+        {"total_return": 1.0, "trades": 1},
+        {"total_return": 1.0, "trades": 0},
+    ]
+    settings = {
+        "metric": "return",
+        "mode": "walk_forward",
+        "min_total_trades": 5,
+        "per_asset_min_trades": 1,
+        "zero_trade_policy": "ignore",
+        "poor_score": -999.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    details = ev.last_details
+    assert score == -999.0
+    assert details.get("floor_fail") is True
+    assert details.get("mu") is None
+    assert details.get("sigma") is None
+    assert details.get("lambda_sigma") is None
+    cov_pen = details.get("penalties", {}).get("coverage")
+    assert isinstance(cov_pen, (int, float)) and cov_pen > 0
+    assert score == settings["poor_score"]
+
+
+def test_walk_forward_floor_fail_zero_assets():
+    stats = [
+        {"total_return": 0.0, "trades": 0},
+        {"total_return": 0.0, "trades": 0},
+    ]
+    df = pd.DataFrame({"Close": [1, 2, 3]})
+    group = {"A": df, "B": df}
+    settings = {
+        "metric": "return",
+        "mode": "walk_forward",
+        "min_total_trades": 1,
+        "per_asset_min_trades": 1,
+        "zero_trade_policy": "ignore",
+        "poor_score": -999.0,
+    }
+    ev = _make_evaluator(settings, stats, group_data=group)
+    score = ev(None, [], 0)
+    details = ev.last_details
+    assert score == -999.0
+    assert details.get("floor_fail") is True
+    assert details.get("assets_included") == 0
+    assert details.get("mu") is None
+    assert details.get("sigma") is None
+    assert details.get("lambda_sigma") is None
+    cov_pen = details.get("penalties", {}).get("coverage")
+    assert isinstance(cov_pen, (int, float)) and cov_pen > 0
+
+
 @pytest.mark.parametrize(
     "metrics, lam, expected",
     [
@@ -973,3 +1031,112 @@ def test_squash_monotonic_and_bounded():
     assert all(-1 <= v <= 1 for v in s_vals + pf_vals)
     assert s_vals[0] < s_vals[1]
     assert pf_vals[0] < pf_vals[1]
+
+
+def test_soft_penalty_monotonicity():
+    def stats(trades):
+        return [{
+            "sortino": 1.0,
+            "profit_factor": 1.0,
+            "max_drawdown": 10.0,
+            "trades": trades,
+        }]
+    settings = {
+        "lambda_dispersion": 0.0,
+        "min_total_trades": 10,
+        "soft_penalty_strength": 1.0,
+        "low_trade_shrink": {"enabled": False},
+        "mode": "ga",
+    }
+    group1 = {"A": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev1 = _make_evaluator(settings, stats(1), group1)
+    f1 = ev1(None, [], 0)
+    fitness._EVAL_CACHE.clear()
+    group2 = {"B": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev2 = _make_evaluator(settings, stats(5), group2)
+    f2 = ev2(None, [], 0)
+    assert f2 >= f1
+
+
+def test_shrinkage_multiplier_monotonic():
+    def stats(trades):
+        return [{
+            "sortino": 1.0,
+            "profit_factor": 1.0,
+            "max_drawdown": 10.0,
+            "trades": trades,
+        }]
+    settings = {
+        "lambda_dispersion": 0.0,
+        "min_total_trades": 0,
+        "soft_penalty_strength": 0.0,
+        "low_trade_shrink": {"enabled": True, "k": 3, "s": 1.0},
+        "mode": "ga",
+    }
+    group1 = {"A": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev1 = _make_evaluator(settings, stats(1), group1)
+    ev1(None, [], 0)
+    sh1 = ev1.last_details["per_asset"]["A"]["shrinkage_multiplier"]
+    fitness._EVAL_CACHE.clear()
+    group2 = {"B": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev2 = _make_evaluator(settings, stats(2), group2)
+    ev2(None, [], 0)
+    sh2 = ev2.last_details["per_asset"]["B"]["shrinkage_multiplier"]
+    fitness._EVAL_CACHE.clear()
+    group3 = {"C": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev3 = _make_evaluator(settings, stats(3), group3)
+    ev3(None, [], 0)
+    sh3 = ev3.last_details["per_asset"]["C"]["shrinkage_multiplier"]
+    assert sh1 < sh2 < sh3
+    assert sh1 == pytest.approx(1/3)
+    assert sh3 == pytest.approx(1.0)
+
+
+def test_weight_renormalization_with_exclusions():
+    stats = [
+        {"sortino": 1.0, "profit_factor": 1.0, "max_drawdown": 0.0, "trades": 5},
+        {"sortino": 1.0, "profit_factor": 1.0, "max_drawdown": 0.0, "trades": 0},
+        {"sortino": 5.0, "profit_factor": 1.0, "max_drawdown": 0.0, "trades": 5},
+    ]
+    group = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+        "C": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    settings = {
+        "asset_weights": {"A": 2, "B": 1, "C": 1},
+        "lambda_dispersion": 0.0,
+        "min_total_trades": 0,
+        "soft_penalty_strength": 0.0,
+        "squash": False,
+        "mode": "ga",
+    }
+    ev = _make_evaluator(settings, stats, group)
+    ev(None, [], 0)
+    details = ev.last_details
+    assert details["assets_included"] == 2
+    norm_w = np.array([2, 1]) / 3
+    assert abs(norm_w.sum() - 1.0) < 1e-12
+    expected_mu = 5 / 3
+    expected_var = norm_w[0] * (1 - expected_mu) ** 2 + norm_w[1] * (3 - expected_mu) ** 2
+    expected_sigma = expected_var ** 0.5
+    assert details["mu"] == pytest.approx(expected_mu)
+    assert details["sigma"] == pytest.approx(expected_sigma)
+
+
+def test_single_asset_sigma_zero():
+    stats = [{"total_return": 1.23, "trades": 5}]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 1.0,
+        "min_total_trades": 0,
+        "soft_penalty_strength": 0.0,
+        "mode": "ga",
+    }
+    group = {"A": pd.DataFrame({"Close": [1, 2, 3]})}
+    ev = _make_evaluator(settings, stats, group)
+    ev(None, [], 0)
+    d = ev.last_details
+    assert d["sigma"] == 0.0
+    assert d["lambda_sigma"] == 0.0
+    assert d["mu"] == pytest.approx(1.23)

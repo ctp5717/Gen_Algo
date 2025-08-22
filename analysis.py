@@ -170,6 +170,7 @@ def log_asset_extremes(details: dict | None, save_path: str | Path | None = None
                 info.get("sortino"),
                 info.get("max_drawdown"),
                 info.get("trades"),
+                info.get("shrinkage_multiplier"),
             )
         )
 
@@ -187,14 +188,14 @@ def log_asset_extremes(details: dict | None, save_path: str | Path | None = None
 
     if not quiet:
         print("Top assets:")
-        for t, _, pf, srt, dd, tr in top:
+        for t, _, pf, srt, dd, tr, sh in top:
             print(
-                f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
+                f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}, shrink_mult={fmt(sh)}"
             )
         print("Bottom assets:")
-        for t, _, pf, srt, dd, tr in bottom:
+        for t, _, pf, srt, dd, tr, sh in bottom:
             print(
-                f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}"
+                f"  {t}: PF={fmt(pf)}, Sortino={fmt(srt)}, MaxDD%={fmt(dd)}, Trades={tr}, shrink_mult={fmt(sh)}"
             )
 
     if save_path:
@@ -210,8 +211,9 @@ def log_asset_extremes(details: dict | None, save_path: str | Path | None = None
                     "sortino": srt,
                     "max_drawdown": dd,
                     "trades": tr,
+                    "shrink_mult": sh,
                 }
-                for t, sc, pf, srt, dd, tr in top
+                for t, sc, pf, srt, dd, tr, sh in top
             ],
             "bottom": [
                 {
@@ -221,8 +223,9 @@ def log_asset_extremes(details: dict | None, save_path: str | Path | None = None
                     "sortino": srt,
                     "max_drawdown": dd,
                     "trades": tr,
+                    "shrink_mult": sh,
                 }
-                for t, sc, pf, srt, dd, tr in bottom
+                for t, sc, pf, srt, dd, tr, sh in bottom
             ],
         }
 
@@ -352,8 +355,11 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         print("No validation data available for asset group.")
         return
 
-    settings = config.MULTI_ASSET
-    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, config.STRATEGY_RULES, gene_map, settings)
+    settings = dict(config.MULTI_ASSET)
+    settings["mode"] = "ga"
+    evaluator = fitness.MultiAssetFitnessEvaluator(
+        group_data, config.STRATEGY_RULES, gene_map, settings
+    )
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
     global last_details
@@ -369,16 +375,21 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         t: d.get("equity_curve") for t, d in details["per_asset"].items() if d.get("included")
     }
     ignored_assets = {
-        t: d.get("ignored_reason", "unknown")
-        for t, d in details["per_asset"].items()
-        if not d.get("included")
+        ex.get("ticker"): ex.get("reason", "unknown")
+        for ex in details.get("excluded_assets", [])
     }
+    for t, d in details["per_asset"].items():
+        if not d.get("included"):
+            reason = d.get("ignored_reason") or ignored_assets.get(t, "unknown")
+            ignored_assets[t] = reason
     mu = details.get("mu")
     sigma = details.get("sigma")
     lam_sigma = details.get("lambda_sigma")
     lam = details.get("lambda")
     total_trades = details.get("total_trades", 0)
     cov_pen = details.get("penalties", {}).get("coverage")
+    floor_policy = details.get("floor_policy")
+    floor_ratio = details.get("floor_ratio")
     cov_pen = cov_pen if isinstance(cov_pen, (int, float)) else 0.0
     assets_incl = details.get("assets_included")
     total_assets = len(group_data)
@@ -393,7 +404,8 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     assets_str = f"{assets_incl}/{total_assets}"
     print(
         "Fitness: {f:.3f} | mu={mu} | sigma={sigma} | lambda={lam} | lambda*sigma={lam_sig} | "
-        "coverage_penalty={cov:.3f} | total_trades={trades} | assets={assets}".format(
+        "coverage_penalty={cov:.3f} | total_trades={trades} | assets={assets} | "
+        "floor_policy={fp} | floor_ratio={fr:.2f}".format(
             f=F,
             mu=mu_str,
             sigma=sigma_str,
@@ -402,6 +414,8 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             cov=cov_pen,
             trades=total_trades,
             assets=assets_str,
+            fp=floor_policy,
+            fr=floor_ratio if isinstance(floor_ratio, (int, float)) else float("nan"),
         )
     )
 
@@ -414,7 +428,11 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             d.get("trades", 0),
             d.get("profit_factor_capped"),
             d.get("drawdown_score"),
+            d.get("sortino_capped"),
             d.get("penalties"),
+            d.get("shrinkage_multiplier"),
+            d.get("included", False),
+            d.get("insufficient", False),
         )
         for t, d in details["per_asset"].items()
         if d["score"] is not None
@@ -432,20 +450,32 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         bottom = scored[:3]
         top = scored[-3:][::-1]
         print("Top assets:")
-        for t, s, tr, pf, dd, pen in top:
+        for t, s, tr, pf, dd, so, pen, sh, inc, insuff in top:
             pf_str = f"{pf:.3f}" if isinstance(pf, (int, float)) else "nan"
             dd_str = f"{dd:.3f}" if isinstance(dd, (int, float)) else "nan"
+            so_str = f"{so:.3f}" if isinstance(so, (int, float)) else "nan"
             pen_str = pen if pen else "None"
+            sh_str = f"{sh:.2f}" if isinstance(sh, (int, float)) else "nan"
+            inc_flag = "Y" if inc else "N"
+            insuff_flag = "Y" if insuff else "N"
             print(
-                f"  {t}: score={s:.3f}, trades={tr}, pf={pf_str}, dd={dd_str}, penalties={pen_str}"
+                f"  {t}: score={s:.3f}, trades={tr}, shrink={sh_str}, pf={pf_str}, "
+                f"sortino={so_str}, dd={dd_str}, penalties={pen_str}, included={inc_flag}, "
+                f"insufficient={insuff_flag}"
             )
         print("Bottom assets:")
-        for t, s, tr, pf, dd, pen in bottom:
+        for t, s, tr, pf, dd, so, pen, sh, inc, insuff in bottom:
             pf_str = f"{pf:.3f}" if isinstance(pf, (int, float)) else "nan"
             dd_str = f"{dd:.3f}" if isinstance(dd, (int, float)) else "nan"
+            so_str = f"{so:.3f}" if isinstance(so, (int, float)) else "nan"
             pen_str = pen if pen else "None"
+            sh_str = f"{sh:.2f}" if isinstance(sh, (int, float)) else "nan"
+            inc_flag = "Y" if inc else "N"
+            insuff_flag = "Y" if insuff else "N"
             print(
-                f"  {t}: score={s:.3f}, trades={tr}, pf={pf_str}, dd={dd_str}, penalties={pen_str}"
+                f"  {t}: score={s:.3f}, trades={tr}, shrink={sh_str}, pf={pf_str}, "
+                f"sortino={so_str}, dd={dd_str}, penalties={pen_str}, included={inc_flag}, "
+                f"insufficient={insuff_flag}"
             )
         export_tickers.update(t for t, *_ in top)
         export_tickers.update(t for t, *_ in bottom)

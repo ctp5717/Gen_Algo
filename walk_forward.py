@@ -259,7 +259,10 @@ def run_walk_forward(initial_champions=None):
         gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
         if multi:
             settings_train = dict(config.MULTI_ASSET)
-            evaluator = fitness.MultiAssetFitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map, settings_train)
+            settings_train["mode"] = "ga"
+            evaluator = fitness.MultiAssetFitnessEvaluator(
+                train_data, config.STRATEGY_RULES, gene_map, settings_train
+            )
             print(f"Training trade floor: {evaluator.settings.get('min_total_trades')}")
         else:
             evaluator = fitness.get_fitness_evaluator(train_data, config.STRATEGY_RULES, gene_map)
@@ -301,7 +304,10 @@ def run_walk_forward(initial_champions=None):
         rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         if multi:
             settings_val = dict(config.MULTI_ASSET)
-            test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
+            settings_val["mode"] = "walk_forward"
+            test_eval = fitness.MultiAssetFitnessEvaluator(
+                test_data, config.STRATEGY_RULES, gene_map, settings_val
+            )
             ev_name = type(test_eval).__name__
             objective = getattr(test_eval, "settings", {}).get("metric", "composite")
             print(f"[WalkForward] Validation evaluator: {ev_name} | Objective: {objective}")
@@ -333,6 +339,7 @@ def run_walk_forward(initial_champions=None):
                             "PF": d.get("profit_factor_capped"),
                             "Sortino": d.get("sortino_capped"),
                             "Drawdown": d.get("max_drawdown"),
+                            "Shrink Mult": d.get("shrinkage_multiplier"),
                             "Included": d.get("included"),
                             "Penalties": d.get("penalties"),
                         }
@@ -370,6 +377,11 @@ def run_walk_forward(initial_champions=None):
             print(f"Trades | Floor: {trades} | {floor}")
             print(f"Assets Traded: {assets_str}")
             print(f"coverage_penalty: {cov_pen:.4f}")
+            print(
+                f"phase: {details.get('phase')} | "
+                f"floor_policy: {details.get('floor_policy')} | "
+                f"floor_ratio: {details.get('floor_ratio'):.2f}"
+            )
             print(
                 "Validation fitness: {val:.4f} | mu={mu} | sigma={sig} | "
                 "lambda={lam} | lambda*sigma={lam_sig}".format(
@@ -421,6 +433,10 @@ def run_walk_forward(initial_champions=None):
                 'Total Trades': details.get('total_trades'),
                 'Coverage Penalty': cov_pen,
                 'Assets Traded': assets_str,
+                'Floor Policy': details.get('floor_policy'),
+                'Floor Ratio': details.get('floor_ratio'),
+                'Phase': details.get('phase'),
+                'Floor Fail': details.get('floor_fail', False),
                 'Equity Curve': combined_eq,
                 'Params': winning_params,
             })
@@ -538,9 +554,14 @@ def run_walk_forward(initial_champions=None):
         avg_fitness = results_df['Fitness'].mean()
         poor = config.MULTI_ASSET.get("poor_score", -999.0)
         total_folds = len(results_df)
-        fails = (results_df['Fitness'] == poor).sum()
+        if 'Floor Fail' in results_df.columns:
+            fails = results_df['Floor Fail'].sum()
+            valid = results_df[~results_df['Floor Fail']]
+        else:
+            mask = (results_df['Fitness'] - poor).abs() < 1e-9
+            fails = mask.sum()
+            valid = results_df[~mask]
         floor_fail_rate = fails / total_folds if total_folds else float("nan")
-        valid = results_df[results_df['Fitness'] != poor]
         mean_fit = valid['Fitness'].mean()
         median_fit = valid['Fitness'].median()
         median_mu = pd.to_numeric(valid['Mu'], errors='coerce').median()

@@ -16,6 +16,12 @@ import os
 DETERMINISTIC = True
 RANDOM_SEED = 42
 
+# When enabled the framework favours more dispersion-aware configurations by
+# restricting certain hyperparameter grids (notably ``lambda_dispersion``) and
+# performing additional validation passes. Disable to allow mean-only
+# solutions during tuning.
+ROBUSTNESS_MODE = True
+
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"
@@ -184,6 +190,15 @@ HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4, "lambda_dispersion": 0.5},
 ]
 
+# In robustness mode we intentionally bias tuning towards dispersion-aware
+# solutions by excluding mean-only (lambda=0) configurations.
+if ROBUSTNESS_MODE:
+    HYPERPARAMETER_SEARCH_SPACE = [
+        p
+        for p in HYPERPARAMETER_SEARCH_SPACE
+        if p.get("lambda_dispersion") in (0.25, 0.5)
+    ]
+
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
     "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 0
@@ -209,13 +224,10 @@ MULTI_ASSET = {
     # Caps for individual metrics to dampen outliers
     "pf_cap": PF_CAP,
     "sortino_cap": SORTINO_CAP,
-    # Optional non-linear scaling of the composite via ``tanh(x / c)``
-    # Set to a float to enable, or ``None`` to disable
-    "tanh_c": None,
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Apply tanh squashing to individual metrics before weighting
-    "squash": False,
+    "squash": True,
     "squash_params": {"sortino_c": 6.0, "pf_c": 3.0},
     # Clip per-asset scores before aggregation to stabilise statistics
     # Provide [min, max] or set to None to disable
@@ -240,8 +252,9 @@ MULTI_ASSET = {
         "tuning": "soft_penalty",
         "walk_forward": "hard_floor",
     },
-    "soft_penalty_strength": 1.0,
-    "mode": "walk_forward",
+    # Soft-floor penalty exponent (Rev-B spec uses 0.8 for a gentler ramp)
+    "soft_penalty_strength": 0.8,
+    # Phase mode is selected when constructing the evaluator and defaults to "ga"
     # How to handle assets with zero trades
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,

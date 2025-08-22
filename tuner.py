@@ -30,11 +30,28 @@ def _evaluate_on_validation(solution, gene_map):
         )
         if not val_data:
             return -np.inf
+        settings = config.MULTI_ASSET.copy()
+        settings["mode"] = "tuning"
+        if getattr(config, "ROBUSTNESS_MODE", False):
+            scores: list[float] = []
+            idx = next(iter(val_data.values())).index
+            for df in val_data.values():
+                idx = idx.intersection(df.index)
+            if idx.empty:
+                return -np.inf
+            splits = np.array_split(idx, 3)
+            for win in splits:
+                if len(win) == 0:
+                    continue
+                start, end = win[0], win[-1]
+                sub = {t: df.loc[start:end] for t, df in val_data.items()}
+                evaluator = fitness.MultiAssetFitnessEvaluator(
+                    sub, config.STRATEGY_RULES, gene_map, settings
+                )
+                scores.append(evaluator(None, solution, 0))
+            return float(np.nanmean(scores)) if scores else -np.inf
         evaluator = fitness.MultiAssetFitnessEvaluator(
-            val_data,
-            config.STRATEGY_RULES,
-            gene_map,
-            config.MULTI_ASSET,
+            val_data, config.STRATEGY_RULES, gene_map, settings
         )
         return evaluator(None, solution, 0)
 
