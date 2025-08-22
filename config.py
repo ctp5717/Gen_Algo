@@ -217,6 +217,8 @@ MULTI_ASSET = {
     # Clip per-asset scores before aggregation to stabilise statistics
     # Provide [min, max] or set to None to disable
     "score_clip": None,
+    # Clip the final composite score to +/- this absolute value
+    "clip_composite_abs": None,
     # Group trade floor configuration
     # Require a slightly larger sample of trades across the entire basket to
     # reduce false positives.  Individual assets are permitted to contribute

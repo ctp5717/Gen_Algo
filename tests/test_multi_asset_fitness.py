@@ -786,6 +786,28 @@ def test_score_clipping_stabilises_mu_sigma():
     assert ev.last_details["per_asset"]["C"]["score"] == 20.0
 
 
+def test_composite_abs_clip_limits_final_score():
+    stats = [
+        {"total_return": 10.0, "trades": 5},
+        {"total_return": 10.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 0.0,
+        "min_total_trades": 0,
+        "soft_penalty_strength": 0,
+        "clip_composite_abs": 1.0,
+    }
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    ev = _make_evaluator(settings, stats, group_data)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 1.0)
+    assert np.isclose(ev.last_details["fitness"], 1.0)
+
+
 def test_ga_and_tuner_consistency(monkeypatch):
     stats = {
         'total_return': 1.0,

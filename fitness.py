@@ -286,6 +286,7 @@ class MultiAssetFitnessEvaluator:
             per_asset_details = {}
             total_trades = 0
             clip_range = self.settings.get("score_clip")
+            clip_abs = self.settings.get("clip_composite_abs")
             excluded_assets = list(getattr(self, "excluded_assets", []))
 
             for ticker, ohlc in self.group_data.items():
@@ -450,6 +451,9 @@ class MultiAssetFitnessEvaluator:
                     coverage_penalty = kappa * 1.0
                     F -= coverage_penalty
 
+                if clip_abs is not None:
+                    F = float(np.clip(F, -clip_abs, clip_abs))
+
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": None,
@@ -520,6 +524,9 @@ class MultiAssetFitnessEvaluator:
                     F = poor_score
                     trade_penalty = "hard_floor"
 
+            if clip_abs is not None:
+                F = float(np.clip(F, -clip_abs, clip_abs))
+
             # store diagnostics for optional inspection
             self.last_details = {
                 "per_asset": per_asset_details,
@@ -546,7 +553,10 @@ class MultiAssetFitnessEvaluator:
 
         except Exception as e:
             print(f"Error in multi-asset fitness evaluation: {e}")
+            clip_abs = self.settings.get("clip_composite_abs")
             poor = self.settings.get("poor_score", -999.0)
+            if clip_abs is not None:
+                poor = float(np.clip(poor, -clip_abs, clip_abs))
             self.last_details = {
                 "per_asset": {},
                 "mu": None,
