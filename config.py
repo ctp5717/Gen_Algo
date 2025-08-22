@@ -225,7 +225,12 @@ MULTI_ASSET = {
     "max_total_trades": None,
     "trade_floor_window": 5,
     "trade_floor_policy": "hard_floor",  # retained for backwards compatibility
-    "trade_floor_strength": 1.0,
+    "trade_floor_policy_by_phase": {
+        "ga": "soft_penalty",
+        "tuning": "soft_penalty",
+        "walk_forward": "hard_floor",
+    },
+    "soft_penalty_strength": 1.0,
     "mode": "walk_forward",
     # How to handle assets with zero trades
     "zero_trade_policy": "ignore",  # penalize | ignore
