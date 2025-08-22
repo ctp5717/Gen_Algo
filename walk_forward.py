@@ -349,18 +349,19 @@ def run_walk_forward(initial_champions=None):
             )
             lam_str = f"{lam:.4f}" if isinstance(lam, (int, float)) else "nan"
             assets_str = f"{assets_incl}/{total_assets}"
+            trades = details.get('total_trades')
             floor = test_eval.settings.get('min_total_trades')
+            print(f"Trades | Floor: {trades} | {floor}")
+            print(f"Assets Traded: {assets_str}")
+            print(f"coverage_penalty: {cov_pen:.4f}")
             print(
-                "Validation fitness: {val:.4f} | floor={floor} | mu={mu} | sigma={sig} | "
-                "lambda={lam} | lambda*sigma={lam_sig} | coverage_penalty={cov:.4f} | assets={assets}".format(
+                "Validation fitness: {val:.4f} | mu={mu} | sigma={sig} | "
+                "lambda={lam} | lambda*sigma={lam_sig}".format(
                     val=validation_score,
-                    floor=floor,
                     mu=mu_str,
                     sig=sigma_str,
                     lam=lam_str,
                     lam_sig=lam_sig_str,
-                    cov=cov_pen,
-                    assets=assets_str,
                 )
             )
             poor = config.MULTI_ASSET.get("poor_score", -999.0)

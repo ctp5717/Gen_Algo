@@ -42,6 +42,20 @@ def persist_details(fitness_evaluator, charts_cfg=None):
     if not details:
         return None
 
+    # Ensure key diagnostics are present before persisting
+    settings = getattr(fitness_evaluator, "settings", {})
+    details.setdefault("effective_floor", settings.get("min_total_trades"))
+    details.setdefault("floor_policy", settings.get("trade_floor_policy"))
+    if "floor_ratio" not in details:
+        trades = details.get("total_trades")
+        floor = details.get("effective_floor") or settings.get("min_total_trades")
+        if trades is not None and floor:
+            details["floor_ratio"] = trades / max(1, floor)
+    details.setdefault(
+        "coverage_threshold", getattr(config, "COVERAGE_THRESHOLD", None)
+    )
+    details.setdefault("excluded_assets", [])
+
     cfg = dict(getattr(config, "CHARTS", {})) if charts_cfg is None else charts_cfg.copy()
     run_ts = cfg.get("run_ts") or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     cfg["run_ts"] = run_ts
