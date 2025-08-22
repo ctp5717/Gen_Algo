@@ -323,7 +323,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
 def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     """Generate overview charts for multi-asset validation."""
     print("\n\n--- Multi-Asset Champion Analysis ---")
-    group_data = data_loader.get_group_data(
+    group_data, excluded_assets = data_loader.get_group_data(
         asset_group=config.ASSET_GROUP,
         start_date=config.VALIDATION_PERIOD['start'],
         end_date=config.VALIDATION_PERIOD['end'],
@@ -336,6 +336,7 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
 
     settings = config.MULTI_ASSET
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, config.STRATEGY_RULES, gene_map, settings)
+    evaluator.excluded_assets = excluded_assets
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
     global last_details

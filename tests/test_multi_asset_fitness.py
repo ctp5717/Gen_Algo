@@ -426,6 +426,30 @@ def test_weight_renormalization():
     assert np.isclose(ev(None, [], 0), 0.6, atol=1e-6)
 
 
+def test_excluded_assets_combined():
+    stats = [
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 0.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'lambda_dispersion': 0.0,
+        'min_total_trades': 0,
+        'soft_penalty_strength': 0,
+    }
+    group_data = {
+        'A': pd.DataFrame({'Close': [1, 2, 3]}),
+        'B': pd.DataFrame({'Close': [1, 2, 3]}),
+    }
+    ev = _make_evaluator(settings, stats, group_data)
+    ev.excluded_assets = [{'ticker': 'C', 'reason': 'low_coverage', 'coverage': 0.5}]
+    ev(None, [], 0)
+    excluded = ev.last_details.get('excluded_assets', [])
+    assert {'ticker': 'C', 'reason': 'low_coverage', 'coverage': 0.5} in excluded
+    assert any(e['ticker'] == 'B' and e['reason'] == 'zero_trades' for e in excluded)
+
+
 def test_weight_renormalization_multiple_exclusions():
     stats = [
         {'total_return': 0.5, 'trades': 5},
@@ -786,7 +810,7 @@ def test_ga_and_tuner_consistency(monkeypatch):
         fake_eval,
         raising=False,
     )
-    monkeypatch.setattr(data_loader, 'get_group_data', lambda *args, **kwargs: group_data)
+    monkeypatch.setattr(data_loader, 'get_group_data', lambda *args, **kwargs: (group_data, []))
     monkeypatch.setattr(pd.DataFrame, 'ta', property(lambda self: None), raising=False)
     vbt = sys.modules['vectorbt']
     setattr(vbt, 'Portfolio', object)

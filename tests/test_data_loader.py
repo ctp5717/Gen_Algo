@@ -88,3 +88,27 @@ def test_get_group_data_summary(monkeypatch, capsys):
     assert 'Loading asset data for 2 assets (2020-01-01–2020-01-02) from cache' in out
     assert 'A:' not in out
     assert 'B:' not in out
+
+
+def test_get_group_data_excluded_assets(monkeypatch, capsys):
+    data_loader._group_load_count = 0
+
+    df_full = pd.DataFrame({'Close': [1, 2]}, index=pd.date_range('2020-01-01', periods=2))
+    df_short = pd.DataFrame({'Close': [1]}, index=pd.date_range('2020-01-01', periods=1))
+
+    def fake_get_data(ticker, *args, **kwargs):
+        return (df_full if ticker == 'A' else df_short), 'cache'
+
+    monkeypatch.setattr(data_loader, 'get_data', fake_get_data)
+
+    assets = [('A', 'A'), ('B', 'B')]
+
+    aligned, excluded = data_loader.get_group_data(
+        assets, '2020-01-01', '2020-01-02', '1d', coverage_threshold=0.75
+    )
+    out = capsys.readouterr().out
+
+    assert 'Excluded: B (50%)' in out
+    assert 'B' not in aligned
+    assert excluded and excluded[0]['ticker'] == 'B'
+    assert excluded[0]['reason'] == 'low_coverage'

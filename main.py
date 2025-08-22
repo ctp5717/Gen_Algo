@@ -95,7 +95,7 @@ def main():
     # selected asset as before.
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
         print("Loading TRAINING data for asset group...")
-        ohlc_data = data_loader.get_group_data(
+        ohlc_data, excluded_assets = data_loader.get_group_data(
             asset_group=config.ASSET_GROUP,
             start_date=config.TRAINING_PERIOD["start"],
             end_date=config.TRAINING_PERIOD["end"],
@@ -127,6 +127,8 @@ def main():
     fitness_evaluator = fitness.get_fitness_evaluator(
         ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
     )
+    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+        setattr(fitness_evaluator, "excluded_assets", excluded_assets)
     evaluator_name = type(fitness_evaluator).__name__
     objective = getattr(fitness_evaluator, "settings", {}).get("metric", "composite")
     print(f"Active evaluator: {evaluator_name} | Objective: {objective}")

@@ -203,6 +203,9 @@ def get_data(
         return (pd.DataFrame(), source_used) if return_source else pd.DataFrame()
 
 
+last_excluded_assets = []
+
+
 def get_group_data(asset_group, start_date, end_date, interval, coverage_threshold=None):
     """Load and align OHLCV data for a group of assets.
 
@@ -223,12 +226,13 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
 
     Returns
     -------
-    dict
-        Mapping of ticker -> aligned OHLCV dataframe.  If no assets pass the
-        coverage filter an empty dict is returned.
+    tuple
+        ``(aligned_data, excluded_assets)`` where ``aligned_data`` is a mapping
+        of ``ticker -> DataFrame`` and ``excluded_assets`` is a list of dicts
+        describing assets filtered out with their exclusion reason.
     """
 
-    global _group_load_count
+    global _group_load_count, last_excluded_assets
     _group_load_count += 1
     first_call = _group_load_count == 1
 
@@ -251,7 +255,8 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
             sources.append(src)
 
     if not raw_data:
-        return {}
+        last_excluded_assets = []
+        return {}, []
 
     # Determine the union of timestamps across all assets to evaluate coverage.
     union_index = None
@@ -260,22 +265,26 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
 
     # Filter out assets with insufficient data coverage.
     filtered = {}
+    excluded = []
     possible_bars = len(union_index)
     for ticker, df in raw_data.items():
         bars_present = len(df.index)
-        coverage = bars_present / possible_bars
+        coverage = bars_present / possible_bars if possible_bars else 0
         if first_call:
             print(f"{ticker}: {bars_present}/{possible_bars} bars ({coverage:.0%} coverage)")
         if coverage >= coverage_threshold:
             filtered[ticker] = df
         else:
-            if first_call:
-                print(
-                    f"WARNING: {ticker} below coverage threshold ({coverage_threshold:.0%})"
-                )
+            print(f"Excluded: {ticker} ({coverage*100:.0f}%)")
+            excluded.append({
+                "ticker": ticker,
+                "reason": "low_coverage",
+                "coverage": coverage,
+            })
 
     if not filtered:
-        return {}
+        last_excluded_assets = excluded
+        return {}, excluded
 
     # Align remaining assets to the intersection of their timestamps.
     common_index = None
@@ -284,6 +293,9 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
 
     aligned = {ticker: df.loc[common_index] for ticker, df in filtered.items()}
 
+    # Persist excluded assets for external access
+    last_excluded_assets = excluded
+
     if not first_call and sources:
         unique_sources = set(sources)
         source_str = unique_sources.pop() if len(unique_sources) == 1 else 'mixed'
@@ -291,5 +303,5 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
             f"Loading asset data for {len(asset_group)} assets ({start_date}–{end_date}) from {source_str}"
         )
 
-    return aligned
+    return aligned, excluded
 

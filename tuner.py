@@ -21,7 +21,7 @@ def _evaluate_on_validation(solution, gene_map):
         return -np.inf
 
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
-        val_data = data_loader.get_group_data(
+        val_data, excluded_assets = data_loader.get_group_data(
             asset_group=config.ASSET_GROUP,
             start_date=config.VALIDATION_PERIOD["start"],
             end_date=config.VALIDATION_PERIOD["end"],
@@ -36,6 +36,7 @@ def _evaluate_on_validation(solution, gene_map):
             gene_map,
             config.MULTI_ASSET,
         )
+        evaluator.excluded_assets = excluded_assets
         return evaluator(None, solution, 0)
 
     val_data = data_loader.get_data(

@@ -178,7 +178,7 @@ def run_walk_forward(initial_champions=None):
 
     multi = getattr(config, "MULTI_ASSET", {}).get("enabled")
     if multi:
-        all_data = data_loader.get_group_data(
+        all_data, excluded_assets = data_loader.get_group_data(
             asset_group=config.ASSET_GROUP,
             start_date=start_date,
             end_date=end_date,
@@ -244,6 +244,7 @@ def run_walk_forward(initial_champions=None):
         if multi:
             settings_train = dict(config.MULTI_ASSET)
             evaluator = fitness.MultiAssetFitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map, settings_train)
+            evaluator.excluded_assets = excluded_assets
             print(f"Training trade floor: {evaluator.settings.get('min_total_trades')}")
         else:
             evaluator = fitness.get_fitness_evaluator(train_data, config.STRATEGY_RULES, gene_map)
@@ -286,6 +287,7 @@ def run_walk_forward(initial_champions=None):
         if multi:
             settings_val = dict(config.MULTI_ASSET)
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
+            test_eval.excluded_assets = excluded_assets
             ev_name = type(test_eval).__name__
             objective = getattr(test_eval, "settings", {}).get("metric", "composite")
             print(f"[WalkForward] Validation evaluator: {ev_name} | Objective: {objective}")

@@ -286,6 +286,7 @@ class MultiAssetFitnessEvaluator:
             per_asset_details = {}
             total_trades = 0
             clip_range = self.settings.get("score_clip")
+            excluded_assets = list(getattr(self, "excluded_assets", []))
 
             for ticker, ohlc in self.group_data.items():
                 cache_key = (ticker, rules_hash)
@@ -363,6 +364,11 @@ class MultiAssetFitnessEvaluator:
                             },
                         },
                     }
+                    excluded_assets.append({
+                        "ticker": ticker,
+                        "reason": "zero_trades",
+                        "trades": trades,
+                    })
                     continue
 
                 metric_type = self.settings.get("metric", "composite")
@@ -457,6 +463,7 @@ class MultiAssetFitnessEvaluator:
                     "effective_floor": trade_floor,
                     "floor_ratio": floor_ratio,
                     "floor_policy": floor_policy,
+                    "excluded_assets": excluded_assets,
                 }
                 self._current_gen_scores.append((F, total_trades))
                 return F
@@ -532,6 +539,7 @@ class MultiAssetFitnessEvaluator:
                 "effective_floor": trade_floor,
                 "floor_ratio": floor_ratio,
                 "floor_policy": floor_policy,
+                "excluded_assets": excluded_assets,
             }
             self._current_gen_scores.append((F, total_trades))
             return F
@@ -555,6 +563,7 @@ class MultiAssetFitnessEvaluator:
                     self.settings.get("mode"),
                     self.settings.get("trade_floor_policy", "hard_floor"),
                 ),
+                "excluded_assets": list(getattr(self, "excluded_assets", [])),
             }
             return poor
 
