@@ -160,6 +160,21 @@ class MultiAssetFitnessEvaluator:
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
+        # Empty or very short dataframes can cause downstream libraries to
+        # raise ``IndexError`` when statistics are requested.  In walk forward
+        # validation some assets may have no data for a given window.  Handle
+        # this case early and return a stub result that indicates zero trades
+        # so that the caller can decide whether to ignore or penalise it.
+        if ohlc is None or ohlc.empty:
+            return {
+                "sortino": None,
+                "profit_factor": None,
+                "max_drawdown": None,
+                "trades": 0,
+                "total_return": None,
+                "equity_curve": pd.Series(dtype=float),
+            }
+
         entries = engine.process_strategy_rules(ohlc, rules)
 
         # Record the actual executed trades using vectorbt.
@@ -208,7 +223,22 @@ class MultiAssetFitnessEvaluator:
             total_trades = 0
 
             for ticker, ohlc in self.group_data.items():
-                stats = self._evaluate_single_asset(ohlc, rules)
+                try:
+                    stats = self._evaluate_single_asset(ohlc, rules)
+                except Exception as e:
+                    # If a single asset fails to evaluate we shouldn't abort
+                    # the entire multi-asset evaluation.  Treat it as having
+                    # zero trades and log the issue for debugging purposes.
+                    print(f"Error evaluating asset {ticker}: {e}")
+                    stats = {
+                        "sortino": None,
+                        "profit_factor": None,
+                        "max_drawdown": None,
+                        "trades": 0,
+                        "total_return": None,
+                        "equity_curve": pd.Series(dtype=float),
+                    }
+
                 trades = stats.get("trades", 0)
                 total_trades += trades
 
@@ -270,7 +300,27 @@ class MultiAssetFitnessEvaluator:
                     }
 
             if not per_asset_metrics:
-                return self.settings.get("nan_fallback", 0.0)
+                F = self.settings.get("nan_fallback", 0.0)
+                coverage_penalty = 0.0
+                if self.settings.get("zero_trade_policy") == "ignore":
+                    kappa = self.settings.get("coverage_penalty", 0.0)
+                    coverage_penalty = kappa  # coverage=0 when no assets included
+                    F -= coverage_penalty
+                self.last_details = {
+                    "per_asset": per_asset_details,
+                    "mu": 0.0,
+                    "sigma": 0.0,
+                    "lambda_sigma": 0.0,
+                    "total_trades": total_trades,
+                    "assets_included": 0,
+                    "assets_ignored": len(self.group_data),
+                    "penalties": {
+                        "trade_floor": None,
+                        "coverage": coverage_penalty,
+                    },
+                    "fitness": F,
+                }
+                return F
 
             # Determine weights for included assets and renormalise
             asset_weights = self.settings.get("asset_weights") or {}
@@ -336,7 +386,19 @@ class MultiAssetFitnessEvaluator:
 
         except Exception as e:
             print(f"Error in multi-asset fitness evaluation: {e}")
-            return self.settings.get("poor_score", -999.0)
+            poor = self.settings.get("poor_score", -999.0)
+            self.last_details = {
+                "per_asset": {},
+                "mu": 0.0,
+                "sigma": 0.0,
+                "lambda_sigma": 0.0,
+                "total_trades": 0,
+                "assets_included": 0,
+                "assets_ignored": len(self.group_data),
+                "penalties": {"trade_floor": None, "coverage": 0.0},
+                "fitness": poor,
+            }
+            return poor
 
 
 def get_fitness_evaluator(ohlc_data, base_rules, gene_map):

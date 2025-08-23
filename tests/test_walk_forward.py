@@ -217,6 +217,7 @@ def test_walk_forward_returns_summary(monkeypatch):
     )
 
     monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, 'enabled', False)
 
     summary = walk_forward.run_walk_forward_validation()
 
