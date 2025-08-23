@@ -33,6 +33,7 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
     monkeypatch.setattr(analysis.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(analysis.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
     monkeypatch.setattr(analysis.config, 'STRATEGY_RULES', {}, raising=False)
+    monkeypatch.setitem(analysis.config.MULTI_ASSET, 'enabled', False)
 
     monkeypatch.setattr(
         analysis.fitness,
