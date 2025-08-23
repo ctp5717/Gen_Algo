@@ -210,12 +210,11 @@ def test_diagnostics_and_factory(monkeypatch):
     assert 'trades' in any_asset
 
     import config as cfg
-    orig = cfg.MULTI_ASSET['enabled']
-    cfg.MULTI_ASSET['enabled'] = False
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'enabled', False)
+    monkeypatch.setitem(fitness.config.MULTI_ASSET, 'enabled', False)
     df = pd.DataFrame({'Close': [1, 2, 3]})
     fe = fitness.get_fitness_evaluator(df, {}, {})
     assert isinstance(fe, fitness.FitnessEvaluator)
-    cfg.MULTI_ASSET['enabled'] = orig
 
 
 def test_metric_options():
@@ -306,3 +305,36 @@ def test_ga_and_tuner_consistency(monkeypatch):
 
     score_val = tuner._evaluate_on_validation(solution, {})
     assert np.isclose(fit, score_val)
+
+
+def test_handles_asset_error_gracefully():
+    """Evaluator should continue even if one asset raises an error."""
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame(),  # empty frame triggers error in evaluation
+    }
+
+    settings = {
+        "metric": "return",
+        "zero_trade_policy": "ignore",
+        "per_asset_min_trades": 1,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+    }
+
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    def fake_eval(self, ohlc, rules):
+        if ohlc.empty:
+            raise IndexError("single positional indexer is out-of-bounds")
+        return {"total_return": 1.0, "trades": 5}
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+    score = ev(None, [], 0)
+
+    # Only asset A contributes to the score
+    assert np.isclose(score, 1.0)
+    assert ev.last_details["assets_included"] == 1
+    assert ev.last_details["assets_ignored"] == 1
