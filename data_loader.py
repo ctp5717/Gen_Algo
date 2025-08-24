@@ -17,6 +17,23 @@ import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
+
+def _normalize_ticker(ticker: str) -> str:
+    """Normalize ticker symbols based on the configured data source.
+
+    When using Binance the framework operates on ``USDT``-settled pairs.  The
+    configuration defines tickers with a ``-USD`` suffix for generality, so we
+    convert those to ``USDT`` and drop any dashes before requesting data.  For
+    other data sources the ticker is returned unchanged.
+    """
+
+    if getattr(config, "DATA_SOURCE", "").lower() == "binance":
+        ticker = ticker.replace("-", "")
+        if ticker.endswith("USD") and not ticker.endswith("USDT"):
+            ticker = ticker[:-3] + "USDT"
+    return ticker
+
+
 def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
     """ Fetches historical kline data from Binance and formats it. """
     print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
@@ -59,7 +76,8 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
     Acts as a router to fetch data from the selected source (yfinance or binance).
     """
     source = config.DATA_SOURCE.lower()
-    
+    ticker = _normalize_ticker(ticker)
+
     # Include the source in the cache filename to prevent conflicts
     cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
@@ -140,9 +158,10 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
 
     raw_data = {}
     for _, ticker in asset_group:
-        df = get_data(ticker=ticker, start_date=start_date, end_date=end_date, interval=interval)
+        norm = _normalize_ticker(ticker)
+        df = get_data(ticker=norm, start_date=start_date, end_date=end_date, interval=interval)
         if not df.empty:
-            raw_data[ticker] = df
+            raw_data[norm] = df
 
     if not raw_data:
         return {}
