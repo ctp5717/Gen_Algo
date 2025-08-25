@@ -38,6 +38,17 @@ def _make_evaluator(settings=None, stats_list=None):
     return evaluator
 
 
+def test_dispersion_math_sanity():
+    vals = np.array([1.6, 1.0, 0.4], dtype=float)
+    w = np.array([1 / 3, 1 / 3, 1 / 3], dtype=float)
+    mu, sigma = fitness.weighted_mean_std(vals, w)
+    assert np.isclose(mu, 1.0, atol=1e-6)
+    assert np.isclose(sigma, 0.4898979, atol=1e-6)
+    lam = 0.25
+    F = mu - lam * sigma
+    assert np.isclose(F, 0.8775255, atol=1e-6)
+
+
 def test_aggregation_math():
     stats = [
         {'total_return': 1.6, 'trades': 5},
@@ -81,6 +92,31 @@ def test_trade_floor_policies():
     assert np.isclose(ev_soft(None, [], 0), 0.5)
 
 
+def test_min_total_trades_scaling(monkeypatch):
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'enabled', True)
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'min_total_trades_per_year', 24)
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'trade_floor_policy', 'hard_floor')
+    monkeypatch.setattr(data_loader, 'get_group_data', lambda *a, **k: {'A': pd.DataFrame({'Close': [1, 2]})})
+    monkeypatch.setattr(pd.DataFrame, 'ta', property(lambda self: None), raising=False)
+    vbt = sys.modules['vectorbt']
+    monkeypatch.setattr(vbt, 'Portfolio', object)
+
+    captured = {}
+
+    class DummyEval:
+        def __init__(self, group_data, rules, gene_map, settings):
+            captured['settings'] = settings
+
+        def __call__(self, ga, sol, idx):
+            return 0.0
+
+    monkeypatch.setattr(fitness, 'MultiAssetFitnessEvaluator', DummyEval)
+    monkeypatch.setattr(cfg, 'VALIDATION_PERIOD', {'start': '2024-01-01', 'end': '2024-02-01'})
+
+    tuner._evaluate_on_validation([], {})
+    assert captured['settings']['min_total_trades'] == 3
+
+
 def test_zero_trade_policy_penalize_vs_ignore():
     stats = [
         {'total_return': 0.0, 'trades': 0},
@@ -110,6 +146,26 @@ def test_zero_trade_policy_penalize_vs_ignore():
     }
     ev_ign = _make_evaluator(ignore_settings, stats)
     assert np.isclose(ev_ign(None, [], 0), 0.9)
+
+
+def test_sentinel_ignores_coverage_penalty():
+    stats = [
+        {'total_return': 1.0, 'trades': 1},
+        {'total_return': 1.0, 'trades': 0},
+        {'total_return': 1.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty': 0.3,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 5,
+        'lambda_dispersion': 0.0,
+        'poor_score': -999.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    assert ev(None, [], 0) == -999.0
 
 
 def test_weight_renormalization():

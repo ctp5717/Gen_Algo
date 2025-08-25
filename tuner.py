@@ -1,4 +1,5 @@
 import os
+import math
 import numpy as np
 import pygad
 import vectorbt as vbt
@@ -28,7 +29,22 @@ def _evaluate_on_validation(solution, gene_map):
         )
         if not val_data:
             return -np.inf
-        evaluator = fitness.MultiAssetFitnessEvaluator(val_data, config.STRATEGY_RULES, gene_map, config.MULTI_ASSET)
+        settings = dict(config.MULTI_ASSET)
+        rate = settings.get("min_total_trades_per_year")
+        if rate:
+            start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
+            end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+            span_years = (end - start).days / 365.25
+            floor = math.ceil(rate * span_years)
+            settings["min_total_trades"] = floor
+            months = (end - start).days / 30.4375
+            print(
+                f"Scaled min_total_trades (validation): {floor} (rate={rate}/yr, span={int(round(months))}mo)"
+            )
+        settings["trade_floor_policy"] = "soft_penalty"
+        settings["soft_penalty_mode"] = "multiplicative"
+        print("Tuner: using trade_floor_policy=soft_penalty (multiplicative) for validation.")
+        evaluator = fitness.MultiAssetFitnessEvaluator(val_data, config.STRATEGY_RULES, gene_map, settings)
         return evaluator(None, solution, 0)
 
     val_data = data_loader.get_data(
