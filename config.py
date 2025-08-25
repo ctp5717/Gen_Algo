@@ -172,7 +172,7 @@ HYPERPARAMETER_SEARCH_SPACE = [
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
-    "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 10
+    "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 0
 }
 
 # --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
