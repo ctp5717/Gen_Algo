@@ -13,7 +13,7 @@ import config
 
 
 def weighted_mean_std(values, weights):
-    """Compute weighted mean and standard deviation.
+    r"""Compute weighted mean and standard deviation.
 
     Parameters
     ----------
@@ -33,14 +33,18 @@ def weighted_mean_std(values, weights):
     """
 
     w = np.asarray(weights, dtype=float)
+    x = np.asarray(values, dtype=float)
     if w.ndim == 0:
         w = np.array([float(w)])
+    if x.ndim == 0:
+        x = np.array([float(x)])
+    if len(w) != len(x) or len(w) == 0:
+        raise ValueError("weighted_mean_std: values/weights length mismatch")
     total = w.sum()
     if total == 0:
         w = np.ones_like(w) / len(w)
     else:
         w = w / total
-    x = np.asarray(values, dtype=float)
     mu = float(np.sum(w * x))
     variance = float(np.sum(w * (x - mu) ** 2))
     sigma = float(np.sqrt(variance))
@@ -116,8 +120,10 @@ class FitnessEvaluator:
             sortino = stats['Sortino Ratio']
             profit_factor = stats['Profit Factor']
             max_drawdown = stats['Max Drawdown [%]']
-            
-            if np.isinf(profit_factor) or profit_factor > 5: profit_factor = 5
+
+            cap = getattr(config, 'MULTI_ASSET', {}).get('winsorize_pf_cap', 5.0)
+            if np.isinf(profit_factor) or profit_factor > cap:
+                profit_factor = cap
             if np.isnan(sortino): sortino = 0
             if np.isnan(profit_factor): profit_factor = 0
             if np.isnan(max_drawdown): max_drawdown = 100.0
@@ -300,12 +306,7 @@ class MultiAssetFitnessEvaluator:
                     }
 
             if not per_asset_metrics:
-                F = self.settings.get("nan_fallback", 0.0)
-                coverage_penalty = 0.0
-                if self.settings.get("zero_trade_policy") == "ignore":
-                    kappa = self.settings.get("coverage_penalty", 0.0)
-                    coverage_penalty = kappa  # coverage=0 when no assets included
-                    F -= coverage_penalty
+                poor_score = self.settings.get("poor_score", -999.0)
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": 0.0,
@@ -314,13 +315,11 @@ class MultiAssetFitnessEvaluator:
                     "total_trades": total_trades,
                     "assets_included": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {
-                        "trade_floor": None,
-                        "coverage": coverage_penalty,
-                    },
-                    "fitness": F,
+                    "penalties": {"trade_floor": "no_assets", "coverage": 0.0},
+                    "min_total_trades": self.settings.get("min_total_trades", 0),
+                    "fitness": poor_score,
                 }
-                return F
+                return poor_score
 
             # Determine weights for included assets and renormalise
             asset_weights = self.settings.get("asset_weights") or {}
@@ -345,6 +344,19 @@ class MultiAssetFitnessEvaluator:
             if policy == "hard_floor" and total_trades < min_trades:
                 F = poor_score
                 trade_penalty = "hard_floor"
+                self.last_details = {
+                    "per_asset": per_asset_details,
+                    "mu": mu,
+                    "sigma": sigma,
+                    "lambda_sigma": lam * sigma,
+                    "total_trades": total_trades,
+                    "assets_included": len(included_assets),
+                    "assets_ignored": len(self.group_data) - len(included_assets),
+                    "penalties": {"trade_floor": trade_penalty, "coverage": 0.0},
+                    "min_total_trades": min_trades,
+                    "fitness": F,
+                }
+                return F
             elif policy == "soft_penalty" and total_trades < min_trades:
                 mode = self.settings.get("soft_penalty_mode", "multiplicative")
                 strength = self.settings.get("soft_penalty_strength", 1.0)
@@ -379,6 +391,7 @@ class MultiAssetFitnessEvaluator:
                     "trade_floor": trade_penalty,
                     "coverage": coverage_penalty,
                 },
+                "min_total_trades": min_trades,
                 "fitness": F,
             }
 
@@ -396,6 +409,7 @@ class MultiAssetFitnessEvaluator:
                 "assets_included": 0,
                 "assets_ignored": len(self.group_data),
                 "penalties": {"trade_floor": None, "coverage": 0.0},
+                "min_total_trades": self.settings.get("min_total_trades", 0),
                 "fitness": poor,
             }
             return poor

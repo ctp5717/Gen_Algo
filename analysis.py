@@ -13,6 +13,8 @@ import strategy_engine as engine
 import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
 import numpy as np
+import pandas as pd
+import math
 
 def run_champion_analysis(best_solution: list, gene_map: dict):
     """Run analysis on the champion solution."""
@@ -102,7 +104,19 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         print("No validation data available for asset group.")
         return
 
-    settings = config.MULTI_ASSET
+    settings = dict(config.MULTI_ASSET)
+    start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
+    end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+    rate = settings.get("min_total_trades_per_year")
+    if rate:
+        span_years = (end - start).days / 365.25
+        floor = math.ceil(rate * span_years)
+        settings["min_total_trades"] = floor
+        months = (end - start).days / 30.4375
+        print(
+            f"Scaled min_total_trades (validation): {floor} (rate={rate}/yr, span={int(round(months))}mo)"
+        )
+    end_str = end.strftime('%Y-%m-%d')
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, config.STRATEGY_RULES, gene_map, settings)
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
@@ -134,8 +148,9 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
     ]
     if scored:
         scored.sort(key=lambda x: x[1])
-        bottom = scored[:3]
-        top = scored[-3:][::-1]
+        n = min(3, len(scored) // 2)
+        bottom = scored[:n]
+        top = scored[-n:][::-1]
         print("Top assets:")
         for t, s, tr in top:
             print(f"  {t}: score={s:.3f}, trades={tr}")
@@ -144,6 +159,24 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             print(f"  {t}: score={s:.3f}, trades={tr}")
 
     charts_cfg = getattr(config, "CHARTS", {})
+    rows = []
+    for t, d in details["per_asset"].items():
+        if d.get("score") is not None:
+            rows.append(
+                {
+                    "ticker": t,
+                    "score": d.get("score"),
+                    "trades": d.get("trades", 0),
+                    "sortino": d.get("sortino"),
+                    "profit_factor": d.get("profit_factor"),
+                    "max_drawdown": d.get("max_drawdown"),
+                }
+            )
+    if rows:
+        df = pd.DataFrame(rows).sort_values("score", ascending=False)
+        fname = f"multi_asset_stats_{config.TIMEFRAME}_{end_str}.csv"
+        df.to_csv(fname, index=False)
+        print(f"Saved per-asset stats: {fname}")
     _plot_multi_asset_overview(
         per_asset_scores,
         per_asset_trades,
@@ -239,4 +272,10 @@ def _plot_multi_asset_overview(
     ax3.legend()
 
     fig.tight_layout()
-    fig.show()
+    end_dt = pd.to_datetime(config.VALIDATION_PERIOD['end'])
+    end_str = end_dt.strftime('%Y-%m-%d')
+    if charts_cfg.get("save_pngs"):
+        fname = f"multi_asset_overview_{config.TIMEFRAME}_{end_str}.png"
+        fig.savefig(fname, dpi=144, bbox_inches="tight")
+    else:
+        fig.show()
