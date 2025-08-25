@@ -324,10 +324,14 @@ def run_walk_forward_validation(initial_champions=None):
         print(results_df.to_string(index=False))
 
     if multi:
-        avg_fitness = results_df['Fitness'].mean()
+        poor = getattr(config, 'MULTI_ASSET', {}).get('poor_score', -999.0)
+        mask = results_df['Fitness'] != poor
+        mask &= results_df['Fitness'].notna()
+        avg_fitness = results_df.loc[mask, 'Fitness'].mean()
+        failure_rate = 1 - mask.mean()
         print("\nAggregate Metrics:")
-        print(f"Average Fitness: {avg_fitness:.4f}")
-        return {'folds': results_df, 'average_fitness': avg_fitness}
+        print(f"Average Fitness: {avg_fitness:.4f} | Fold failure rate: {failure_rate:.2%}")
+        return {'folds': results_df, 'average_fitness': avg_fitness, 'fold_failure_rate': failure_rate}
 
     avg_return = results_df['Total Return [%]'].mean()
     std_return = results_df['Total Return [%]'].std()
