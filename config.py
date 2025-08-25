@@ -269,7 +269,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'indicator_crosses_above_value', 'value': 0}
             },
             {
-                'is_active': True,
+                'is_active': False,
                 'rule_name': 'Bollinger_Band_Breakout',
                 'indicator': 'bbands',
                 'params': {
