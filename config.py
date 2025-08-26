@@ -281,7 +281,7 @@ STRATEGY_RULES = {
                 'condition': {'type': 'price_is_above_indicator'}
             },
             {
-                'is_active': False, # This rule is ON
+                'is_active': True, # This rule is ON
                 'rule_name': 'RSI_Momentum_Filter',
                 'indicator': 'rsi',
                 'params': {
@@ -293,7 +293,7 @@ STRATEGY_RULES = {
                 }
             },
             {
-                'is_active': True,
+                'is_active': False,
                 'rule_name': 'MACD_Momentum_Cross',
                 'indicator': 'macd',
                 'params': {
