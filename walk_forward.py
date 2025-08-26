@@ -78,7 +78,7 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     return pool
 
 
-def run_walk_forward_validation(initial_champions=None):
+def run_walk_forward_validation(initial_champions=None, data=None):
     """Execute walk-forward validation across the available data.
 
     Parameters
@@ -86,6 +86,8 @@ def run_walk_forward_validation(initial_champions=None):
     initial_champions : list[list[float]] or None
         Optional list of solutions to seed the first population. Each solution
         should be an iterable of gene values matching the strategy's genes.
+    data : DataFrame or dict, optional
+        Preloaded dataset to reuse instead of fetching from disk/API.
     """
     print("\n=== Running Walk-Forward Validation ===")
     np.random.seed(config.SEED)
@@ -97,34 +99,50 @@ def run_walk_forward_validation(initial_champions=None):
     end_date = date_range.get("end", config.VALIDATION_PERIOD["end"])
 
     multi = getattr(config, "MULTI_ASSET", {}).get("enabled")
-    if multi:
-        all_data = data_loader.get_group_data(
-            asset_group=config.ASSET_GROUP,
-            start_date=start_date,
-            end_date=end_date,
-            interval=config.TIMEFRAME,
-            coverage_threshold=config.COVERAGE_THRESHOLD,
-            verbose=False,
-        )
-        if not all_data:
-            print("No data available for walk-forward validation.")
-            return
-        sample_df = next(iter(all_data.values()))
-        start = sample_df.index[0]
-        end = sample_df.index[-1]
+    if data is not None:
+        all_data = data
+        if multi:
+            if not all_data:
+                print("No data available for walk-forward validation.")
+                return
+            sample_df = next(iter(all_data.values()))
+            start = sample_df.index[0]
+            end = sample_df.index[-1]
+        else:
+            if all_data.empty:
+                print("No data available for walk-forward validation.")
+                return
+            start = all_data.index[0]
+            end = all_data.index[-1]
     else:
-        all_data, _ = data_loader.get_data(
-            ticker=config.TICKER,
-            start_date=start_date,
-            end_date=end_date,
-            interval=config.TIMEFRAME,
-            verbose=False,
-        )
-        if all_data.empty:
-            print("No data available for walk-forward validation.")
-            return
-        start = all_data.index[0]
-        end = all_data.index[-1]
+        if multi:
+            all_data = data_loader.get_group_data(
+                asset_group=config.ASSET_GROUP,
+                start_date=start_date,
+                end_date=end_date,
+                interval=config.TIMEFRAME,
+                coverage_threshold=config.COVERAGE_THRESHOLD,
+                verbose=False,
+            )
+            if not all_data:
+                print("No data available for walk-forward validation.")
+                return
+            sample_df = next(iter(all_data.values()))
+            start = sample_df.index[0]
+            end = sample_df.index[-1]
+        else:
+            all_data, _ = data_loader.get_data(
+                ticker=config.TICKER,
+                start_date=start_date,
+                end_date=end_date,
+                interval=config.TIMEFRAME,
+                verbose=False,
+            )
+            if all_data.empty:
+                print("No data available for walk-forward validation.")
+                return
+            start = all_data.index[0]
+            end = all_data.index[-1]
     train_months = wf_settings.get(
         "training_period_length",
         getattr(config, "WALK_FORWARD_TRAINING_MONTHS", 12),

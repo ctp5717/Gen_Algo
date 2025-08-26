@@ -6,28 +6,15 @@ import vectorbt as vbt
 import pandas as pd
 
 import config
-import data_loader
 import fitness
 import strategy_engine as engine
-
-
-def _evaluate_on_validation(solution, gene_map):
-    """Evaluate solution on validation data and return the objective score."""
-    # If heavy optional dependencies are missing, skip evaluation to keep tests
-    # lightweight. We check for the pandas_ta accessor and vectorbt's Portfolio
-    # class. When absent, return -inf so the tuner can continue without errors.
+def _evaluate_on_validation(solution, gene_map, val_data):
+    """Evaluate solution on preloaded validation data and return the score."""
+    # Skip evaluation gracefully if optional heavy dependencies are missing.
     if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
         return -np.inf
 
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
-        val_data = data_loader.get_group_data(
-            asset_group=config.ASSET_GROUP,
-            start_date=config.VALIDATION_PERIOD["start"],
-            end_date=config.VALIDATION_PERIOD["end"],
-            interval=config.TIMEFRAME,
-            coverage_threshold=config.COVERAGE_THRESHOLD,
-            verbose=False,
-        )
         if not val_data:
             return -np.inf
         settings = dict(config.MULTI_ASSET)
@@ -45,20 +32,15 @@ def _evaluate_on_validation(solution, gene_map):
             )
         settings["trade_floor_policy"] = "soft_penalty"
         settings["soft_penalty_mode"] = "multiplicative"
-        print("Tuner: using trade_floor_policy=soft_penalty (multiplicative) for validation.")
+        print(
+            "Tuner: using trade_floor_policy=soft_penalty (multiplicative) for validation."
+        )
         evaluator = fitness.MultiAssetFitnessEvaluator(
             val_data, config.STRATEGY_RULES, gene_map, settings
         )
         return evaluator(None, solution, 0)
 
-    val_data, _ = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=config.VALIDATION_PERIOD["start"],
-        end_date=config.VALIDATION_PERIOD["end"],
-        interval=config.TIMEFRAME,
-        verbose=False,
-    )
-    if val_data.empty:
+    if val_data is None or val_data.empty:
         return -np.inf
 
     rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
@@ -93,8 +75,8 @@ def _evaluate_on_validation(solution, gene_map):
     return -np.inf if np.isnan(score) else score
 
 
-def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
-    """Run short GA optimisations to find the best hyperparameter set."""
+def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_data):
+    """Run short GA optimisations using preloaded data."""
     print("\n--- Express Hyperparameter Tuning ---")
     np.random.seed(config.SEED)
 
@@ -111,7 +93,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
                 settings["trade_floor_policy"] = "soft_penalty"
                 settings["soft_penalty_mode"] = "multiplicative"
                 evaluator = fitness.MultiAssetFitnessEvaluator(
-                    ohlc_data, config.STRATEGY_RULES, gene_map, settings
+                    train_data, config.STRATEGY_RULES, gene_map, settings
                 )
                 probe = pygad.GA(
                     num_generations=1,
@@ -135,7 +117,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
                 print(f"Selected λ={best_lam}")
 
     fitness_evaluator = fitness.get_fitness_evaluator(
-        ohlc_data, config.STRATEGY_RULES, gene_map
+        train_data, config.STRATEGY_RULES, gene_map
     )
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()
@@ -158,7 +140,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
         )
         ga.run()
         best_solution, _, _ = ga.best_solution()
-        score = _evaluate_on_validation(best_solution, gene_map)
+        score = _evaluate_on_validation(best_solution, gene_map, val_data)
         results.append({"params": params, "score": score})
         print(f"Validation score: {score}")
 
