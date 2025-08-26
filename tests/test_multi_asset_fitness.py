@@ -109,7 +109,7 @@ def test_min_total_trades_scaling(monkeypatch):
         raising=False,
     )
     vbt = sys.modules['vectorbt']
-    monkeypatch.setattr(vbt, 'Portfolio', object)
+    monkeypatch.setattr(vbt, 'Portfolio', object, raising=False)
 
     captured = {}
 
@@ -123,7 +123,8 @@ def test_min_total_trades_scaling(monkeypatch):
     monkeypatch.setattr(fitness, 'MultiAssetFitnessEvaluator', DummyEval)
     monkeypatch.setattr(cfg, 'VALIDATION_PERIOD', {'start': '2024-01-01', 'end': '2024-02-01'})
 
-    tuner._evaluate_on_validation([], {})
+    val = {'A': pd.DataFrame({'Close': [1, 2]})}
+    tuner._evaluate_on_validation([], {}, val)
     assert captured['settings']['min_total_trades'] == 3
     assert captured['settings']['trade_floor_policy'] == 'soft_penalty'
     assert captured['settings']['soft_penalty_mode'] == 'multiplicative'
@@ -440,7 +441,7 @@ def test_ga_and_tuner_consistency(monkeypatch):
     ga.run()
     solution, fit, _ = ga.best_solution()
 
-    score_val = tuner._evaluate_on_validation(solution, {})
+    score_val = tuner._evaluate_on_validation(solution, {}, group_data)
     assert np.isclose(fit, score_val)
 
 
@@ -482,13 +483,14 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     monkeypatch.setattr(cfg, 'CHARTS', {'save_pngs': False, 'show_distribution': False})
     monkeypatch.setattr(cfg, 'TIMEFRAME', '1d')
     monkeypatch.setattr(cfg, 'VALIDATION_PERIOD', {'start': '2024-01-01', 'end': '2024-01-31'})
+    group = {
+        'A': pd.DataFrame({'Close': [1]}),
+        'B': pd.DataFrame({'Close': [1]}),
+    }
     monkeypatch.setattr(
         data_loader,
         'get_group_data',
-        lambda *a, **k: {
-            'A': pd.DataFrame({'Close': [1]}),
-            'B': pd.DataFrame({'Close': [1]}),
-        },
+        lambda *a, **k: group,
     )
 
     class DummyEval:
@@ -533,7 +535,7 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     monkeypatch.setattr(analysis, '_plot_multi_asset_overview', lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {})
+    analysis._run_multi_asset_analysis([], {}, group)
     fname = tmp_path / 'multi_asset_stats_1d_2024-01-31.csv'
     assert fname.exists()
     df = pd.read_csv(fname)

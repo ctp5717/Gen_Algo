@@ -49,9 +49,9 @@ def test_find_best_hyperparameters_selects_best(monkeypatch):
             return [self.score], self.score, None
 
     monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
-    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm: sol[0])
+    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm, val: sol[0])
 
-    best = tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
+    best = tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
     assert best == search[1]
 
 
@@ -96,10 +96,10 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
             return [0], 0, None
 
     monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
-    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm: 0)
+    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm, val: 0)
 
     original = list(gene_types)
-    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
     assert gene_types == original
 
 
@@ -124,10 +124,7 @@ def test_evaluate_on_validation_uses_multi_asset(monkeypatch):
         index=pd.date_range('2020-01-01', periods=1),
     )
     monkeypatch.setattr(
-        tuner.data_loader, 'get_group_data', lambda **k: {'X': df}, raising=False
-    )
-    monkeypatch.setattr(
         tuner.fitness, 'MultiAssetFitnessEvaluator', lambda *a, **k: DummyEval()
     )
-    res = tuner._evaluate_on_validation([0], {})
+    res = tuner._evaluate_on_validation([0], {}, {'X': df})
     assert res is sentinel

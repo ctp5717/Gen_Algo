@@ -18,13 +18,13 @@ def test_main_runs(monkeypatch):
     # Provide minimal OHLC data
     df = pd.DataFrame(
         {
-            'Open': [1, 2],
-            'High': [1, 2],
-            'Low': [1, 2],
-            'Close': [1, 2],
-            'Volume': [100, 100],
+            'Open': [1, 2, 3],
+            'High': [1, 2, 3],
+            'Low': [1, 2, 3],
+            'Close': [1, 2, 3],
+            'Volume': [100, 100, 100],
         },
-        index=pd.date_range('2020-01-01', periods=2)
+        index=pd.date_range('2020-01-01', periods=3)
     )
 
     # Patch data loader to avoid network requests
@@ -107,13 +107,13 @@ def test_main_runs(monkeypatch):
 def test_main_uses_tuner(monkeypatch):
     df = pd.DataFrame(
         {
-            'Open': [1, 2],
-            'High': [1, 2],
-            'Low': [1, 2],
-            'Close': [1, 2],
-            'Volume': [100, 100],
+            'Open': [1, 2, 3],
+            'High': [1, 2, 3],
+            'Low': [1, 2, 3],
+            'Close': [1, 2, 3],
+            'Volume': [100, 100, 100],
         },
-        index=pd.date_range('2020-01-01', periods=2)
+        index=pd.date_range('2020-01-01', periods=3)
     )
 
     monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: (df, 'cache'))

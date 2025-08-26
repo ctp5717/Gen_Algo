@@ -7,7 +7,6 @@ Analysis & Reporting Module
 
 import vectorbt as vbt
 import config
-import data_loader
 import fitness
 import strategy_engine as engine
 import traceback
@@ -17,26 +16,15 @@ import pandas as pd
 import math
 import json
 
-def run_champion_analysis(best_solution: list, gene_map: dict):
-    """Run analysis on the champion solution."""
+
+def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
+    """Run analysis on the champion solution using preloaded data."""
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
-        _run_multi_asset_analysis(best_solution, gene_map)
+        _run_multi_asset_analysis(best_solution, gene_map, validation_data)
         return
 
     print("\n\n--- Champion Strategy Analysis on Unseen Data ---")
-
-    print(
-        "Loading validation data from "
-        f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
-    )
-    validation_data, _ = data_loader.get_data(
-        ticker=config.TICKER,
-        start_date=config.VALIDATION_PERIOD['start'],
-        end_date=config.VALIDATION_PERIOD['end'],
-        interval=config.TIMEFRAME,
-        verbose=False,
-    )
-    if validation_data.empty:
+    if validation_data is None or validation_data.empty:
         return
 
     try:
@@ -92,17 +80,9 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
     fig.show()
 
 
-def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
+def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: dict):
     """Generate overview charts for multi-asset validation."""
     print("\n\n--- Multi-Asset Champion Analysis ---")
-    group_data = data_loader.get_group_data(
-        asset_group=config.ASSET_GROUP,
-        start_date=config.VALIDATION_PERIOD['start'],
-        end_date=config.VALIDATION_PERIOD['end'],
-        interval=config.TIMEFRAME,
-        coverage_threshold=config.COVERAGE_THRESHOLD,
-        verbose=False,
-    )
     if not group_data:
         print("No validation data available for asset group.")
         return

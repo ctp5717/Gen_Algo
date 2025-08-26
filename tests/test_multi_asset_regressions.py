@@ -129,7 +129,6 @@ def test_csv_and_json_include_exclusions(tmp_path, monkeypatch):
         {'total_return': 1.0, 'trades': 5},
     ]
 
-    monkeypatch.setattr(analysis.data_loader, 'get_group_data', lambda *a, **k: group)
     stats_iter = iter(stats)
 
     def fake_eval(self, ohlc, rules):
@@ -145,7 +144,7 @@ def test_csv_and_json_include_exclusions(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis, '_plot_multi_asset_overview', lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {})
+    analysis._run_multi_asset_analysis([], {}, group)
 
     csv_file = next(tmp_path.glob('multi_asset_stats_*.csv'))
     df = pd.read_csv(csv_file)
@@ -168,7 +167,6 @@ def test_evaluation_error_reason(tmp_path, monkeypatch):
     }
     stats = [Exception('boom'), {'total_return': 1.0, 'trades': 5}]
 
-    monkeypatch.setattr(analysis.data_loader, 'get_group_data', lambda *a, **k: group)
     stats_iter = iter(stats)
 
     def fake_eval(self, ohlc, rules):
@@ -187,7 +185,7 @@ def test_evaluation_error_reason(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis, '_plot_multi_asset_overview', lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {})
+    analysis._run_multi_asset_analysis([], {}, group)
 
     csv_file = next(tmp_path.glob('multi_asset_stats_*.csv'))
     df = pd.read_csv(csv_file)
