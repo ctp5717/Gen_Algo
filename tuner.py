@@ -80,7 +80,7 @@ def _evaluate_on_validation(solution, gene_map):
         sl_stop=sl_stop,
         tp_stop=tp_stop,
         sl_trail=sl_trail,
-        fees=0.001,
+        fees=config.FEES,
         freq=config.TIMEFRAME,
     )
     stats = portfolio.stats()
@@ -91,6 +91,44 @@ def _evaluate_on_validation(solution, gene_map):
 def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
     """Run short GA optimisations to find the best hyperparameter set."""
     print("\n--- Express Hyperparameter Tuning ---")
+    np.random.seed(config.SEED)
+
+    # Optional coarse tuning of lambda dispersion
+    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+        lam_grid = config.MULTI_ASSET.get("lambda_grid")
+        if lam_grid:
+            print("\n-- Lambda Dispersion Grid --")
+            best_lam = None
+            best_score = -np.inf
+            for lam in lam_grid:
+                settings = dict(config.MULTI_ASSET)
+                settings["lambda_dispersion"] = lam
+                settings["trade_floor_policy"] = "soft_penalty"
+                settings["soft_penalty_mode"] = "multiplicative"
+                evaluator = fitness.MultiAssetFitnessEvaluator(
+                    ohlc_data, config.STRATEGY_RULES, gene_map, settings
+                )
+                probe = pygad.GA(
+                    num_generations=1,
+                    num_parents_mating=2,
+                    sol_per_pop=4,
+                    num_genes=len(gene_space),
+                    gene_space=gene_space,
+                    gene_type=list(gene_types),
+                    mutation_num_genes=1,
+                    fitness_func=evaluator.__call__,
+                    random_seed=config.SEED,
+                )
+                probe.run()
+                _, score, _ = probe.best_solution()
+                print(f"λ={lam}: {score}")
+                if score > best_score:
+                    best_score = score
+                    best_lam = lam
+            if best_lam is not None:
+                config.MULTI_ASSET["lambda_dispersion"] = best_lam
+                print(f"Selected λ={best_lam}")
+
     fitness_evaluator = fitness.get_fitness_evaluator(
         ohlc_data, config.STRATEGY_RULES, gene_map
     )
@@ -111,6 +149,7 @@ def find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types):
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
+            random_seed=config.SEED,
         )
         ga.run()
         best_solution, _, _ = ga.best_solution()

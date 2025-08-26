@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+from collections import Counter
 import pandas as pd
 import numpy as np
 import vectorbt as vbt
@@ -30,6 +31,14 @@ def weighted_mean_std(values, weights):
         Weights are normalised internally so that ``sum(u_i)=1``. This helper
         is shared by evaluators and tests to guarantee consistent dispersion
         calculations across the project.
+
+    Examples
+    --------
+    >>> vals = [1.6, 1.0, 0.4]
+    >>> weights = [1/3, 1/3, 1/3]
+    >>> mu, sigma = weighted_mean_std(vals, weights)
+    >>> round(mu, 1), round(sigma, 4)
+    (1.0, 0.4899)
     """
 
     w = np.asarray(weights, dtype=float)
@@ -47,8 +56,8 @@ def weighted_mean_std(values, weights):
         w = w / total
     mu = float(np.sum(w * x))
     variance = float(np.sum(w * (x - mu) ** 2))
-    sigma = float(np.sqrt(variance))
-    return mu, sigma
+    sigma_pop = float(np.sqrt(variance))  # population stdev (ddof=0)
+    return mu, sigma_pop
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
@@ -112,7 +121,7 @@ class FitnessEvaluator:
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
                 sl_trail=sl_trail, # Pass the trailing stop value to the backtester
-                fees=0.001,
+                fees=config.FEES,
                 freq=config.TIMEFRAME
             )
             
@@ -162,6 +171,7 @@ class MultiAssetFitnessEvaluator:
         if settings:
             self.settings.update(settings)
         self.last_details = {}
+        self.floor_failures = Counter()
 
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
@@ -203,7 +213,7 @@ class MultiAssetFitnessEvaluator:
             sl_stop=sl_stop,
             tp_stop=tp_stop,
             sl_trail=sl_trail,
-            fees=0.001,
+            fees=config.FEES,
             freq=config.TIMEFRAME,
         )
 
@@ -227,6 +237,8 @@ class MultiAssetFitnessEvaluator:
             included_assets = []
             per_asset_details = {}
             total_trades = 0
+            assets_traded = 0
+            asset_weights_cfg = self.settings.get("asset_weights") or {}
 
             for ticker, ohlc in self.group_data.items():
                 try:
@@ -235,7 +247,8 @@ class MultiAssetFitnessEvaluator:
                     # If a single asset fails to evaluate we shouldn't abort
                     # the entire multi-asset evaluation.  Treat it as having
                     # zero trades and log the issue for debugging purposes.
-                    print(f"Error evaluating asset {ticker}: {e}")
+                    if self.settings.get("verbose_asset_errors"):
+                        print(f"Error evaluating asset {ticker}: {e}")
                     stats = {
                         "sortino": None,
                         "profit_factor": None,
@@ -247,6 +260,16 @@ class MultiAssetFitnessEvaluator:
 
                 trades = stats.get("trades", 0)
                 total_trades += trades
+                if trades > 0:
+                    assets_traded += 1
+
+                weight = asset_weights_cfg.get(ticker, 1.0)
+                pf_raw = stats.get("profit_factor")
+                cap = self.settings.get("winsorize_pf_cap", 5.0)
+                if pf_raw is None or np.isnan(pf_raw):
+                    pf_capped = self.settings.get("nan_fallback", 0.0)
+                else:
+                    pf_capped = min(cap, pf_raw) if not np.isinf(pf_raw) else cap
 
                 if trades < self.settings.get("per_asset_min_trades", 1):
                     if self.settings.get("zero_trade_policy") == "penalize":
@@ -257,12 +280,16 @@ class MultiAssetFitnessEvaluator:
                             **stats,
                             "score": val,
                             "included": True,
+                            "asset_weight": weight,
+                            "profit_factor_capped": pf_capped,
                         }
                     else:
                         per_asset_details[ticker] = {
                             **stats,
                             "score": None,
                             "included": False,
+                            "asset_weight": weight,
+                            "profit_factor_capped": pf_capped,
                         }
                         continue
                 else:
@@ -270,19 +297,14 @@ class MultiAssetFitnessEvaluator:
                     if metric_type == "sortino":
                         val = stats.get("sortino", self.settings.get("nan_fallback", 0.0))
                     elif metric_type == "profit_factor":
-                        val = stats.get("profit_factor", self.settings.get("nan_fallback", 0.0))
+                        val = pf_capped
                     elif metric_type == "return":
                         val = stats.get("total_return", self.settings.get("nan_fallback", 0.0))
                     else:  # composite metric
                         sortino = stats.get("sortino")
-                        pf = stats.get("profit_factor")
+                        pf = pf_capped
                         dd = stats.get("max_drawdown")
-
-                        cap = self.settings.get("winsorize_pf_cap", 5.0)
-                        if pf is None or np.isnan(pf):
-                            pf = self.settings.get("nan_fallback", 0.0)
-                        pf = min(cap, pf) if not np.isinf(pf) else cap
-
+                        
                         if sortino is None or np.isnan(sortino):
                             sortino = self.settings.get("nan_fallback", 0.0)
 
@@ -303,10 +325,14 @@ class MultiAssetFitnessEvaluator:
                         **stats,
                         "score": val,
                         "included": True,
+                        "asset_weight": weight,
+                        "profit_factor_capped": pf_capped,
                     }
 
             if not per_asset_metrics:
                 poor_score = self.settings.get("poor_score", -999.0)
+                reason = "no_assets"
+                self.floor_failures[reason] += 1
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": 0.0,
@@ -314,8 +340,9 @@ class MultiAssetFitnessEvaluator:
                     "lambda_sigma": 0.0,
                     "total_trades": total_trades,
                     "assets_included": 0,
+                    "assets_traded": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {"trade_floor": "no_assets", "coverage": 0.0},
+                    "penalties": {"trade_floor": reason, "coverage": 0.0},
                     "min_total_trades": self.settings.get("min_total_trades", 0),
                     "fitness": poor_score,
                 }
@@ -343,7 +370,9 @@ class MultiAssetFitnessEvaluator:
             trade_penalty = None
             if policy == "hard_floor" and total_trades < min_trades:
                 F = poor_score
-                trade_penalty = "hard_floor"
+                reason = "below_group_floor"
+                trade_penalty = reason
+                self.floor_failures[reason] += 1
                 self.last_details = {
                     "per_asset": per_asset_details,
                     "mu": mu,
@@ -351,6 +380,7 @@ class MultiAssetFitnessEvaluator:
                     "lambda_sigma": lam * sigma,
                     "total_trades": total_trades,
                     "assets_included": len(included_assets),
+                    "assets_traded": assets_traded,
                     "assets_ignored": len(self.group_data) - len(included_assets),
                     "penalties": {"trade_floor": trade_penalty, "coverage": 0.0},
                     "min_total_trades": min_trades,
@@ -386,6 +416,7 @@ class MultiAssetFitnessEvaluator:
                 "lambda_sigma": lam * sigma,
                 "total_trades": total_trades,
                 "assets_included": len(included_assets),
+                "assets_traded": assets_traded,
                 "assets_ignored": len(self.group_data) - len(included_assets),
                 "penalties": {
                     "trade_floor": trade_penalty,

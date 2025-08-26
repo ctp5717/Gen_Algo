@@ -17,6 +17,7 @@ import fitness  # noqa: E402
 import tuner  # noqa: E402
 import data_loader  # noqa: E402
 import config as cfg  # noqa: E402
+import analysis  # noqa: E402
 
 
 def _make_evaluator(settings=None, stats_list=None):
@@ -115,6 +116,8 @@ def test_min_total_trades_scaling(monkeypatch):
 
     tuner._evaluate_on_validation([], {})
     assert captured['settings']['min_total_trades'] == 3
+    assert captured['settings']['trade_floor_policy'] == 'soft_penalty'
+    assert captured['settings']['soft_penalty_mode'] == 'multiplicative'
 
 
 def test_zero_trade_policy_penalize_vs_ignore():
@@ -316,6 +319,43 @@ def test_lambda_with_unequal_weights():
     assert np.isclose(score, expected)
 
 
+def test_profit_factor_capping():
+    stats = [
+        {"sortino": 1.0, "profit_factor": 10.0, "max_drawdown": 10.0, "trades": 5, "total_return": 1.0},
+        {"sortino": 1.0, "profit_factor": 2.0, "max_drawdown": 10.0, "trades": 5, "total_return": 1.0},
+        {"sortino": 1.0, "profit_factor": 1.0, "max_drawdown": 10.0, "trades": 5, "total_return": 1.0},
+    ]
+    settings = {
+        "metric": "composite",
+        "winsorize_pf_cap": 5.0,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "lambda_dispersion": 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    ev(None, [], 0)
+    assert ev.last_details["per_asset"]["A"]["profit_factor_capped"] == 5.0
+
+
+def test_hard_floor_failure_counts():
+    stats = [
+        {"total_return": 1.0, "trades": 1},
+        {"total_return": 1.0, "trades": 1},
+        {"total_return": 1.0, "trades": 1},
+    ]
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 10,
+        "lambda_dispersion": 0.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    score = ev(None, [], 0)
+    assert ev.floor_failures["below_group_floor"] == 1
+    assert ev.last_details["penalties"]["trade_floor"] == "below_group_floor"
+    assert score == -999.0
+
+
 def test_ga_and_tuner_consistency(monkeypatch):
     stats = {
         'total_return': 1.0,
@@ -394,3 +434,65 @@ def test_handles_asset_error_gracefully():
     assert np.isclose(score, 1.0)
     assert ev.last_details["assets_included"] == 1
     assert ev.last_details["assets_ignored"] == 1
+
+
+def test_csv_columns_and_sort(monkeypatch, tmp_path):
+    monkeypatch.setitem(cfg.MULTI_ASSET, 'enabled', True)
+    monkeypatch.setattr(cfg, 'CHARTS', {'save_pngs': False, 'show_distribution': False})
+    monkeypatch.setattr(cfg, 'TIMEFRAME', '1d')
+    monkeypatch.setattr(cfg, 'VALIDATION_PERIOD', {'start': '2024-01-01', 'end': '2024-01-31'})
+    monkeypatch.setattr(data_loader, 'get_group_data', lambda *a, **k: {'A': pd.DataFrame({'Close': [1]}), 'B': pd.DataFrame({'Close': [1]})})
+
+    class DummyEval:
+        def __init__(self, group, rules, gene_map, settings):
+            self.last_details = {
+                'per_asset': {
+                    'A': {
+                        'score': 1.0,
+                        'trades': 1,
+                        'included': True,
+                        'asset_weight': 1.0,
+                        'sortino': 0.1,
+                        'profit_factor_capped': 1.2,
+                        'max_drawdown': 5.0,
+                        'equity_curve': pd.Series([1, 2]),
+                    },
+                    'B': {
+                        'score': 2.0,
+                        'trades': 1,
+                        'included': True,
+                        'asset_weight': 1.0,
+                        'sortino': 0.2,
+                        'profit_factor_capped': 1.3,
+                        'max_drawdown': 4.0,
+                        'equity_curve': pd.Series([1, 2]),
+                    },
+                },
+                'mu': 0.0,
+                'sigma': 0.0,
+                'lambda_sigma': 0.0,
+                'total_trades': 2,
+                'penalties': {'coverage': 0.0, 'trade_floor': None},
+                'assets_included': 2,
+                'assets_traded': 2,
+                'min_total_trades': 0,
+            }
+
+        def __call__(self, ga, sol, idx):
+            return 0.5
+
+    monkeypatch.setattr(fitness, 'MultiAssetFitnessEvaluator', DummyEval)
+    monkeypatch.setattr(analysis, '_plot_multi_asset_overview', lambda *a, **k: None)
+    monkeypatch.chdir(tmp_path)
+
+    analysis._run_multi_asset_analysis([], {})
+    fname = tmp_path / 'multi_asset_stats_1d_2024-01-31.csv'
+    assert fname.exists()
+    df = pd.read_csv(fname)
+    assert list(df.columns) == [
+        'ticker', 'included', 'asset_weight', 'score',
+        'trades', 'sortino', 'profit_factor_capped', 'max_drawdown',
+        'per_asset_min_trades', 'reason'
+    ]
+    scores = df['score'].tolist()
+    assert scores == sorted(scores, reverse=True)
