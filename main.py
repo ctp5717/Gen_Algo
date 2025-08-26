@@ -68,6 +68,7 @@ def main():
             end_date=config.TRAINING_PERIOD["end"],
             interval=config.TIMEFRAME,
             coverage_threshold=config.COVERAGE_THRESHOLD,
+            verbose=False,
         )
         if not ohlc_data:
             return
@@ -76,11 +77,12 @@ def main():
             "Loading TRAINING data from "
             f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
         )
-        ohlc_data = data_loader.get_data(
+        ohlc_data, _ = data_loader.get_data(
             ticker=config.TICKER,
             start_date=config.TRAINING_PERIOD['start'],
             end_date=config.TRAINING_PERIOD['end'],
-            interval=config.TIMEFRAME
+            interval=config.TIMEFRAME,
+            verbose=True,
         )
         if ohlc_data.empty:
             return
