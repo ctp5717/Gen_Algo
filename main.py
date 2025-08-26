@@ -11,6 +11,7 @@ import tuner
 import traceback
 import time  # <-- NEW: Import the time module
 import matplotlib.pyplot as plt  # For non-blocking plot display
+import pandas as pd
 
 # Import our custom modules
 import config
@@ -57,49 +58,72 @@ def main():
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
 
-    # Load price data.  When multi-asset mode is enabled we fetch and align data
-    # for each asset in the configured group; otherwise fall back to the single
-    # selected asset as before.
-    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
-        print("Loading TRAINING data for asset group...")
-        ohlc_data = data_loader.get_group_data(
+    # Determine the full date range needed across training, validation, and walk-forward
+    train_start = pd.to_datetime(config.TRAINING_PERIOD['start'])
+    train_end = pd.to_datetime(config.TRAINING_PERIOD['end'])
+    val_start = pd.to_datetime(config.VALIDATION_PERIOD['start'])
+    val_end = pd.to_datetime(config.VALIDATION_PERIOD['end'])
+    wf_settings = getattr(config, 'WALK_FORWARD_SETTINGS', {})
+    wf_enabled = wf_settings.get('enabled', getattr(config, 'ENABLE_WALK_FORWARD_VALIDATION', False))
+    if wf_enabled:
+        wf_range = wf_settings.get('total_data_range', {})
+        wf_start = pd.to_datetime(wf_range.get('start', train_start))
+        wf_end = pd.to_datetime(wf_range.get('end', val_end))
+    else:
+        wf_start, wf_end = train_start, val_end
+    earliest = min(train_start, val_start, wf_start).strftime('%Y-%m-%d')
+    latest = max(train_end, val_end, wf_end).strftime('%Y-%m-%d')
+
+    # Load price data once for the full range and slice for each phase
+    if getattr(config, 'MULTI_ASSET', {}).get('enabled'):
+        print(f'Loading data for asset group from {earliest} to {latest}...')
+        all_data = data_loader.get_group_data(
             asset_group=config.ASSET_GROUP,
-            start_date=config.TRAINING_PERIOD["start"],
-            end_date=config.TRAINING_PERIOD["end"],
+            start_date=earliest,
+            end_date=latest,
             interval=config.TIMEFRAME,
             coverage_threshold=config.COVERAGE_THRESHOLD,
             verbose=False,
         )
-        if not ohlc_data:
+        if not all_data:
             return
+        training_data = {
+            t: df.loc[config.TRAINING_PERIOD['start']:config.TRAINING_PERIOD['end']]
+            for t, df in all_data.items()
+        }
+        validation_data = {
+            t: df.loc[config.VALIDATION_PERIOD['start']:config.VALIDATION_PERIOD['end']]
+            for t, df in all_data.items()
+        }
     else:
-        print(
-            "Loading TRAINING data from "
-            f"{config.TRAINING_PERIOD['start']} to {config.TRAINING_PERIOD['end']}..."
-        )
-        ohlc_data, _ = data_loader.get_data(
+        print(f'Loading data from {earliest} to {latest}...')
+        all_data, _ = data_loader.get_data(
             ticker=config.TICKER,
-            start_date=config.TRAINING_PERIOD['start'],
-            end_date=config.TRAINING_PERIOD['end'],
+            start_date=earliest,
+            end_date=latest,
             interval=config.TIMEFRAME,
             verbose=True,
         )
-        if ohlc_data.empty:
+        if all_data.empty:
             return
+        training_data = all_data.loc[config.TRAINING_PERIOD['start']:config.TRAINING_PERIOD['end']]
+        validation_data = all_data.loc[config.VALIDATION_PERIOD['start']:config.VALIDATION_PERIOD['end']]
 
-    print("Parsing strategy rules to identify genes for optimization...")
+    print('Parsing strategy rules to identify genes for optimization...')
     gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
     if not gene_space: print("No genes found. Exiting."); return
     print(f"Found {len(gene_space)} genes to optimize:"); pprint.pprint(gene_map); print("-" * 35)
 
     # Build the appropriate fitness evaluator (single- or multi-asset)
     fitness_evaluator = fitness.get_fitness_evaluator(
-        ohlc_data=ohlc_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
+        ohlc_data=training_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
     )
     fitness_function = fitness_evaluator.__call__
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
-        tuned = tuner.find_best_hyperparameters(ohlc_data, gene_space, gene_map, gene_types)
+        tuned = tuner.find_best_hyperparameters(
+            training_data, gene_space, gene_map, gene_types, validation_data
+        )
         sol_per_pop = tuned.get("sol_per_pop", config.GA_POPULATION_SIZE) if tuned else config.GA_POPULATION_SIZE
         num_parents_mating = tuned.get("num_parents_mating", config.GA_PARENTS_MATING) if tuned else config.GA_PARENTS_MATING
         mutation_num_genes = tuned.get("mutation_num_genes", config.GA_MUTATION_NUM_GENES) if tuned else config.GA_MUTATION_NUM_GENES
@@ -152,20 +176,22 @@ def main():
         plt.show()
 
     try:
-        analysis.run_champion_analysis(best_solution, gene_map)
+        analysis.run_champion_analysis(best_solution, gene_map, validation_data)
     except Exception as e:
         print(f"\nAn error occurred during the analysis phase: {e}")
         traceback.print_exc()
 
-    wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
-    wf_enabled = wf_settings.get(
-        "enabled",
-        getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False),
-    )
     if wf_enabled:
         try:
             import walk_forward
-            walk_forward.run_walk_forward_validation(initial_champions=[best_solution])
+            wf_range = wf_settings.get("total_data_range", {})
+            wf_start = wf_range.get("start", config.TRAINING_PERIOD["start"])
+            wf_end = wf_range.get("end", config.VALIDATION_PERIOD["end"])
+            if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+                wf_data = {t: df.loc[wf_start:wf_end] for t, df in all_data.items()}
+            else:
+                wf_data = all_data.loc[wf_start:wf_end]
+            walk_forward.run_walk_forward_validation(initial_champions=[best_solution], data=wf_data)
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")
             traceback.print_exc()
