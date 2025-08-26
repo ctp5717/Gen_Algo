@@ -24,4 +24,3 @@ def test_to_pandas_freq_uses_min_no_future_warning():
         warnings.simplefilter('always', FutureWarning)
         pd.Timedelta(freq)
         assert not any('deprecated' in str(warn.message) for warn in w)
-
