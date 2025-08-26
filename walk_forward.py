@@ -104,6 +104,7 @@ def run_walk_forward_validation(initial_champions=None):
             end_date=end_date,
             interval=config.TIMEFRAME,
             coverage_threshold=config.COVERAGE_THRESHOLD,
+            verbose=False,
         )
         if not all_data:
             print("No data available for walk-forward validation.")
@@ -112,11 +113,12 @@ def run_walk_forward_validation(initial_champions=None):
         start = sample_df.index[0]
         end = sample_df.index[-1]
     else:
-        all_data = data_loader.get_data(
+        all_data, _ = data_loader.get_data(
             ticker=config.TICKER,
             start_date=start_date,
             end_date=end_date,
             interval=config.TIMEFRAME,
+            verbose=False,
         )
         if all_data.empty:
             print("No data available for walk-forward validation.")

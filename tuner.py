@@ -26,6 +26,7 @@ def _evaluate_on_validation(solution, gene_map):
             end_date=config.VALIDATION_PERIOD["end"],
             interval=config.TIMEFRAME,
             coverage_threshold=config.COVERAGE_THRESHOLD,
+            verbose=False,
         )
         if not val_data:
             return -np.inf
@@ -50,11 +51,12 @@ def _evaluate_on_validation(solution, gene_map):
         )
         return evaluator(None, solution, 0)
 
-    val_data = data_loader.get_data(
+    val_data, _ = data_loader.get_data(
         ticker=config.TICKER,
         start_date=config.VALIDATION_PERIOD["start"],
         end_date=config.VALIDATION_PERIOD["end"],
         interval=config.TIMEFRAME,
+        verbose=False,
     )
     if val_data.empty:
         return -np.inf

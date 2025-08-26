@@ -29,11 +29,12 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
         "Loading validation data from "
         f"{config.VALIDATION_PERIOD['start']} to {config.VALIDATION_PERIOD['end']}..."
     )
-    validation_data = data_loader.get_data(
+    validation_data, _ = data_loader.get_data(
         ticker=config.TICKER,
         start_date=config.VALIDATION_PERIOD['start'],
         end_date=config.VALIDATION_PERIOD['end'],
-        interval=config.TIMEFRAME
+        interval=config.TIMEFRAME,
+        verbose=False,
     )
     if validation_data.empty:
         return
@@ -100,6 +101,7 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
         end_date=config.VALIDATION_PERIOD['end'],
         interval=config.TIMEFRAME,
         coverage_threshold=config.COVERAGE_THRESHOLD,
+        verbose=False,
     )
     if not group_data:
         print("No validation data available for asset group.")

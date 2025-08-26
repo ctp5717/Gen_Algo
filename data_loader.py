@@ -17,6 +17,10 @@ import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
 
+# Tracks whether the first group data load has occurred so we can automatically
+# show verbose output once.
+_first_group_load = True
+
 
 def _normalize_ticker(ticker: str) -> str:
     """Normalize ticker symbols based on the configured data source.
@@ -34,9 +38,14 @@ def _normalize_ticker(ticker: str) -> str:
     return ticker
 
 
-def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str) -> pd.DataFrame:
-    """ Fetches historical kline data from Binance and formats it. """
-    print(f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API...")
+def _get_binance_data(
+    ticker: str, start_date: str, end_date: str, interval: str, *, verbose: bool = True
+) -> pd.DataFrame:
+    """Fetch historical kline data from Binance and format it."""
+    if verbose:
+        print(
+            f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API..."
+        )
     
     # --- MODIFIED: Added the tld parameter to correctly connect to Binance.US ---
     client = Client(
@@ -46,13 +55,16 @@ def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str
     )
     
     # Fetch the data
-    klines = client.get_historical_klines(ticker.replace('-',''), interval, start_str=start_date, end_str=end_date)
+    klines = client.get_historical_klines(
+        ticker.replace('-', ''), interval, start_str=start_date, end_str=end_date
+    )
     
     if not klines:
-        print(
-            "No data returned from Binance for "
-            f"{ticker}. It may not be listed on Binance.US or have history in this range."
-        )
+        if verbose:
+            print(
+                "No data returned from Binance for "
+                f"{ticker}. It may not be listed on Binance.US or have history in this range."
+            )
         return pd.DataFrame()
 
     # Create a pandas DataFrame
@@ -68,12 +80,37 @@ def _get_binance_data(ticker: str, start_date: str, end_date: str, interval: str
     data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
     data = data.apply(pd.to_numeric, errors='coerce')
     
-    print("Binance data loaded and formatted successfully.")
+    if verbose:
+        print("Binance data loaded and formatted successfully.")
     return data
 
-def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') -> pd.DataFrame:
-    """
-    Acts as a router to fetch data from the selected source (yfinance or binance).
+
+def get_data(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    interval: str = '1d',
+    *,
+    verbose: bool = True,
+) -> tuple[pd.DataFrame, str]:
+    """Fetch OHLCV data for a single ticker.
+
+    Parameters
+    ----------
+    ticker : str
+        Asset symbol to download.
+    start_date, end_date : str
+        Date range for the request.
+    interval : str
+        Sampling interval, e.g. ``'1d'``.
+    verbose : bool, keyword-only
+        When ``True`` (default) prints status messages; otherwise silent.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, str]
+        The data frame and a marker indicating ``'cache'`` or ``'API'`` for the
+        data source used.
     """
     source = config.DATA_SOURCE.lower()
     ticker = _normalize_ticker(ticker)
@@ -83,31 +120,50 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
 
     if os.path.exists(cache_filepath):
-        print(f"Loading '{ticker}' data from local cache: {cache_filename}")
+        if verbose:
+            print(f"Loading '{ticker}' data from local cache: {cache_filename}")
         try:
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
-            print("Cache loaded successfully.")
-            return data
+            if verbose:
+                print("Cache loaded successfully.")
+            return data, "cache"
         except Exception as e:
-            print(f"Error loading from cache file {cache_filepath}: {e}. Re-downloading.")
+            if verbose:
+                print(
+                    f"Error loading from cache file {cache_filepath}: {e}. Re-downloading."
+                )
 
     # --- Router Logic ---
     try:
         if source == 'binance':
-            data = _get_binance_data(ticker, start_date, end_date, interval)
+            data = _get_binance_data(
+                ticker, start_date, end_date, interval, verbose=verbose
+            )
         elif source == 'yfinance':
-            print(f"Cache not found. Downloading '{ticker}' data from Yahoo Finance...")
-            data = yf.download(ticker, start=start_date, end=end_date, interval=interval, progress=False)
+            if verbose:
+                print(
+                    f"Cache not found. Downloading '{ticker}' data from Yahoo Finance..."
+                )
+            data = yf.download(
+                ticker,
+                start=start_date,
+                end=end_date,
+                interval=interval,
+                progress=False,
+            )
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
         else:
             raise ValueError(f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'.")
 
         if data.empty:
-            print(f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters.")
-            return pd.DataFrame()
+            if verbose:
+                print(
+                    f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters."
+                )
+            return pd.DataFrame(), "API"
 
         # Standardize column names
         data.columns = [col.capitalize() for col in data.columns]
@@ -115,16 +171,26 @@ def get_data(ticker: str, start_date: str, end_date: str, interval: str = '1d') 
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
-        print(f"Saved data to cache: {cache_filename}")
+        if verbose:
+            print(f"Saved data to cache: {cache_filename}")
 
-        return data
+        return data, "API"
 
     except Exception as e:
-        print(f"An error occurred while downloading data for {ticker}: {e}")
-        return pd.DataFrame()
+        if verbose:
+            print(f"An error occurred while downloading data for {ticker}: {e}")
+        return pd.DataFrame(), "API"
 
 
-def get_group_data(asset_group, start_date, end_date, interval, coverage_threshold=None):
+def get_group_data(
+    asset_group,
+    start_date,
+    end_date,
+    interval,
+    coverage_threshold=None,
+    *,
+    verbose: bool = False,
+):
     """Load and align OHLCV data for a group of assets.
 
     Each asset is downloaded via :func:`get_data`. The resulting dataframes are
@@ -156,14 +222,31 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
     if coverage_threshold is None:
         coverage_threshold = getattr(config, "COVERAGE_THRESHOLD", 0.8)
 
+    global _first_group_load
+    asset_verbose = verbose or _first_group_load
+
     raw_data = {}
+    sources = {}
     for _, ticker in asset_group:
         norm = _normalize_ticker(ticker)
-        df = get_data(ticker=norm, start_date=start_date, end_date=end_date, interval=interval)
+        df, src = get_data(
+            ticker=norm,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+            verbose=asset_verbose,
+        )
         if not df.empty:
             raw_data[norm] = df
+            sources[norm] = src
 
     if not raw_data:
+        if not verbose:
+            print(
+                f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]"
+            )
+        if asset_verbose:
+            _first_group_load = False
         return {}
 
     # Determine the union of timestamps across all assets to evaluate coverage.
@@ -178,9 +261,18 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
         if coverage >= coverage_threshold:
             filtered[ticker] = df
         else:
-            print(f"Excluding {ticker} due to insufficient coverage ({coverage:.0%})")
+            if asset_verbose:
+                print(
+                    f"Excluding {ticker} due to insufficient coverage ({coverage:.0%})"
+                )
 
     if not filtered:
+        if not verbose:
+            print(
+                f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]"
+            )
+        if asset_verbose:
+            _first_group_load = False
         return {}
 
     # Align remaining assets to the intersection of their timestamps.
@@ -189,5 +281,18 @@ def get_group_data(asset_group, start_date, end_date, interval, coverage_thresho
         common_index = df.index if common_index is None else common_index.intersection(df.index)
 
     aligned = {ticker: df.loc[common_index] for ticker, df in filtered.items()}
+
+    if not verbose:
+        used_sources = {t: sources[t] for t in aligned.keys()}
+        cache_count = sum(1 for s in used_sources.values() if s == "cache")
+        api_count = sum(1 for s in used_sources.values() if s == "API")
+        print(
+            f"Loaded {len(aligned)} assets from {start_date} to {end_date} "
+            f"[cache:{cache_count}, API:{api_count}]"
+        )
+
+    if asset_verbose:
+        _first_group_load = False
+
     return aligned
 

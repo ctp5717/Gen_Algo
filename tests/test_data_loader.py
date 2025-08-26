@@ -32,6 +32,7 @@ def test_get_data_uses_cache(monkeypatch):
     monkeypatch.setattr(data_loader.yf, 'download', lambda *a, **k: None)
     monkeypatch.setattr(data_loader.config, 'DATA_SOURCE', 'yfinance')
 
-    result = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
+    result, src = data_loader.get_data('TEST', '2020-01-01', '2020-01-02')
 
     pd.testing.assert_frame_equal(result, df)
+    assert src == 'cache'
