@@ -153,7 +153,8 @@ def to_pandas_freq(tf: str) -> str:
     if tf.endswith("h"):
         return tf[:-1] + "H"
     if tf.endswith("m"):
-        return tf[:-1] + "T"
+        # Pandas deprecated the 'T' alias for minutes; use 'min' instead
+        return tf[:-1] + "min"
     return tf
 
 # Walk-forward validation will leverage a longer history than the main
