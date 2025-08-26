@@ -8,6 +8,8 @@ import pandas as pd
 import config
 import fitness
 import strategy_engine as engine
+
+
 def _evaluate_on_validation(solution, gene_map, val_data):
     """Evaluate solution on preloaded validation data and return the score."""
     # Skip evaluation gracefully if optional heavy dependencies are missing.
