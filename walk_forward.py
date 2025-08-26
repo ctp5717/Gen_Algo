@@ -213,10 +213,7 @@ def run_walk_forward_validation(initial_champions=None):
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
-            if getattr(test_eval, "floor_failures", None):
-                ff = dict(test_eval.floor_failures)
-                if ff:
-                    print(f"Hard floor failures: {ff}")
+            fitness.print_floor_failures(getattr(test_eval, "floor_failures", {}))
             cov_pen = details.get('penalties', {}).get('coverage', 0.0)
             print(
                 (
@@ -307,7 +304,7 @@ def run_walk_forward_validation(initial_champions=None):
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=config.FEES,
-            freq=config.TIMEFRAME,
+            freq=config.to_pandas_freq(config.TIMEFRAME),
         )
         stats = portfolio.stats()
         tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')

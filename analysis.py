@@ -66,7 +66,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict):
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=config.FEES,
-            freq=config.TIMEFRAME
+            freq=config.to_pandas_freq(config.TIMEFRAME)
         )
 
     except Exception as e:
@@ -118,9 +118,12 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             f"Scaled min_total_trades (validation): {floor} (rate={rate}/yr, span={int(round(months))}mo)"
         )
     end_str = end.strftime('%Y-%m-%d')
-    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, config.STRATEGY_RULES, gene_map, settings)
+    evaluator = fitness.MultiAssetFitnessEvaluator(
+        group_data, config.STRATEGY_RULES, gene_map, settings
+    )
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
+    fitness.print_floor_failures(getattr(evaluator, "floor_failures", {}))
 
     tickers = sorted(
         t for t, d in details["per_asset"].items() if d["score"] is not None
@@ -155,11 +158,6 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             print(f"Soft penalty applied: scale={floor_reason.get('scale'):.3f}")
         elif mode == "additive":
             print(f"Soft penalty applied: penalty={floor_reason.get('penalty'):.3f}")
-    if getattr(evaluator, "floor_failures", None):
-        ff = dict(evaluator.floor_failures)
-        if ff:
-            print(f"Hard floor failure counts: {ff}")
-
     scored = [
         (t, d["score"], d.get("trades", 0))
         for t, d in details["per_asset"].items()
@@ -179,27 +177,34 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
 
     charts_cfg = getattr(config, "CHARTS", {})
     rows = []
-    for t in tickers:
+    w_map = details.get("asset_weights", {})
+    if w_map:
+        assert abs(sum(w_map.values()) - 1.0) < 1e-9
+    for t in sorted(details["per_asset"]):
         d = details["per_asset"][t]
+        included = d.get("included", False)
         rows.append(
             {
                 "ticker": t,
-                "included": d.get("included", False),
-                "asset_weight": d.get("asset_weight"),
+                "included": included,
+                "asset_weight": w_map.get(t),
                 "score": d.get("score"),
                 "trades": d.get("trades", 0),
                 "sortino": d.get("sortino"),
                 "profit_factor_capped": d.get("profit_factor_capped"),
                 "max_drawdown": d.get("max_drawdown"),
                 "per_asset_min_trades": settings.get("per_asset_min_trades", 1),
-                "reason": "" if d.get("included", False) else "below_per_asset_min_trades",
+                "reason": d.get("reason", ""),
             }
         )
     if rows:
-        df = pd.DataFrame(rows).sort_values("score", ascending=False)
+        df = pd.DataFrame(rows).sort_values(
+            by=["score"], key=lambda s: s.fillna(-np.inf), ascending=False
+        )
         fname = f"multi_asset_stats_{config.TIMEFRAME}_{end_str}.csv"
-        df.to_csv(fname, index=False)
-        print(f"Saved per-asset stats: {fname}")
+        if charts_cfg.get("save_csv", True):
+            df.to_csv(fname, index=False)
+            print(f"Saved per-asset stats: {fname}")
         summary = {
             "F": F,
             "mu": mu,
@@ -209,11 +214,13 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict):
             "total_trades": total_trades,
             "assets_included": assets_incl,
             "assets_traded": assets_traded,
+            "assets_ignored": details.get("assets_ignored"),
             "total_assets": total_assets,
             "coverage_penalty": cov_pen,
             "min_total_trades": settings.get("min_total_trades"),
             "start_date": config.VALIDATION_PERIOD["start"],
             "end_date": config.VALIDATION_PERIOD["end"],
+            "asset_weights": w_map,
         }
         jf = f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
         with open(jf, "w") as fh:
@@ -266,17 +273,15 @@ def _plot_multi_asset_overview(
     weight_sum = weights.sum()
     weights = weights / weight_sum if weight_sum else np.ones_like(weights) / len(weights)
 
-    combined_equity = None
+    combined_equity = pd.Series(dtype=float)
     for w, ticker in zip(weights, tickers):
         eq = equities.get(ticker)
         if eq is None or len(eq) == 0:
             continue
         eq_norm = eq / eq.iloc[0]
         combined_equity = (
-            eq_norm * w if combined_equity is None else combined_equity + eq_norm * w
+            eq_norm * w if combined_equity.empty else combined_equity + eq_norm * w
         )
-    if combined_equity is None:
-        combined_equity = pd.Series(dtype=float)
 
     max_assets = charts_cfg.get("max_assets_in_overview")
     sorted_items = sorted(scores.items(), key=lambda kv: kv[1])
@@ -308,8 +313,8 @@ def _plot_multi_asset_overview(
     ax0.axis("off")
     lam = settings.get("lambda_dispersion", 0.0)
     kpi = (
-        f"F={F:.2f} | μ={mu:.2f} | λ={lam:.2f} | λσ={lam_sigma:.2f} | Trades={total_trades} | "
-        f"Assets included={assets_included}, traded={assets_traded} / total={total_assets} | "
+        f"F={F:.2f} | μ={mu:.2f} | σ={sigma:.2f} | λ={lam:.2f} | λσ={lam_sigma:.2f} | "
+        f"Trades={total_trades} | Assets included={assets_included}, traded={assets_traded} / total={total_assets} | "
         f"Floor={floor} | {start_date} → {end_date}"
     )
     ax0.text(0.5, 0.5, kpi, ha="center", va="center", fontsize=10)
@@ -331,17 +336,22 @@ def _plot_multi_asset_overview(
         ax_hist.set_title("Score distribution")
 
     trades_sorted = [trades[t] for t in tick_sorted]
-    ax3.bar(tick_sorted, trades_sorted)
+    ax3.bar(tick_sorted, trades_sorted, label="Trades")
     if floor:
         scaled_floor = floor / max(1, total_assets)
-        ax3.axhline(
-            scaled_floor,
-            color="gray",
-            linestyle="--",
-            label=f"floor/N={scaled_floor:.1f} trades",
-        )
+        if scaled_floor >= 1:
+            ax3.axhline(
+                scaled_floor,
+                color="gray",
+                linestyle="--",
+                label=f"floor/N={scaled_floor:.1f} trades",
+            )
+        else:
+            ax3.plot([], [], color="none", label=f"Group floor: {floor} total trades")
     ax3.set_title("Trades per asset")
-    ax3.legend()
+    handles, labels = ax3.get_legend_handles_labels()
+    if handles:
+        ax3.legend(handles, labels)
 
     fig.tight_layout()
     end_dt = pd.to_datetime(end_date)
