@@ -97,8 +97,17 @@ def test_min_total_trades_scaling(monkeypatch):
     monkeypatch.setitem(cfg.MULTI_ASSET, 'enabled', True)
     monkeypatch.setitem(cfg.MULTI_ASSET, 'min_total_trades_per_year', 24)
     monkeypatch.setitem(cfg.MULTI_ASSET, 'trade_floor_policy', 'hard_floor')
-    monkeypatch.setattr(data_loader, 'get_group_data', lambda *a, **k: {'A': pd.DataFrame({'Close': [1, 2]})})
-    monkeypatch.setattr(pd.DataFrame, 'ta', property(lambda self: None), raising=False)
+    monkeypatch.setattr(
+        data_loader,
+        'get_group_data',
+        lambda *a, **k: {'A': pd.DataFrame({'Close': [1, 2]})},
+    )
+    monkeypatch.setattr(
+        pd.DataFrame,
+        'ta',
+        property(lambda self: None),
+        raising=False,
+    )
     vbt = sys.modules['vectorbt']
     monkeypatch.setattr(vbt, 'Portfolio', object)
 
@@ -264,7 +273,16 @@ def test_diagnostics_and_factory(monkeypatch):
     score2 = ev(None, [], 0)
     assert np.isclose(score1, score2)
     details = ev.last_details
-    assert {'per_asset', 'mu', 'sigma', 'lambda_sigma', 'total_trades', 'assets_included', 'assets_ignored', 'penalties'} <= details.keys()
+    assert {
+        'per_asset',
+        'mu',
+        'sigma',
+        'lambda_sigma',
+        'total_trades',
+        'assets_included',
+        'assets_ignored',
+        'penalties',
+    } <= details.keys()
     any_asset = next(iter(details['per_asset'].values()))
     assert 'trades' in any_asset
 
@@ -321,9 +339,27 @@ def test_lambda_with_unequal_weights():
 
 def test_profit_factor_capping():
     stats = [
-        {"sortino": 1.0, "profit_factor": 10.0, "max_drawdown": 10.0, "trades": 5, "total_return": 1.0},
-        {"sortino": 1.0, "profit_factor": 2.0, "max_drawdown": 10.0, "trades": 5, "total_return": 1.0},
-        {"sortino": 1.0, "profit_factor": 1.0, "max_drawdown": 10.0, "trades": 5, "total_return": 1.0},
+        {
+            "sortino": 1.0,
+            "profit_factor": 10.0,
+            "max_drawdown": 10.0,
+            "trades": 5,
+            "total_return": 1.0,
+        },
+        {
+            "sortino": 1.0,
+            "profit_factor": 2.0,
+            "max_drawdown": 10.0,
+            "trades": 5,
+            "total_return": 1.0,
+        },
+        {
+            "sortino": 1.0,
+            "profit_factor": 1.0,
+            "max_drawdown": 10.0,
+            "trades": 5,
+            "total_return": 1.0,
+        },
     ]
     settings = {
         "metric": "composite",
@@ -374,7 +410,12 @@ def test_ga_and_tuner_consistency(monkeypatch):
         'B': pd.DataFrame({'Close': [1, 2, 3]}),
     }
 
-    monkeypatch.setattr(fitness.MultiAssetFitnessEvaluator, '_evaluate_single_asset', fake_eval, raising=False)
+    monkeypatch.setattr(
+        fitness.MultiAssetFitnessEvaluator,
+        '_evaluate_single_asset',
+        fake_eval,
+        raising=False,
+    )
     monkeypatch.setattr(data_loader, 'get_group_data', lambda *args, **kwargs: group_data)
     monkeypatch.setattr(pd.DataFrame, 'ta', property(lambda self: None), raising=False)
     vbt = sys.modules['vectorbt']
@@ -441,7 +482,14 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     monkeypatch.setattr(cfg, 'CHARTS', {'save_pngs': False, 'show_distribution': False})
     monkeypatch.setattr(cfg, 'TIMEFRAME', '1d')
     monkeypatch.setattr(cfg, 'VALIDATION_PERIOD', {'start': '2024-01-01', 'end': '2024-01-31'})
-    monkeypatch.setattr(data_loader, 'get_group_data', lambda *a, **k: {'A': pd.DataFrame({'Close': [1]}), 'B': pd.DataFrame({'Close': [1]})})
+    monkeypatch.setattr(
+        data_loader,
+        'get_group_data',
+        lambda *a, **k: {
+            'A': pd.DataFrame({'Close': [1]}),
+            'B': pd.DataFrame({'Close': [1]}),
+        },
+    )
 
     class DummyEval:
         def __init__(self, group, rules, gene_map, settings):

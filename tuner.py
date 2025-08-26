@@ -39,12 +39,15 @@ def _evaluate_on_validation(solution, gene_map):
             settings["min_total_trades"] = floor
             months = (end - start).days / 30.4375
             print(
-                f"Scaled min_total_trades (validation): {floor} (rate={rate}/yr, span={int(round(months))}mo)"
+                f"Scaled min_total_trades (validation): {floor} "
+                f"(rate={rate}/yr, span={int(round(months))}mo)"
             )
         settings["trade_floor_policy"] = "soft_penalty"
         settings["soft_penalty_mode"] = "multiplicative"
         print("Tuner: using trade_floor_policy=soft_penalty (multiplicative) for validation.")
-        evaluator = fitness.MultiAssetFitnessEvaluator(val_data, config.STRATEGY_RULES, gene_map, settings)
+        evaluator = fitness.MultiAssetFitnessEvaluator(
+            val_data, config.STRATEGY_RULES, gene_map, settings
+        )
         return evaluator(None, solution, 0)
 
     val_data = data_loader.get_data(
