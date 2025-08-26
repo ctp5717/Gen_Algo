@@ -136,6 +136,26 @@ VALIDATION_PERIOD = {
     "end": today.strftime("%Y-%m-%d"),
 }
 
+
+def to_pandas_freq(tf: str) -> str:
+    """Convert common timeframe strings to pandas frequency aliases.
+
+    Monthly ("1mo") and weekly ("1wk") inputs map to pandas' "M" and "W"
+    offsets which are anchored to month-end and week-end respectively.
+    """
+    tf = tf.strip().lower()
+    if tf.endswith("mo"):
+        return tf[:-2] + "M"
+    if tf.endswith("wk"):
+        return tf[:-2] + "W"
+    if tf.endswith("d"):
+        return tf[:-1] + "D"
+    if tf.endswith("h"):
+        return tf[:-1] + "H"
+    if tf.endswith("m"):
+        return tf[:-1] + "T"
+    return tf
+
 # Walk-forward validation will leverage a longer history than the main
 # optimisation phase.  Start three years back from today regardless of the
 # optimisation window above.
@@ -228,6 +248,7 @@ CHARTS = {
     "max_assets_in_overview": 20,
     "save_pngs": True,
     "show_distribution": True,
+    "save_csv": True,
 }
 
 # Settings controlling how walk-forward champions are kept or discarded

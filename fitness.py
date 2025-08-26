@@ -59,6 +59,14 @@ def weighted_mean_std(values, weights):
     sigma_pop = float(np.sqrt(variance))  # population stdev (ddof=0)
     return mu, sigma_pop
 
+
+def print_floor_failures(counter: Counter):
+    """Utility to print a consistent hard-floor failure summary."""
+    if not counter or sum(counter.values()) == 0:
+        print("Hard-floor failures: none")
+    else:
+        print(f"Hard-floor failures: {dict(counter)}")
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
     Injects the gene values from a GA solution into a copy of the strategy rules.
@@ -122,13 +130,13 @@ class FitnessEvaluator:
                 tp_stop=tp_stop,
                 sl_trail=sl_trail, # Pass the trailing stop value to the backtester
                 fees=config.FEES,
-                freq=config.TIMEFRAME
+                freq=config.to_pandas_freq(config.TIMEFRAME)
             )
             
             stats = portfolio.stats()
-            sortino = stats['Sortino Ratio']
-            profit_factor = stats['Profit Factor']
-            max_drawdown = stats['Max Drawdown [%]']
+            sortino = stats.get('Sortino Ratio')
+            profit_factor = stats.get('Profit Factor')
+            max_drawdown = stats.get('Max Drawdown [%]')
 
             cap = getattr(config, 'MULTI_ASSET', {}).get('winsorize_pf_cap', 5.0)
             if np.isinf(profit_factor) or profit_factor > cap:
@@ -214,7 +222,7 @@ class MultiAssetFitnessEvaluator:
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=config.FEES,
-            freq=config.TIMEFRAME,
+            freq=config.to_pandas_freq(config.TIMEFRAME),
         )
 
         stats = portfolio.stats()
@@ -240,7 +248,11 @@ class MultiAssetFitnessEvaluator:
             assets_traded = 0
             asset_weights_cfg = self.settings.get("asset_weights") or {}
 
-            for ticker, ohlc in self.group_data.items():
+            for ticker in sorted(self.group_data):
+                ohlc = self.group_data[ticker]
+                eval_reason = None
+                if ohlc is None or ohlc.empty:
+                    eval_reason = "insufficient_coverage"
                 try:
                     stats = self._evaluate_single_asset(ohlc, rules)
                 except Exception as e:
@@ -249,6 +261,7 @@ class MultiAssetFitnessEvaluator:
                     # zero trades and log the issue for debugging purposes.
                     if self.settings.get("verbose_asset_errors"):
                         print(f"Error evaluating asset {ticker}: {e}")
+                    eval_reason = "evaluation_error"
                     stats = {
                         "sortino": None,
                         "profit_factor": None,
@@ -284,12 +297,16 @@ class MultiAssetFitnessEvaluator:
                             "profit_factor_capped": pf_capped,
                         }
                     else:
+                        reason = eval_reason or (
+                            "ignored_zero_trades" if trades == 0 else "below_per_asset_min_trades"
+                        )
                         per_asset_details[ticker] = {
                             **stats,
                             "score": None,
                             "included": False,
                             "asset_weight": weight,
                             "profit_factor_capped": pf_capped,
+                            "reason": reason,
                         }
                         continue
                 else:
@@ -350,12 +367,26 @@ class MultiAssetFitnessEvaluator:
 
             # Determine weights for included assets and renormalise
             asset_weights = self.settings.get("asset_weights") or {}
-            weights = [asset_weights.get(t, 1.0) for t in included_assets]
-            weight_sum = sum(weights)
+            raw_weights = []
+            neg_seen = False
+            for t in included_assets:
+                w = asset_weights.get(t, 1.0)
+                if w < 0:
+                    neg_seen = True
+                    w = 0.0
+                raw_weights.append(w)
+            if neg_seen:
+                print("Warning: negative asset weights clipped to zero")
+            weight_sum = sum(raw_weights)
             if weight_sum == 0:
                 weights = [1.0 / len(per_asset_metrics)] * len(per_asset_metrics)
             else:
-                weights = [w / weight_sum for w in weights]
+                weights = [w / weight_sum for w in raw_weights]
+
+            w_map = {}
+            for t, w in zip(included_assets, weights):
+                per_asset_details[t]["asset_weight"] = w
+                w_map[t] = w
 
             m_arr = np.array(per_asset_metrics, dtype=float)
             w_arr = np.array(weights, dtype=float)
@@ -385,6 +416,7 @@ class MultiAssetFitnessEvaluator:
                     "penalties": {"trade_floor": trade_penalty, "coverage": 0.0},
                     "min_total_trades": min_trades,
                     "fitness": F,
+                    "asset_weights": w_map,
                 }
                 return F
             elif policy == "soft_penalty" and total_trades < min_trades:
@@ -424,6 +456,7 @@ class MultiAssetFitnessEvaluator:
                 },
                 "min_total_trades": min_trades,
                 "fitness": F,
+                "asset_weights": w_map,
             }
 
             return F

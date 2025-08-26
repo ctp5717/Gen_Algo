@@ -29,6 +29,7 @@ def test_main_runs(monkeypatch):
 
     # Patch data loader to avoid network requests
     monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setitem(main.config.MULTI_ASSET, 'enabled', False)
 
     # Patch gene parser to return a single gene definition
     gene_space = [{'low': 0, 'high': 1}]
@@ -46,6 +47,7 @@ def test_main_runs(monkeypatch):
             self.num_generations = 1
             self.generations_completed = 1
             self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
 
         def run(self):
             return None
@@ -53,13 +55,25 @@ def test_main_runs(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
-            return None
-
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
 
     # Patch analysis and fitness evaluator
     monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        main,
+        'plt',
+        types.SimpleNamespace(
+            ion=lambda: None,
+            plot=lambda *a, **k: None,
+            gca=lambda: types.SimpleNamespace(get_legend_handles_labels=lambda: ([], [])),
+            legend=lambda *a, **k: None,
+            xlabel=lambda *a, **k: None,
+            ylabel=lambda *a, **k: None,
+            title=lambda *a, **k: None,
+            show=lambda *a, **k: None,
+        ),
+    )
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
@@ -103,6 +117,7 @@ def test_main_uses_tuner(monkeypatch):
     )
 
     monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setitem(main.config.MULTI_ASSET, 'enabled', False)
 
     gene_space = [{'low': 0, 'high': 1}]
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
@@ -121,6 +136,7 @@ def test_main_uses_tuner(monkeypatch):
             self.num_generations = 1
             self.generations_completed = 1
             self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
 
         def run(self):
             return None
@@ -128,11 +144,22 @@ def test_main_uses_tuner(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 1.0, None
 
-        def plot_fitness(self):
-            return None
-
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
     monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
+    monkeypatch.setattr(
+        main,
+        'plt',
+        types.SimpleNamespace(
+            ion=lambda: None,
+            plot=lambda *a, **k: None,
+            gca=lambda: types.SimpleNamespace(get_legend_handles_labels=lambda: ([], [])),
+            legend=lambda *a, **k: None,
+            xlabel=lambda *a, **k: None,
+            ylabel=lambda *a, **k: None,
+            title=lambda *a, **k: None,
+            show=lambda *a, **k: None,
+        ),
+    )
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
@@ -190,6 +217,7 @@ def test_fitness_plot_non_blocking(monkeypatch):
     )
 
     monkeypatch.setattr(main.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setitem(main.config.MULTI_ASSET, 'enabled', False)
 
     gene_space = [{'low': 0, 'high': 1}]
     gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
@@ -206,15 +234,13 @@ def test_fitness_plot_non_blocking(monkeypatch):
             self.num_generations = 1
             self.generations_completed = 1
             self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
 
         def run(self):
             return None
 
         def best_solution(self, **kwargs):
             return [0], 1.0, None
-
-        def plot_fitness(self):
-            events['plot_called'] = True
 
     monkeypatch.setattr(main.pygad, 'GA', DummyGA)
     monkeypatch.setattr(main.analysis, 'run_champion_analysis', lambda *a, **k: None)
@@ -243,17 +269,34 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main.config, 'TICKER', 'TEST', raising=False)
     monkeypatch.setattr(main.config, 'TIMEFRAME', '1d', raising=False)
 
-    ion_called = {}
+    class FakePlt:
+        def ion(self):
+            events['ion'] = True
 
-    monkeypatch.setattr(
-        main,
-        'plt',
-        types.SimpleNamespace(
-            ion=lambda: ion_called.setdefault('ion', True)
-        ),
-    )
+        def plot(self, *a, **k):
+            events['plot_called'] = True
+
+        def gca(self):
+            return types.SimpleNamespace(get_legend_handles_labels=lambda: ([], []))
+
+        def legend(self, *a, **k):
+            pass
+
+        def xlabel(self, *a, **k):
+            pass
+
+        def ylabel(self, *a, **k):
+            pass
+
+        def title(self, *a, **k):
+            pass
+
+        def show(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(main, 'plt', FakePlt())
 
     main.main()
 
-    assert ion_called['ion']
+    assert events['ion']
     assert events['plot_called']
