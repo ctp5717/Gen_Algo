@@ -84,7 +84,7 @@ def _evaluate_on_validation(solution, gene_map):
         tp_stop=tp_stop,
         sl_trail=sl_trail,
         fees=config.FEES,
-        freq=config.TIMEFRAME,
+        freq=config.to_pandas_freq(config.TIMEFRAME),
     )
     stats = portfolio.stats()
     score = stats.get("Sortino Ratio")

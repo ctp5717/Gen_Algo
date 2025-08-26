@@ -44,7 +44,15 @@ def on_generation(ga_instance):
 def main():
     """ The main execution function. """
     print("--- GA Trading Strategy Framework ---")
-    print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
+    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+        assets = [name for name, _ in getattr(config, "ASSET_GROUP", [])]
+        preview = ", ".join(assets[:5])
+        more = "" if len(assets) <= 5 else ", ..."
+        print(
+            f"Starting multi-asset optimization for {len(assets)} assets ({preview}{more})"
+        )
+    else:
+        print(f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})")
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
@@ -130,9 +138,16 @@ def main():
         if gene_type == int: print(f"  - {gene_name}: {int(gene_value)}")
         else: print(f"  - {gene_name}: {gene_value:.4f}")
     print("\nDisplaying GA fitness evolution plot...")
-    # Enable interactive mode so the plot window does not block execution.
     plt.ion()
-    ga_instance.plot_fitness()
+    if getattr(ga_instance, "best_solutions_fitness", None):
+        plt.plot(ga_instance.best_solutions_fitness, label="Best Fitness")
+        handles, labels = plt.gca().get_legend_handles_labels()
+        if handles:
+            plt.legend(handles, labels)
+        plt.title("GA Fitness Evolution")
+        plt.xlabel("Generation")
+        plt.ylabel("Fitness")
+        plt.show()
 
     try:
         analysis.run_champion_analysis(best_solution, gene_map)
