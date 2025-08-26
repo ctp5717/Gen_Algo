@@ -21,7 +21,7 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         'Volume': [1, 1],
     }, index=pd.date_range('2020-01-01', periods=2))
 
-    monkeypatch.setattr(analysis.data_loader, 'get_data', lambda *a, **k: df)
+    monkeypatch.setattr(analysis.data_loader, 'get_data', lambda *a, **k: (df, 'cache'))
     monkeypatch.setattr(analysis.config, 'MAX_HOLD_PERIOD', 1, raising=False)
     monkeypatch.setattr(analysis.config, 'TIMEFRAME', '1d', raising=False)
     monkeypatch.setattr(
