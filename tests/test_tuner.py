@@ -34,6 +34,7 @@ def test_find_best_hyperparameters_selects_best(monkeypatch):
     ]
     monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', search, raising=False)
     monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, 'lambda_grid', None)
 
     scores = [0.1, 0.2]
 
@@ -79,6 +80,7 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
 
     monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', search, raising=False)
     monkeypatch.setattr(tuner.config, 'GENERATIONS_PER_TUNE', 1, raising=False)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, 'lambda_grid', None)
 
     class DummyGA:
         def __init__(self, *a, **k):
@@ -99,3 +101,33 @@ def test_find_best_hyperparameters_preserves_gene_types(monkeypatch):
     original = list(gene_types)
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types)
     assert gene_types == original
+
+
+def test_evaluate_on_validation_uses_multi_asset(monkeypatch):
+    sentinel = object()
+
+    class DummyEval:
+        def __call__(self, ga, sol, idx):
+            return sentinel
+
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, 'enabled', True)
+    monkeypatch.setattr(pd.DataFrame, 'ta', None, raising=False)
+    monkeypatch.setattr(tuner.vbt, 'Portfolio', object, raising=False)
+    df = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+    monkeypatch.setattr(
+        tuner.data_loader, 'get_group_data', lambda **k: {'X': df}, raising=False
+    )
+    monkeypatch.setattr(
+        tuner.fitness, 'MultiAssetFitnessEvaluator', lambda *a, **k: DummyEval()
+    )
+    res = tuner._evaluate_on_validation([0], {})
+    assert res is sentinel

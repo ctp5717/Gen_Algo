@@ -38,6 +38,8 @@ This is the single most important file for the user. It is the central "control 
     * **GA Tuning:** Holds all parameters for the Genetic Algorithm (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, etc.).
     * **Fitness Criteria:** Defines the `FITNESS_WEIGHTS` for the composite score, telling the AI what characteristics of a "good" strategy to prioritize.
     * **Multi-Asset Settings:** The `MULTI_ASSET` block controls group evaluation including asset weights, dispersion penalty `lambda_dispersion`, trade-floor policies, zero-trade handling and per-asset trade requirements. A global `COVERAGE_THRESHOLD` setting decides how much historical data an asset must have to be included, and the `poor_score` value defines the sentinel fitness used when the trade floor fails.
+    * **Determinism & Fees:** A global `SEED` ensures reproducible runs (override with the `GA_SEED` environment variable) and `FEES` centralises trading costs.
+    * **Lambda Grid:** Optional `lambda_grid` values allow coarse tuning of the dispersion penalty before main GA runs; set this to `None` to disable the grid search.
 
 ---
 ### `data_loader.py` - The Data Handler
