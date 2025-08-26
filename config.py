@@ -10,6 +10,14 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import os
 
+# Global random seed for deterministic runs. Can be overridden via the
+# GA_SEED environment variable which acts like a CLI flag.
+SEED = int(os.environ.get("GA_SEED", 42))
+
+# Centralised trading fee (percentage). All modules should reference this
+# constant rather than hard-coding fee rates.
+FEES = 0.001
+
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"
@@ -186,6 +194,9 @@ MULTI_ASSET = {
     "asset_weights": None,
     # Penalty multiplier for dispersion across assets
     "lambda_dispersion": 0.25,
+    # Optional coarse tuning grid for lambda. If provided the tuner can try
+    # multiple values and pick the best one.
+    "lambda_grid": [0.15, 0.25, 0.35],
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
     # Profit factor cap to avoid outliers
@@ -206,6 +217,8 @@ MULTI_ASSET = {
     "per_asset_min_trades": 1,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 24,
+    # Verbose logging of per-asset evaluation errors (can be noisy)
+    "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs
     "poor_score": -999.0,
 }

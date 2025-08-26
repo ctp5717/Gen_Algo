@@ -88,6 +88,7 @@ def run_walk_forward_validation(initial_champions=None):
         should be an iterable of gene values matching the strategy's genes.
     """
     print("\n=== Running Walk-Forward Validation ===")
+    np.random.seed(config.SEED)
     num_cores = os.cpu_count()
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
@@ -158,7 +159,12 @@ def run_walk_forward_validation(initial_champions=None):
             rate = settings_train.get("min_total_trades_per_year")
             if rate:
                 years = (p['train_end'] - p['train_start']).days / 365.25
-                settings_train["min_total_trades"] = math.ceil(rate * years)
+                floor = math.ceil(rate * years)
+                settings_train["min_total_trades"] = floor
+                print(
+                    f"Scaled min_total_trades (train): {floor} (rate={rate}/yr, span={years:.2f}y)"
+                )
+            print(f"Training lambda={settings_train.get('lambda_dispersion')}")
             evaluator = fitness.MultiAssetFitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map, settings_train)
         else:
             evaluator = fitness.get_fitness_evaluator(train_data, config.STRATEGY_RULES, gene_map)
@@ -172,6 +178,7 @@ def run_walk_forward_validation(initial_champions=None):
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=['process', num_cores],
+            random_seed=config.SEED,
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
@@ -197,14 +204,28 @@ def run_walk_forward_validation(initial_champions=None):
             rate = settings_val.get("min_total_trades_per_year")
             if rate:
                 years_val = (p['test_end'] - p['test_start']).days / 365.25
-                settings_val["min_total_trades"] = math.ceil(rate * years_val)
+                floor_val = math.ceil(rate * years_val)
+                settings_val["min_total_trades"] = floor_val
+                print(
+                    f"Scaled min_total_trades (validation): {floor_val} (rate={rate}/yr, span={years_val:.2f}y)"
+                )
+            print(f"Validation lambda={settings_val.get('lambda_dispersion')}")
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
+            if getattr(test_eval, "floor_failures", None):
+                ff = dict(test_eval.floor_failures)
+                if ff:
+                    print(f"Hard floor failures: {ff}")
             cov_pen = details.get('penalties', {}).get('coverage', 0.0)
             print(
-                f"Validation fitness: {validation_score:.4f} | Mu: {details.get('mu'):.4f} | "
-                f"Lambda*Sigma: {details.get('lambda_sigma'):.4f} | Coverage Penalty: {cov_pen:.4f}"
+                (
+                    f"Validation fitness: {validation_score:.4f} | "
+                    f"Lambda={settings_val.get('lambda_dispersion'):.4f} | "
+                    f"Mu: {details.get('mu'):.4f} | "
+                    f"Lambda*Sigma: {details.get('lambda_sigma'):.4f} | "
+                    f"Coverage Penalty: {cov_pen:.4f}"
+                )
             )
             scored = [
                 (t, d['score'], d.get('trades', 0))
@@ -231,9 +252,12 @@ def run_walk_forward_validation(initial_champions=None):
                 'Mu': details.get('mu'),
                 'Sigma': details.get('sigma'),
                 'Lambda Sigma': details.get('lambda_sigma'),
+                'Lambda': settings_val.get('lambda_dispersion'),
                 'Total Trades': details.get('total_trades'),
+                'Scaled Floor': details.get('min_total_trades'),
+                'Assets Included': details.get('assets_included'),
+                'Assets Traded': details.get('assets_traded'),
                 'Coverage Penalty': cov_pen,
-                'Assets Traded': f"{details.get('assets_included')}/{len(test_data)}",
                 'Params': winning_params,
             })
             continue
@@ -282,7 +306,7 @@ def run_walk_forward_validation(initial_champions=None):
             sl_stop=sl_stop,
             tp_stop=tp_stop,
             sl_trail=sl_trail,
-            fees=0.001,
+            fees=config.FEES,
             freq=config.TIMEFRAME,
         )
         stats = portfolio.stats()
@@ -321,7 +345,18 @@ def run_walk_forward_validation(initial_champions=None):
     results_df = pd.DataFrame(results)
     print("\n=== Walk-Forward Summary ===")
     with pd.option_context('display.max_colwidth', None, 'display.width', None):
-        print(results_df.to_string(index=False))
+        if multi:
+            cols = [
+                'Window', 'Fitness', 'Mu', 'Sigma', 'Lambda', 'Lambda Sigma',
+                'Total Trades', 'Scaled Floor', 'Assets Included',
+                'Assets Traded', 'Coverage Penalty', 'Params'
+            ]
+        else:
+            cols = [
+                'Window', 'Total Return [%]', 'Max Drawdown [%]',
+                'Sharpe Ratio', 'Sortino Ratio', 'Win Rate [%]', 'Params'
+            ]
+        print(results_df[cols].to_string(index=False))
 
     if multi:
         poor = getattr(config, 'MULTI_ASSET', {}).get('poor_score', -999.0)
