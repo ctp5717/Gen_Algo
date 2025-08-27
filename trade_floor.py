@@ -1,5 +1,6 @@
 import math
 
+
 def scale_floor(rate_per_year, start_ts, end_ts):
     years = (end_ts - start_ts).days / 365.25
     raw = rate_per_year * years
