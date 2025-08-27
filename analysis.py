@@ -15,6 +15,23 @@ import numpy as np
 import pandas as pd
 import trade_floor
 import json
+import os
+import subprocess
+from pathlib import Path
+
+
+def _get_commit_hash() -> str:
+    """Return the current git commit hash or "unknown" if unavailable."""
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:
+        return "unknown"
 
 
 def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
@@ -199,6 +216,9 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
             "start_date": config.VALIDATION_PERIOD["start"],
             "end_date": config.VALIDATION_PERIOD["end"],
             "asset_weights": w_map,
+            "seed": config.SEED,
+            "ga_seed": os.environ.get("GA_SEED"),
+            "commit_hash": _get_commit_hash(),
         }
         jf = f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
         with open(jf, "w") as fh:

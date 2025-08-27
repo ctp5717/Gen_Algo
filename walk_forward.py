@@ -8,6 +8,8 @@ import numpy as np
 import pygad
 import vectorbt as vbt
 import json
+import subprocess
+from pathlib import Path
 
 import config
 import data_loader
@@ -15,6 +17,20 @@ import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
 import trade_floor
+
+
+def _get_commit_hash() -> str:
+    """Return the repository's current commit hash."""
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:
+        return "unknown"
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -482,6 +498,9 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             'average_fitness': avg_fitness,
             'fold_failure_rate': failure_rate,
             'artifact_version': '1.0.0',
+            'seed': config.SEED,
+            'ga_seed': os.environ.get('GA_SEED'),
+            'commit_hash': _get_commit_hash(),
         }
         summary_json = summary.copy()
         summary_json['folds'] = json.loads(results_df.to_json(orient='records'))
@@ -512,6 +531,9 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         'average_win_rate': avg_win,
         'total_compounded_return': total_compounded_return,
         'artifact_version': '1.0.0',
+        'seed': config.SEED,
+        'ga_seed': os.environ.get('GA_SEED'),
+        'commit_hash': _get_commit_hash(),
     }
     summary_json = summary.copy()
     summary_json['folds'] = json.loads(results_df.to_json(orient='records'))
