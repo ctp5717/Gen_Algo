@@ -183,9 +183,17 @@ def test_lambda_grid_rescoring(monkeypatch):
         def best_solution(self, **kwargs):
             return [self.score], self.score, None
 
-    monkeypatch.setattr(tuner.fitness, 'MultiAssetFitnessEvaluator', DummyEval)
+    monkeypatch.setattr(
+        tuner.fitness,
+        'MultiAssetFitnessEvaluator',
+        DummyEval,
+    )
     monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
-    monkeypatch.setattr(tuner.fitness, 'get_fitness_evaluator', lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0))
+    monkeypatch.setattr(
+        tuner.fitness,
+        'get_fitness_evaluator',
+        lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0),
+    )
     monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm, val: 0)
 
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
