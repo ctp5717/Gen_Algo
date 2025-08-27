@@ -218,6 +218,10 @@ MULTI_ASSET = {
     # Optional coarse tuning grid for lambda. If provided the tuner can try
     # multiple values and pick the best one.
     "lambda_grid": [0.15, 0.25, 0.35],
+    # Number of top lambda candidates to re-score after the initial sweep
+    "lambda_top_k": 2,
+    # Seeds used when re-scoring lambda candidates without mutation
+    "lambda_rescore_seeds": [SEED, SEED + 1, SEED + 2],
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
     # Profit factor cap to avoid outliers
