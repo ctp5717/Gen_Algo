@@ -84,8 +84,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
         lam_grid = config.MULTI_ASSET.get("lambda_grid")
         if lam_grid:
             print("\n-- Lambda Dispersion Grid --")
-            best_lam = None
-            best_score = -np.inf
+            sweep_results = []
             for lam in lam_grid:
                 settings = dict(config.MULTI_ASSET)
                 settings["lambda_dispersion"] = lam
@@ -107,10 +106,51 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 )
                 probe.run()
                 _, score, _ = probe.best_solution()
+                sweep_results.append((lam, score))
                 print(f"λ={lam}: {score}")
-                if score > best_score:
-                    best_score = score
+
+            top_k = config.MULTI_ASSET.get("lambda_top_k", 1)
+            seeds = config.MULTI_ASSET.get(
+                "lambda_rescore_seeds", [config.SEED]
+            )
+            top_candidates = sorted(
+                sweep_results, key=lambda x: x[1], reverse=True
+            )[:top_k]
+
+            best_lam = None
+            best_median = -np.inf
+            for lam, _ in top_candidates:
+                seed_scores = []
+                for seed in seeds:
+                    np.random.seed(seed)
+                    settings = dict(config.MULTI_ASSET)
+                    settings["lambda_dispersion"] = lam
+                    settings["trade_floor_policy"] = "soft_penalty"
+                    settings["soft_penalty_mode"] = "multiplicative"
+                    evaluator = fitness.MultiAssetFitnessEvaluator(
+                        train_data, config.STRATEGY_RULES, gene_map, settings
+                    )
+                    probe = pygad.GA(
+                        num_generations=1,
+                        num_parents_mating=2,
+                        sol_per_pop=4,
+                        num_genes=len(gene_space),
+                        gene_space=gene_space,
+                        gene_type=list(gene_types),
+                        mutation_num_genes=0,
+                        mutation_probability=0.0,
+                        fitness_func=evaluator.__call__,
+                        random_seed=seed,
+                    )
+                    probe.run()
+                    _, score, _ = probe.best_solution()
+                    seed_scores.append(score)
+                median_score = float(np.median(seed_scores)) if seed_scores else -np.inf
+                print(f"λ={lam} median score: {median_score}")
+                if median_score > best_median:
+                    best_median = median_score
                     best_lam = lam
+
             if best_lam is not None:
                 config.MULTI_ASSET["lambda_dispersion"] = best_lam
                 print(f"Selected λ={best_lam}")
