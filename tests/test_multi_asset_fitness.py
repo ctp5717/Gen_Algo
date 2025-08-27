@@ -181,6 +181,50 @@ def test_sentinel_ignores_coverage_penalty():
     assert ev(None, [], 0) == -999.0
 
 
+def test_min_included_assets_hard_floor():
+    stats = [
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'hard_floor',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+        'min_included_assets': 3,
+    }
+    ev = _make_evaluator(settings, stats)
+    assert ev(None, [], 0) == -999.0
+    assert ev.last_details['penalties']['trade_floor'] == 'below_min_included_assets'
+    assert ev.last_details['penalties']['min_assets'] == 'below_min_included_assets'
+
+
+def test_min_included_assets_soft_penalty():
+    stats = [
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 5},
+        {'total_return': 1.0, 'trades': 0},
+    ]
+    settings = {
+        'metric': 'return',
+        'zero_trade_policy': 'ignore',
+        'coverage_penalty': 0.0,
+        'per_asset_min_trades': 1,
+        'trade_floor_policy': 'soft_penalty',
+        'min_total_trades': 0,
+        'lambda_dispersion': 0.0,
+        'min_included_assets': 3,
+        'soft_penalty_strength': 1.0,
+    }
+    ev = _make_evaluator(settings, stats)
+    expected = 2/3
+    assert np.isclose(ev(None, [], 0), expected)
+    assert np.isclose(ev.last_details['penalties']['min_assets']['scale'], expected)
+
+
 def test_weight_renormalization():
     stats = [
         {'total_return': 1.0, 'trades': 5},
@@ -522,7 +566,7 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
                 'sigma': 0.0,
                 'lambda_sigma': 0.0,
                 'total_trades': 2,
-                'penalties': {'coverage': 0.0, 'trade_floor': None},
+                'penalties': {'coverage': 0.0, 'trade_floor': None, 'min_assets': None},
                 'assets_included': 2,
                 'assets_traded': 2,
                 'min_total_trades': 0,

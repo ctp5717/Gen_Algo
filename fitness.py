@@ -359,7 +359,7 @@ class MultiAssetFitnessEvaluator:
                     "assets_included": 0,
                     "assets_traded": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {"trade_floor": reason, "coverage": 0.0},
+                    "penalties": {"trade_floor": reason, "coverage": 0.0, "min_assets": reason},
                     "min_total_trades": self.settings.get("min_total_trades", 0),
                     "fitness": poor_score,
                 }
@@ -395,10 +395,46 @@ class MultiAssetFitnessEvaluator:
             lam = self.settings.get("lambda_dispersion", 0.0)
             F = mu - lam * sigma
 
-            min_trades = self.settings.get("min_total_trades", 0)
             policy = self.settings.get("trade_floor_policy", "hard_floor")
             poor_score = self.settings.get("poor_score", -999.0)
+            min_trades = self.settings.get("min_total_trades", 0)
+            min_assets = self.settings.get("min_included_assets", 1)
             trade_penalty = None
+            min_assets_penalty = None
+
+            assets_count = len(included_assets)
+            if assets_count < min_assets:
+                if policy == "hard_floor":
+                    F = poor_score
+                    reason = "below_min_included_assets"
+                    trade_penalty = reason
+                    min_assets_penalty = reason
+                    self.floor_failures[reason] += 1
+                    self.last_details = {
+                        "per_asset": per_asset_details,
+                        "mu": mu,
+                        "sigma": sigma,
+                        "lambda_sigma": lam * sigma,
+                        "total_trades": total_trades,
+                        "assets_included": assets_count,
+                        "assets_traded": assets_traded,
+                        "assets_ignored": len(self.group_data) - assets_count,
+                        "penalties": {
+                            "trade_floor": trade_penalty,
+                            "coverage": 0.0,
+                            "min_assets": min_assets_penalty,
+                        },
+                        "min_total_trades": min_trades,
+                        "fitness": F,
+                        "asset_weights": w_map,
+                    }
+                    return F
+                else:
+                    strength = self.settings.get("soft_penalty_strength", 1.0)
+                    scale = (assets_count / max(1, min_assets)) ** strength
+                    F *= scale
+                    min_assets_penalty = {"scale": scale}
+
             if policy == "hard_floor" and total_trades < min_trades:
                 F = poor_score
                 reason = "below_group_floor"
@@ -410,10 +446,14 @@ class MultiAssetFitnessEvaluator:
                     "sigma": sigma,
                     "lambda_sigma": lam * sigma,
                     "total_trades": total_trades,
-                    "assets_included": len(included_assets),
+                    "assets_included": assets_count,
                     "assets_traded": assets_traded,
-                    "assets_ignored": len(self.group_data) - len(included_assets),
-                    "penalties": {"trade_floor": trade_penalty, "coverage": 0.0},
+                    "assets_ignored": len(self.group_data) - assets_count,
+                    "penalties": {
+                        "trade_floor": trade_penalty,
+                        "coverage": 0.0,
+                        "min_assets": min_assets_penalty,
+                    },
                     "min_total_trades": min_trades,
                     "fitness": F,
                     "asset_weights": w_map,
@@ -436,7 +476,7 @@ class MultiAssetFitnessEvaluator:
             coverage_penalty = 0.0
             if self.settings.get("zero_trade_policy") == "ignore":
                 kappa = self.settings.get("coverage_penalty", 0.0)
-                coverage = len(included_assets) / max(1, len(self.group_data))
+                coverage = assets_count / max(1, len(self.group_data))
                 coverage_penalty = kappa * (1 - coverage)
                 F -= coverage_penalty
 
@@ -447,12 +487,13 @@ class MultiAssetFitnessEvaluator:
                 "sigma": sigma,
                 "lambda_sigma": lam * sigma,
                 "total_trades": total_trades,
-                "assets_included": len(included_assets),
+                "assets_included": assets_count,
                 "assets_traded": assets_traded,
-                "assets_ignored": len(self.group_data) - len(included_assets),
+                "assets_ignored": len(self.group_data) - assets_count,
                 "penalties": {
                     "trade_floor": trade_penalty,
                     "coverage": coverage_penalty,
+                    "min_assets": min_assets_penalty,
                 },
                 "min_total_trades": min_trades,
                 "fitness": F,
@@ -472,7 +513,7 @@ class MultiAssetFitnessEvaluator:
                 "total_trades": 0,
                 "assets_included": 0,
                 "assets_ignored": len(self.group_data),
-                "penalties": {"trade_floor": None, "coverage": 0.0},
+                "penalties": {"trade_floor": None, "coverage": 0.0, "min_assets": None},
                 "min_total_trades": self.settings.get("min_total_trades", 0),
                 "fitness": poor,
             }
