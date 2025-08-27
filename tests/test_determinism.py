@@ -1,6 +1,10 @@
+import json
 import sys
 import types
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -8,11 +12,8 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
 sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
 
-import json
-import numpy as np
-import pandas as pd
-import walk_forward
-import config
+import walk_forward  # noqa: E402
+import config  # noqa: E402
 
 
 def test_walk_forward_determinism(monkeypatch, tmp_path):
