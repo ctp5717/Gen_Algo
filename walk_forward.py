@@ -7,7 +7,6 @@ import os
 import numpy as np
 import pygad
 import vectorbt as vbt
-import math
 import json
 
 import config
@@ -15,6 +14,7 @@ import data_loader
 import strategy_engine as engine
 from gene_parser import parse_genes_from_config
 import fitness
+import trade_floor
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -180,11 +180,10 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             settings_train = dict(config.MULTI_ASSET)
             rate = settings_train.get("min_total_trades_per_year")
             if rate:
-                years = (p['train_end'] - p['train_start']).days / 365.25
-                floor = math.ceil(rate * years)
+                floor, info = trade_floor.scale_floor(rate, p['train_start'], p['train_end'])
                 settings_train["min_total_trades"] = floor
                 print(
-                    f"Scaled min_total_trades (train): {floor} (rate={rate}/yr, span={years:.2f}y)"
+                    f"Scaled min_total_trades (train): {floor} | info={info}"
                 )
             # Explicitly propagate trade floor policy settings
             policy = settings_train.get("trade_floor_policy", "hard_floor")
@@ -249,11 +248,10 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             settings_val = dict(config.MULTI_ASSET)
             rate = settings_val.get("min_total_trades_per_year")
             if rate:
-                years_val = (p['test_end'] - p['test_start']).days / 365.25
-                floor_val = math.ceil(rate * years_val)
+                floor_val, info_val = trade_floor.scale_floor(rate, p['test_start'], p['test_end'])
                 settings_val["min_total_trades"] = floor_val
                 print(
-                    f"Scaled min_total_trades (validation): {floor_val} (rate={rate}/yr, span={years_val:.2f}y)"
+                    f"Scaled min_total_trades (validation): {floor_val} | info={info_val}"
                 )
             policy_val = settings_val.get("trade_floor_policy", "hard_floor")
             settings_val["trade_floor_policy"] = policy_val

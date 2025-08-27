@@ -13,7 +13,7 @@ import traceback
 import matplotlib.pyplot as plt  # To display plots without blocking
 import numpy as np
 import pandas as pd
-import math
+import trade_floor
 import json
 
 
@@ -92,13 +92,9 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
     end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
     rate = settings.get("min_total_trades_per_year")
     if rate:
-        span_years = (end - start).days / 365.25
-        floor = math.ceil(rate * span_years)
+        floor, info = trade_floor.scale_floor(rate, start, end)
         settings["min_total_trades"] = floor
-        months = (end - start).days / 30.4375
-        print(
-            f"Scaled min_total_trades (validation): {floor} (rate={rate}/yr, span={int(round(months))}mo)"
-        )
+        print(f"Scaled min_total_trades (validation): {floor} | info={info}")
     end_str = end.strftime('%Y-%m-%d')
     evaluator = fitness.MultiAssetFitnessEvaluator(
         group_data, config.STRATEGY_RULES, gene_map, settings
