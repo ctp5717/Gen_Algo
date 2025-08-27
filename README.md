@@ -31,6 +31,7 @@ This is the single most important file for the user. It is the central "control 
 * **Key Responsibilities:**
     * **Data Source Selection:** Sets the `DATA_SOURCE` (`binance` or `yfinance`) and reads API credentials from environment variables.
     * **Asset & Timeframe:** Defines which asset to test (`SELECTED_ASSET_NAME`) and at what resolution (`TIMEFRAME`).
+    * **Timeframe Conversion:** Minute bars map to `'min'` for pandas frequency strings (e.g., `'15m'` → `'15min'`). See [`tests/test_config_to_pandas_freq.py`](tests/test_config_to_pandas_freq.py) for validation.
     * **Dynamic Date Calculation:** Intelligently calculates the rolling `TRAINING_PERIOD` and `VALIDATION_PERIOD` based on the current date and the selected timeframe, automatically respecting the data history limits of the chosen API.
     * **Strategy Definition:** Contains the `STRATEGY_RULES` dictionary, the heart of the system. This is where you build your trading strategy by combining indicator rules, setting their parameters, defining which parameters should be optimized as "genes," and using `is_active` flags to turn rules on or off.
     * **Risk Management:** Sets the `MAX_HOLD_PERIOD` for trades, now expressed
