@@ -1,9 +1,9 @@
 import os
-import math
 import numpy as np
 import pygad
 import vectorbt as vbt
 import pandas as pd
+import trade_floor
 
 import config
 import fitness
@@ -24,13 +24,10 @@ def _evaluate_on_validation(solution, gene_map, val_data):
         if rate:
             start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
             end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
-            span_years = (end - start).days / 365.25
-            floor = math.ceil(rate * span_years)
+            floor, info = trade_floor.scale_floor(rate, start, end)
             settings["min_total_trades"] = floor
-            months = (end - start).days / 30.4375
             print(
-                f"Scaled min_total_trades (validation): {floor} "
-                f"(rate={rate}/yr, span={int(round(months))}mo)"
+                f"Scaled min_total_trades (validation): {floor} | info={info}"
             )
         settings["trade_floor_policy"] = "soft_penalty"
         settings["soft_penalty_mode"] = "multiplicative"
