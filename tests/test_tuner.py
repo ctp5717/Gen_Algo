@@ -128,3 +128,65 @@ def test_evaluate_on_validation_uses_multi_asset(monkeypatch):
     )
     res = tuner._evaluate_on_validation([0], {}, {'X': df})
     assert res is sentinel
+
+
+def test_lambda_grid_rescoring(monkeypatch):
+    df = pd.DataFrame(
+        {
+            'Open': [1],
+            'High': [1],
+            'Low': [1],
+            'Close': [1],
+            'Volume': [1],
+        },
+        index=pd.date_range('2020-01-01', periods=1),
+    )
+
+    gene_space = [{'low': 0, 'high': 1}]
+    gene_map = {0: {'name': 'x', 'path': [], 'type': float}}
+    gene_types = [float]
+
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, 'lambda_grid', [0.1, 0.2, 0.3])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, 'lambda_top_k', 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, 'lambda_rescore_seeds', [1, 2])
+    monkeypatch.setattr(tuner.config, 'HYPERPARAMETER_SEARCH_SPACE', [], raising=False)
+
+    scores = {
+        (0.1, 42): 1.0,
+        (0.2, 42): 0.8,
+        (0.3, 42): 0.7,
+        (0.1, 1): 1.0,
+        (0.1, 2): 0.5,
+        (0.2, 1): 2.0,
+        (0.2, 2): 1.5,
+    }
+
+    current_lam = {'value': None}
+
+    class DummyEval:
+        def __init__(self, *a, **k):
+            settings = a[3]
+            current_lam['value'] = settings['lambda_dispersion']
+
+        def __call__(self, ga, sol, idx):
+            return 0
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            seed = k.get('random_seed')
+            lam = current_lam['value']
+            self.score = scores[(lam, seed)]
+
+        def run(self):
+            pass
+
+        def best_solution(self, **kwargs):
+            return [self.score], self.score, None
+
+    monkeypatch.setattr(tuner.fitness, 'MultiAssetFitnessEvaluator', DummyEval)
+    monkeypatch.setattr(tuner.pygad, 'GA', DummyGA)
+    monkeypatch.setattr(tuner.fitness, 'get_fitness_evaluator', lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0))
+    monkeypatch.setattr(tuner, '_evaluate_on_validation', lambda sol, gm, val: 0)
+
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
+    assert tuner.config.MULTI_ASSET['lambda_dispersion'] == 0.2
