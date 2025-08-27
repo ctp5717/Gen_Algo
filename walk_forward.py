@@ -281,7 +281,8 @@ def run_walk_forward_validation(initial_champions=None, data=None):
                     print(
                         f"Validation soft floor (multiplicative): floor={floor_v}, total trades={total_v}, multiplier={mult:.4f}"
                     )
-            for t, d in details.get('per_asset', {}).items():
+            per_details = details.get('per_asset', {})
+            for t, d in per_details.items():
                 per_asset_records.append({
                     'fold': idx,
                     'ticker': t,
@@ -290,6 +291,22 @@ def run_walk_forward_validation(initial_champions=None, data=None):
                     'trades': d.get('trades'),
                     'reason': d.get('reason'),
                 })
+
+            reason_counts = {}
+            for d in per_details.values():
+                r = d.get('reason')
+                if r:
+                    reason_counts[r] = reason_counts.get(r, 0) + 1
+            if reason_counts:
+                print("Exclusion reasons:")
+                for r, c in reason_counts.items():
+                    print(f"  {r}: {c}")
+
+            kappa = settings_val.get('coverage_penalty', 0.0)
+            included = details.get('assets_included', 0)
+            total_assets = included + details.get('assets_ignored', 0)
+            print(f"Coverage penalty applied: κ={kappa}, included={included}/{total_assets}")
+
             fitness.print_floor_failures(getattr(test_eval, "floor_failures", {}))
             cov_pen = details.get('penalties', {}).get('coverage', 0.0)
             print(
