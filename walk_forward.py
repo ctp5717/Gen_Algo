@@ -251,8 +251,9 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             ]
             if scored:
                 scored.sort(key=lambda x: x[1])
-                top = scored[-3:][::-1]
-                bottom = scored[:3]
+                n = min(3, len(scored) // 2)  # avoid overlap
+                top = scored[-n:][::-1]
+                bottom = scored[:n]
                 print("Top assets:")
                 for t, s, tr in top:
                     print(f"  {t}: score={s:.3f}, trades={tr}")
