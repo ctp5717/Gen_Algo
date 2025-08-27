@@ -37,9 +37,10 @@ def on_generation(ga_instance):
     
     # Use carriage return `\r` and `end=''` to keep the output on a single, updating line.
     print(
-        "Generation "
-        f"{generation}/{total_generations} | Best Fitness: {fitness:.4f} | Est. Time Left: {int(est_time_remaining)}s",
-        end="\r",
+        f"Generation {generation}/{total_generations} | "
+        f"Best Fitness: {fitness:.4f} | "
+        f"Est. Time Left: {int(est_time_remaining):>4}s   ",
+        end="\r", flush=True
     )
 
 def main():
