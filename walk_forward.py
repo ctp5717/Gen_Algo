@@ -8,6 +8,7 @@ import numpy as np
 import pygad
 import vectorbt as vbt
 import math
+import json
 
 import config
 import data_loader
@@ -158,6 +159,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         return
 
     results = []
+    per_asset_records = []
     champion_pool = list(initial_champions or [])
 
     for idx, p in enumerate(periods, start=1):
@@ -233,6 +235,15 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
+            for t, d in details.get('per_asset', {}).items():
+                per_asset_records.append({
+                    'fold': idx,
+                    'ticker': t,
+                    'included': d.get('included'),
+                    'score': d.get('score'),
+                    'trades': d.get('trades'),
+                    'reason': d.get('reason'),
+                })
             fitness.print_floor_failures(getattr(test_eval, "floor_failures", {}))
             cov_pen = details.get('penalties', {}).get('coverage', 0.0)
             print(
@@ -283,6 +294,14 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         entries = engine.process_strategy_rules(test_data, rules)
         if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
             print("No trades in test period.")
+            per_asset_records.append({
+                'fold': idx,
+                'ticker': config.TICKER,
+                'included': False,
+                'score': None,
+                'trades': 0,
+                'reason': 'no_trades',
+            })
             results.append({
                 'Window': idx,
                 'Total Return [%]': np.nan,
@@ -328,6 +347,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             freq=config.to_pandas_freq(config.TIMEFRAME),
         )
         stats = portfolio.stats()
+        trades = int(portfolio.trades.count()) if hasattr(portfolio, 'trades') else 0
         tr = stats['Total Return [%]'] if isinstance(stats, dict) else stats.get('Total Return [%]')
         dd = stats['Max Drawdown [%]'] if isinstance(stats, dict) else stats.get('Max Drawdown [%]')
         sharpe = stats.get('Sharpe Ratio') if isinstance(stats, dict) else stats.get('Sharpe Ratio')
@@ -346,6 +366,15 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             champion_pool, best_solution, validation_score, gene_space, champion_settings
         )
 
+        per_asset_records.append({
+            'fold': idx,
+            'ticker': config.TICKER,
+            'included': True,
+            'score': validation_score,
+            'trades': trades,
+            'reason': None,
+        })
+
         results.append({
             'Window': idx,
             'Total Return [%]': tr,
@@ -361,6 +390,9 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         return None
 
     results_df = pd.DataFrame(results)
+    results_df.to_csv('walk_forward_results.csv', index=False)
+    if per_asset_records:
+        pd.DataFrame(per_asset_records).to_csv('walk_forward_per_asset.csv', index=False)
     print("\n=== Walk-Forward Summary ===")
     with pd.option_context('display.max_colwidth', None, 'display.width', None):
         if multi:
@@ -384,7 +416,17 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         failure_rate = 1 - mask.mean()
         print("\nAggregate Metrics:")
         print(f"Average Fitness: {avg_fitness:.4f} | Fold failure rate: {failure_rate:.2%}")
-        return {'folds': results_df, 'average_fitness': avg_fitness, 'fold_failure_rate': failure_rate}
+        summary = {
+            'folds': results_df,
+            'average_fitness': avg_fitness,
+            'fold_failure_rate': failure_rate,
+            'artifact_version': '1.0.0',
+        }
+        summary_json = summary.copy()
+        summary_json['folds'] = json.loads(results_df.to_json(orient='records'))
+        with open('walk_forward_summary.json', 'w') as f:
+            json.dump(summary_json, f, indent=2)
+        return summary
 
     avg_return = results_df['Total Return [%]'].mean()
     std_return = results_df['Total Return [%]'].std()
@@ -400,7 +442,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     print(f"Average Win Rate: {avg_win:.2f}%")
     print(f"Total Compounded Return: {total_compounded_return * 100:.2f}%")
 
-    return {
+    summary = {
         'folds': results_df,
         'average_return': avg_return,
         'std_return': std_return,
@@ -408,4 +450,10 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         'average_sortino': avg_sortino,
         'average_win_rate': avg_win,
         'total_compounded_return': total_compounded_return,
+        'artifact_version': '1.0.0',
     }
+    summary_json = summary.copy()
+    summary_json['folds'] = json.loads(results_df.to_json(orient='records'))
+    with open('walk_forward_summary.json', 'w') as f:
+        json.dump(summary_json, f, indent=2)
+    return summary
