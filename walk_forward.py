@@ -186,6 +186,12 @@ def run_walk_forward_validation(initial_champions=None, data=None):
                 print(
                     f"Scaled min_total_trades (train): {floor} (rate={rate}/yr, span={years:.2f}y)"
                 )
+            # Explicitly propagate trade floor policy settings
+            policy = settings_train.get("trade_floor_policy", "hard_floor")
+            settings_train["trade_floor_policy"] = policy
+            if policy == "soft_penalty":
+                settings_train.setdefault("soft_penalty_mode", config.MULTI_ASSET.get("soft_penalty_mode", "multiplicative"))
+                settings_train.setdefault("soft_penalty_strength", config.MULTI_ASSET.get("soft_penalty_strength", 1.0))
             print(f"Training lambda={settings_train.get('lambda_dispersion')}")
             evaluator = fitness.MultiAssetFitnessEvaluator(train_data, config.STRATEGY_RULES, gene_map, settings_train)
         else:
@@ -216,6 +222,24 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         best_solution, best_fitness, _ = ga_instance.best_solution()
         print(f"Best training fitness: {best_fitness:.4f}")
 
+        if multi and settings_train.get("trade_floor_policy") == "soft_penalty":
+            _ = evaluator(None, best_solution, 0)
+            train_details = evaluator.last_details
+            pen = train_details.get("penalties", {}).get("trade_floor") or {}
+            mode = settings_train.get("soft_penalty_mode", "multiplicative")
+            floor_tr = train_details.get("min_total_trades")
+            total_tr = train_details.get("total_trades")
+            if mode == "additive":
+                delta = pen.get("penalty", 0.0)
+                print(
+                    f"Training soft floor (additive): floor={floor_tr}, total trades={total_tr}, delta={delta:.4f}"
+                )
+            else:
+                mult = pen.get("scale", 1.0)
+                print(
+                    f"Training soft floor (multiplicative): floor={floor_tr}, total trades={total_tr}, multiplier={mult:.4f}"
+                )
+
         winning_params = {
             gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
         }
@@ -231,10 +255,32 @@ def run_walk_forward_validation(initial_champions=None, data=None):
                 print(
                     f"Scaled min_total_trades (validation): {floor_val} (rate={rate}/yr, span={years_val:.2f}y)"
                 )
+            policy_val = settings_val.get("trade_floor_policy", "hard_floor")
+            settings_val["trade_floor_policy"] = policy_val
+            if policy_val == "soft_penalty":
+                settings_val.setdefault("soft_penalty_mode", config.MULTI_ASSET.get("soft_penalty_mode", "multiplicative"))
+                settings_val.setdefault(
+                    "soft_penalty_strength", config.MULTI_ASSET.get("soft_penalty_strength", 1.0)
+                )
             print(f"Validation lambda={settings_val.get('lambda_dispersion')}")
             test_eval = fitness.MultiAssetFitnessEvaluator(test_data, config.STRATEGY_RULES, gene_map, settings_val)
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
+            if policy_val == "soft_penalty":
+                pen = details.get("penalties", {}).get("trade_floor") or {}
+                mode = settings_val.get("soft_penalty_mode", "multiplicative")
+                floor_v = details.get("min_total_trades")
+                total_v = details.get("total_trades")
+                if mode == "additive":
+                    delta = pen.get("penalty", 0.0)
+                    print(
+                        f"Validation soft floor (additive): floor={floor_v}, total trades={total_v}, delta={delta:.4f}"
+                    )
+                else:
+                    mult = pen.get("scale", 1.0)
+                    print(
+                        f"Validation soft floor (multiplicative): floor={floor_v}, total trades={total_v}, multiplier={mult:.4f}"
+                    )
             for t, d in details.get('per_asset', {}).items():
                 per_asset_records.append({
                     'fold': idx,
