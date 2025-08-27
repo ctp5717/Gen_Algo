@@ -250,6 +250,21 @@ MULTI_ASSET = {
     "poor_score": -999.0,
 }
 
+# Validate core multi-asset parameters on import so that misconfigured
+# values fail fast regardless of whether the evaluator runs.
+assert MULTI_ASSET["lambda_dispersion"] >= 0, (
+    "lambda_dispersion must be >= 0"
+)
+assert MULTI_ASSET["winsorize_pf_cap"] >= 1, (
+    "winsorize_pf_cap must be >= 1"
+)
+assert MULTI_ASSET["soft_penalty_strength"] >= 0, (
+    "soft_penalty_strength must be >= 0"
+)
+assert MULTI_ASSET["min_total_trades"] >= 0, (
+    "min_total_trades must be >= 0"
+)
+
 # Basic charting options for the multi-asset analysis overview.
 CHARTS = {
     "max_assets_in_overview": 20,
