@@ -181,6 +181,20 @@ class MultiAssetFitnessEvaluator:
         self.last_details = {}
         self.floor_failures = Counter()
 
+        # Validate key configuration values to catch misconfiguration early.
+        assert self.settings.get("lambda_dispersion", 0.0) >= 0, (
+            "lambda_dispersion must be >= 0"
+        )
+        assert self.settings.get("winsorize_pf_cap", 1.0) >= 1, (
+            "winsorize_pf_cap must be >= 1"
+        )
+        assert self.settings.get("soft_penalty_strength", 0.0) >= 0, (
+            "soft_penalty_strength must be >= 0"
+        )
+        assert self.settings.get("min_total_trades", 0) >= 0, (
+            "min_total_trades must be >= 0"
+        )
+
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
@@ -379,6 +393,10 @@ class MultiAssetFitnessEvaluator:
                 print("Warning: negative asset weights clipped to zero")
             weight_sum = sum(raw_weights)
             if weight_sum == 0:
+                if raw_weights:
+                    print(
+                        "Warning: all asset weights were zero; reverting to equal weights"
+                    )
                 weights = [1.0 / len(per_asset_metrics)] * len(per_asset_metrics)
             else:
                 weights = [w / weight_sum for w in raw_weights]
