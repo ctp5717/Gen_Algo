@@ -17,7 +17,11 @@ import trade_floor
 import json
 import os
 import subprocess
+import hashlib
+from datetime import datetime
 from pathlib import Path
+
+import data_loader
 
 
 def _get_commit_hash() -> str:
@@ -34,14 +38,83 @@ def _get_commit_hash() -> str:
         return "unknown"
 
 
+def _file_sha256(path: Path) -> str | None:
+    """Return the SHA256 hash of a file or ``None`` if missing."""
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def _get_cache_hashes() -> dict:
+    """Compute hashes for any cache files backing the current run."""
+    train_start = pd.to_datetime(config.TRAINING_PERIOD["start"])
+    train_end = pd.to_datetime(config.TRAINING_PERIOD["end"])
+    val_start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
+    val_end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+    wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
+    wf_enabled = wf_settings.get(
+        "enabled", getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False)
+    )
+    if wf_enabled:
+        wf_range = wf_settings.get("total_data_range", {})
+        wf_start = pd.to_datetime(wf_range.get("start", train_start))
+        wf_end = pd.to_datetime(wf_range.get("end", val_end))
+    else:
+        wf_start, wf_end = train_start, val_end
+    earliest = min(train_start, val_start, wf_start).strftime("%Y-%m-%d")
+    latest = max(train_end, val_end, wf_end).strftime("%Y-%m-%d")
+
+    tickers = (
+        [t for _, t in getattr(config, "ASSET_GROUP", [])]
+        if getattr(config, "MULTI_ASSET", {}).get("enabled")
+        else [config.TICKER]
+    )
+    hashes = {}
+    for t in tickers:
+        norm = data_loader._normalize_ticker(t)
+        fname = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}.csv"
+        fpath = Path(data_loader.CACHE_DIR) / fname
+        hashes[fname] = _file_sha256(fpath)
+    return hashes
+
+
+def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
+    """Persist run metadata for reproducibility."""
+    end_time = datetime.utcnow()
+    metadata = {
+        "artifact_version": "1.0.0",
+        "start_time": start_time.isoformat(),
+        "end_time": end_time.isoformat(),
+        "wall_time": (end_time - start_time).total_seconds(),
+        "data_source": config.DATA_SOURCE,
+        "cpu_count": os.cpu_count(),
+        "cache_files": _get_cache_hashes(),
+        "library_versions": {
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "vectorbt": vbt.__version__,
+        },
+        "artifacts": artifacts,
+    }
+    with open("run_metadata.json", "w") as fh:
+        json.dump(metadata, fh, indent=2)
+
+
 def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
     """Run analysis on the champion solution using preloaded data."""
+    start_time = datetime.utcnow()
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
         _run_multi_asset_analysis(best_solution, gene_map, validation_data)
         return
 
     print("\n\n--- Champion Strategy Analysis on Unseen Data ---")
     if validation_data is None or validation_data.empty:
+        _write_run_metadata(start_time, [])
         return
 
     try:
@@ -78,6 +151,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
     except Exception as e:
         print(f"An error occurred during analysis backtest: {e}")
         traceback.print_exc()
+        _write_run_metadata(start_time, [])
         return
 
     print("\n--- Validation Period Performance Stats ---")
@@ -95,13 +169,16 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
         title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
     )
     fig.show()
+    _write_run_metadata(start_time, [])
 
 
 def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: dict):
     """Generate overview charts for multi-asset validation."""
+    start_time = datetime.utcnow()
     print("\n\n--- Multi-Asset Champion Analysis ---")
     if not group_data:
         print("No validation data available for asset group.")
+        _write_run_metadata(start_time, [])
         return
 
     settings = dict(config.MULTI_ASSET)
@@ -221,6 +298,7 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
             "commit_hash": _get_commit_hash(),
         }
         jf = f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
+        summary["run_metadata_file"] = "run_metadata.json"
         with open(jf, "w") as fh:
             json.dump(summary, fh, indent=2)
         print(f"Saved run summary: {jf}")
@@ -242,6 +320,9 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
         config.VALIDATION_PERIOD["end"],
         settings.get("min_total_trades"),
     )
+
+    artifacts = [fname, jf] if rows else []
+    _write_run_metadata(start_time, artifacts)
 
 
 def _plot_multi_asset_overview(
