@@ -9,6 +9,7 @@ import pygad
 import vectorbt as vbt
 import json
 import subprocess
+import hashlib
 from pathlib import Path
 
 import config
@@ -31,6 +32,59 @@ def _get_commit_hash() -> str:
         )
     except Exception:
         return "unknown"
+
+
+def _file_sha256(path: Path) -> str | None:
+    """Return SHA256 hash for a file or ``None`` if missing."""
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def _get_cache_hashes(start_date: str, end_date: str) -> dict:
+    """Compute hashes for cache files used during the walk-forward run."""
+    tickers = (
+        [t for _, t in getattr(config, "ASSET_GROUP", [])]
+        if getattr(config, "MULTI_ASSET", {}).get("enabled")
+        else [config.TICKER]
+    )
+    earliest = pd.to_datetime(start_date).strftime("%Y-%m-%d")
+    latest = pd.to_datetime(end_date).strftime("%Y-%m-%d")
+    hashes = {}
+    for t in tickers:
+        norm = data_loader._normalize_ticker(t)
+        fname = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}.csv"
+        fpath = Path(data_loader.CACHE_DIR) / fname
+        hashes[fname] = _file_sha256(fpath)
+    return hashes
+
+
+def _write_run_metadata(start: datetime, start_date: str, end_date: str, artifacts: list[str]) -> None:
+    """Persist run metadata to ``run_metadata.json``."""
+    end = datetime.utcnow()
+    metadata = {
+        "artifact_version": "1.0.0",
+        "start_time": start.isoformat(),
+        "end_time": end.isoformat(),
+        "wall_time": (end - start).total_seconds(),
+        "data_source": config.DATA_SOURCE,
+        "cpu_count": os.cpu_count(),
+        "cache_files": _get_cache_hashes(start_date, end_date),
+        "library_versions": {
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "vectorbt": vbt.__version__,
+            "pygad": pygad.__version__,
+        },
+        "artifacts": artifacts,
+    }
+    with open("run_metadata.json", "w") as fh:
+        json.dump(metadata, fh, indent=2)
 
 
 def _generate_periods(start: datetime, end: datetime, train_months: int, test_months: int):
@@ -109,6 +163,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     print("\n=== Running Walk-Forward Validation ===")
     np.random.seed(config.SEED)
     num_cores = os.cpu_count()
+    start_time = datetime.utcnow()
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
@@ -121,6 +176,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         if multi:
             if not all_data:
                 print("No data available for walk-forward validation.")
+                _write_run_metadata(start_time, start_date, end_date, [])
                 return
             sample_df = next(iter(all_data.values()))
             start = sample_df.index[0]
@@ -128,6 +184,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         else:
             if all_data.empty:
                 print("No data available for walk-forward validation.")
+                _write_run_metadata(start_time, start_date, end_date, [])
                 return
             start = all_data.index[0]
             end = all_data.index[-1]
@@ -143,6 +200,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             if not all_data:
                 print("No data available for walk-forward validation.")
+                _write_run_metadata(start_time, start_date, end_date, [])
                 return
             sample_df = next(iter(all_data.values()))
             start = sample_df.index[0]
@@ -157,6 +215,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             if all_data.empty:
                 print("No data available for walk-forward validation.")
+                _write_run_metadata(start_time, start_date, end_date, [])
                 return
             start = all_data.index[0]
             end = all_data.index[-1]
@@ -172,6 +231,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     periods = _generate_periods(start, end, train_months, test_months)
     if not periods:
         print("Insufficient data for the requested walk-forward windows.")
+        _write_run_metadata(start_time, start_date, end_date, [])
         return
 
     results = []
@@ -464,6 +524,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
 
     if not results:
         print("\nNo walk-forward runs produced trades.")
+        _write_run_metadata(start_time, start_date, end_date, [])
         return None
 
     results_df = pd.DataFrame(results)
@@ -501,11 +562,16 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             'seed': config.SEED,
             'ga_seed': os.environ.get('GA_SEED'),
             'commit_hash': _get_commit_hash(),
+            'run_metadata_file': 'run_metadata.json',
         }
         summary_json = summary.copy()
         summary_json['folds'] = json.loads(results_df.to_json(orient='records'))
         with open('walk_forward_summary.json', 'w') as f:
             json.dump(summary_json, f, indent=2)
+        artifacts = ["walk_forward_results.csv", "walk_forward_summary.json"]
+        if per_asset_records:
+            artifacts.append("walk_forward_per_asset.csv")
+        _write_run_metadata(start_time, start_date, end_date, artifacts)
         return summary
 
     avg_return = results_df['Total Return [%]'].mean()
@@ -534,9 +600,14 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         'seed': config.SEED,
         'ga_seed': os.environ.get('GA_SEED'),
         'commit_hash': _get_commit_hash(),
+        'run_metadata_file': 'run_metadata.json',
     }
     summary_json = summary.copy()
     summary_json['folds'] = json.loads(results_df.to_json(orient='records'))
     with open('walk_forward_summary.json', 'w') as f:
         json.dump(summary_json, f, indent=2)
+    artifacts = ["walk_forward_results.csv", "walk_forward_summary.json"]
+    if per_asset_records:
+        artifacts.append("walk_forward_per_asset.csv")
+    _write_run_metadata(start_time, start_date, end_date, artifacts)
     return summary
