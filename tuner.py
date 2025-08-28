@@ -130,6 +130,11 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     evaluator = fitness.MultiAssetFitnessEvaluator(
                         train_data, config.STRATEGY_RULES, gene_map, settings
                     )
+                    mutation_kwargs = {"mutation_num_genes": 0}
+                    if mutation_kwargs["mutation_num_genes"] == 0:
+                        mutation_kwargs["mutation_type"] = None
+                        mutation_kwargs["mutation_probability"] = 0.0
+
                     probe = pygad.GA(
                         num_generations=1,
                         num_parents_mating=2,
@@ -137,10 +142,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                         num_genes=len(gene_space),
                         gene_space=gene_space,
                         gene_type=list(gene_types),
-                        mutation_num_genes=0,
-                        mutation_probability=0.0,
                         fitness_func=evaluator.__call__,
                         random_seed=seed,
+                        **mutation_kwargs,
                     )
                     probe.run()
                     _, score, _ = probe.best_solution()
