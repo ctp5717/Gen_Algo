@@ -41,9 +41,13 @@ class Portfolio:
     def trades(self) -> _Trades:  # pragma: no cover - simple property
         return self._trades
 
-    def stats(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:  # pragma: no cover - passthrough
+    def stats(
+        self, *args: Any, **kwargs: Any
+    ) -> Dict[str, Any]:  # pragma: no cover - passthrough
         return self._stats
 
     @classmethod
-    def from_signals(cls, *args: Any, **kwargs: Any) -> "Portfolio":  # pragma: no cover - deterministic default
+    def from_signals(
+        cls, *args: Any, **kwargs: Any
+    ) -> "Portfolio":  # pragma: no cover - deterministic default
         return cls()

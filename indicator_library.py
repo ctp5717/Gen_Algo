@@ -25,8 +25,8 @@ To Add a New Indicator:
    the function name in the `config.py` file.
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 # -- Compatibility shim -------------------------------------------------------
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
@@ -38,6 +38,7 @@ if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
 import pandas_ta as ta
+
 
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
@@ -52,14 +53,17 @@ def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("EMA 'period' parameter cannot be None.")
-    
+
     # pandas-ta automatically finds the 'Close' column to perform the calculation
     ema_series = ohlc_data.ta.ema(length=period)
-    
+
     if ema_series is None:
-        raise ConnectionError("Failed to calculate EMA. Check input data and parameters.")
-        
+        raise ConnectionError(
+            "Failed to calculate EMA. Check input data and parameters."
+        )
+
     return ema_series
+
 
 def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
@@ -74,14 +78,17 @@ def calculate_atr(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("ATR 'period' parameter cannot be None.")
-    
+
     # pandas-ta uses the high, low, and close columns for the ATR calculation
     atr_series = ohlc_data.ta.atr(length=period)
-    
+
     if atr_series is None:
-        raise ConnectionError("Failed to calculate ATR. Check input data and parameters.")
-        
+        raise ConnectionError(
+            "Failed to calculate ATR. Check input data and parameters."
+        )
+
     return atr_series
+
 
 def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
@@ -89,33 +96,43 @@ def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     if period is None:
         raise ValueError("RSI 'period' parameter cannot be None.")
-    
+
     rsi_series = ohlc_data.ta.rsi(length=period)
-    
+
     if rsi_series is None:
-        raise ConnectionError("Failed to calculate RSI. Check input data and parameters.")
-        
+        raise ConnectionError(
+            "Failed to calculate RSI. Check input data and parameters."
+        )
+
     return rsi_series
 
-def calculate_macd(ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int) -> pd.DataFrame:
+
+def calculate_macd(
+    ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int
+) -> pd.DataFrame:
     """
     Calculates the Moving Average Convergence Divergence (MACD).
-    
+
     Returns:
         pd.DataFrame: A DataFrame containing MACD line, histogram, and signal line.
     """
     if not all([fast, slow, signal]):
         raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
-    
+
     # The .ta.macd() function returns a DataFrame with multiple columns
     macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
 
     if macd_df is None:
-        raise ConnectionError("Failed to calculate MACD. Check input data and parameters.")
-    
+        raise ConnectionError(
+            "Failed to calculate MACD. Check input data and parameters."
+        )
+
     return macd_df
 
-def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd.DataFrame:
+
+def calculate_bbands(
+    ohlc_data: pd.DataFrame, period: int, std_dev: float
+) -> pd.DataFrame:
     """
     Calculates Bollinger Bands (BBands).
 
@@ -124,13 +141,16 @@ def calculate_bbands(ohlc_data: pd.DataFrame, period: int, std_dev: float) -> pd
     """
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
-    
+
     bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
 
     if bbands_df is None:
-        raise ConnectionError("Failed to calculate BBands. Check input data and parameters.")
+        raise ConnectionError(
+            "Failed to calculate BBands. Check input data and parameters."
+        )
 
     return bbands_df
+
 
 # --- Future Indicators Will Be Added Below ---
 # Example of how we would add another indicator, like RSI.

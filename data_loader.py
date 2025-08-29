@@ -10,11 +10,13 @@ for the indicator and backtesting engines.)
 """
 
 import os
+
 import pandas as pd
 import yfinance as yf
+
 import config
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_cache")
 
 # Tracks whether the first group data load has occurred so we can automatically
 # show verbose output once.
@@ -56,16 +58,16 @@ def _get_binance_data(
 
     # --- MODIFIED: Added the tld parameter to correctly connect to Binance.US ---
     client = Client(
-        api_key=config.API_KEYS['binance']['api_key'],
-        api_secret=config.API_KEYS['binance']['api_secret'],
-        tld=config.API_KEYS['binance']['tld']
+        api_key=config.API_KEYS["binance"]["api_key"],
+        api_secret=config.API_KEYS["binance"]["api_secret"],
+        tld=config.API_KEYS["binance"]["tld"],
     )
-    
+
     # Fetch the data
     klines = client.get_historical_klines(
-        ticker.replace('-', ''), interval, start_str=start_date, end_str=end_date
+        ticker.replace("-", ""), interval, start_str=start_date, end_str=end_date
     )
-    
+
     if not klines:
         if verbose:
             print(
@@ -75,18 +77,30 @@ def _get_binance_data(
         return pd.DataFrame()
 
     # Create a pandas DataFrame
-    data = pd.DataFrame(klines, columns=[
-        'Open time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close time',
-        'Quote asset volume', 'Number of trades', 'Taker buy base asset volume',
-        'Taker buy quote asset volume', 'Ignore'
-    ])
-    
+    data = pd.DataFrame(
+        klines,
+        columns=[
+            "Open time",
+            "Open",
+            "High",
+            "Low",
+            "Close",
+            "Volume",
+            "Close time",
+            "Quote asset volume",
+            "Number of trades",
+            "Taker buy base asset volume",
+            "Taker buy quote asset volume",
+            "Ignore",
+        ],
+    )
+
     # --- Data Cleaning and Formatting ---
-    data['Date'] = pd.to_datetime(data['Open time'], unit='ms')
-    data.set_index('Date', inplace=True)
-    data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
-    data = data.apply(pd.to_numeric, errors='coerce')
-    
+    data["Date"] = pd.to_datetime(data["Open time"], unit="ms")
+    data.set_index("Date", inplace=True)
+    data = data[["Open", "High", "Low", "Close", "Volume"]]
+    data = data.apply(pd.to_numeric, errors="coerce")
+
     if verbose:
         print("Binance data loaded and formatted successfully.")
     return data
@@ -96,7 +110,7 @@ def get_data(
     ticker: str,
     start_date: str,
     end_date: str,
-    interval: str = '1d',
+    interval: str = "1d",
     *,
     verbose: bool = True,
 ) -> tuple[pd.DataFrame, str]:
@@ -144,11 +158,11 @@ def get_data(
 
     # --- Router Logic ---
     try:
-        if source == 'binance':
+        if source == "binance":
             data = _get_binance_data(
                 ticker, start_date, end_date, interval, verbose=verbose
             )
-        elif source == 'yfinance':
+        elif source == "yfinance":
             if verbose:
                 print(
                     f"Cache not found. Downloading '{ticker}' data from Yahoo Finance..."
@@ -163,7 +177,9 @@ def get_data(
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
         else:
-            raise ValueError(f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'.")
+            raise ValueError(
+                f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'."
+            )
 
         if data.empty:
             if verbose:
@@ -174,7 +190,7 @@ def get_data(
 
         # Standardize column names
         data.columns = [col.capitalize() for col in data.columns]
-        
+
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
@@ -249,9 +265,7 @@ def get_group_data(
 
     if not raw_data:
         if not verbose:
-            print(
-                f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]"
-            )
+            print(f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]")
         if asset_verbose:
             _first_group_load = False
         return {}
@@ -275,9 +289,7 @@ def get_group_data(
 
     if not filtered:
         if not verbose:
-            print(
-                f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]"
-            )
+            print(f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]")
         if asset_verbose:
             _first_group_load = False
         return {}
@@ -285,7 +297,9 @@ def get_group_data(
     # Align remaining assets to the intersection of their timestamps.
     common_index = None
     for df in filtered.values():
-        common_index = df.index if common_index is None else common_index.intersection(df.index)
+        common_index = (
+            df.index if common_index is None else common_index.intersection(df.index)
+        )
 
     aligned = {ticker: df.loc[common_index] for ticker, df in filtered.items()}
 
@@ -302,4 +316,3 @@ def get_group_data(
         _first_group_load = False
 
     return aligned
-
