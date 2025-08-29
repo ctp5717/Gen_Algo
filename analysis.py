@@ -18,7 +18,7 @@ import json
 import os
 import subprocess
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import data_loader
@@ -85,7 +85,7 @@ def _get_cache_hashes() -> dict:
 
 def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
     """Persist run metadata for reproducibility."""
-    end_time = datetime.utcnow()
+    end_time = datetime.now(timezone.utc)
     metadata = {
         "artifact_version": "1.0.0",
         "start_time": start_time.isoformat(),
@@ -107,7 +107,7 @@ def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
 
 def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
     """Run analysis on the champion solution using preloaded data."""
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
         _run_multi_asset_analysis(best_solution, gene_map, validation_data)
         return
@@ -174,7 +174,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
 
 def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: dict):
     """Generate overview charts for multi-asset validation."""
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     print("\n\n--- Multi-Asset Champion Analysis ---")
     if not group_data:
         print("No validation data available for asset group.")
