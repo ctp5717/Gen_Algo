@@ -12,7 +12,6 @@ for the indicator and backtesting engines.)
 import os
 import pandas as pd
 import yfinance as yf
-from binance.client import Client
 import config
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'data_cache')
@@ -41,12 +40,20 @@ def _normalize_ticker(ticker: str) -> str:
 def _get_binance_data(
     ticker: str, start_date: str, end_date: str, interval: str, *, verbose: bool = True
 ) -> pd.DataFrame:
-    """Fetch historical kline data from Binance and format it."""
+    """Fetch historical kline data from Binance and format it.
+
+    The real ``binance`` package is an optional dependency and importing it
+    at module import time causes deprecation warnings in the test
+    environment. We therefore import the client lazily inside this
+    function.
+    """
     if verbose:
         print(
             f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API..."
         )
-    
+
+    from binance.client import Client  # type: ignore
+
     # --- MODIFIED: Added the tld parameter to correctly connect to Binance.US ---
     client = Client(
         api_key=config.API_KEYS['binance']['api_key'],
