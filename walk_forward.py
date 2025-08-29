@@ -1,6 +1,6 @@
 """Walk-Forward Validation Module."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 import os
@@ -66,7 +66,7 @@ def _get_cache_hashes(start_date: str, end_date: str) -> dict:
 
 def _write_run_metadata(start: datetime, start_date: str, end_date: str, artifacts: list[str]) -> None:
     """Persist run metadata to ``run_metadata.json``."""
-    end = datetime.utcnow()
+    end = datetime.now(timezone.utc)
     metadata = {
         "artifact_version": "1.0.0",
         "start_time": start.isoformat(),
@@ -163,7 +163,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     print("\n=== Running Walk-Forward Validation ===")
     np.random.seed(config.SEED)
     num_cores = os.cpu_count()
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
