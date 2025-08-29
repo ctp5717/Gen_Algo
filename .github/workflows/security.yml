@@ -58,10 +58,10 @@ jobs:
             requirements-dev.txt
       - name: Install Bandit
         run: |
-          pip install bandit[toml]
+          pip install "bandit[toml]>=1.7.4" bandit-sarif-formatter
       - name: Run Bandit
         run: |
-          bandit -r . --severity-level medium --confidence-level medium \
+          python -m bandit -r . --severity-level medium --confidence-level medium \
             -f sarif -o bandit.sarif
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
