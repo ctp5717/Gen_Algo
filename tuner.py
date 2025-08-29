@@ -1,13 +1,14 @@
 import os
+
 import numpy as np
-import pygad
-import vectorbt as vbt
 import pandas as pd
-import trade_floor
+import pygad
 
 import config
 import fitness
 import strategy_engine as engine
+import trade_floor
+import vectorbt as vbt
 
 
 def _evaluate_on_validation(solution, gene_map, val_data):
@@ -26,9 +27,7 @@ def _evaluate_on_validation(solution, gene_map, val_data):
             end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
             floor, info = trade_floor.scale_floor(rate, start, end)
             settings["min_total_trades"] = floor
-            print(
-                f"Scaled min_total_trades (validation): {floor} | info={info}"
-            )
+            print(f"Scaled min_total_trades (validation): {floor} | info={info}")
         settings["trade_floor_policy"] = "soft_penalty"
         settings["soft_penalty_mode"] = "multiplicative"
         print(
@@ -52,9 +51,21 @@ def _evaluate_on_validation(solution, gene_map, val_data):
     tsl_rule = exit_rules.get("trailing_stop", {})
     tp_rule = exit_rules.get("take_profit", {})
 
-    sl_stop = sl_rule.get("params", {}).get("value") if sl_rule.get("is_active", False) else None
-    sl_trail = tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
-    tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
+    sl_stop = (
+        sl_rule.get("params", {}).get("value")
+        if sl_rule.get("is_active", False)
+        else None
+    )
+    sl_trail = (
+        tsl_rule.get("params", {}).get("value")
+        if tsl_rule.get("is_active", False)
+        else None
+    )
+    tp_stop = (
+        tp_rule.get("params", {}).get("value")
+        if tp_rule.get("is_active", False)
+        else None
+    )
 
     time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
     time_exit = time_exit.reindex(entries.index, fill_value=False)
@@ -110,12 +121,10 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 print(f"λ={lam}: {score}")
 
             top_k = config.MULTI_ASSET.get("lambda_top_k", 1)
-            seeds = config.MULTI_ASSET.get(
-                "lambda_rescore_seeds", [config.SEED]
-            )
-            top_candidates = sorted(
-                sweep_results, key=lambda x: x[1], reverse=True
-            )[:top_k]
+            seeds = config.MULTI_ASSET.get("lambda_rescore_seeds", [config.SEED])
+            top_candidates = sorted(sweep_results, key=lambda x: x[1], reverse=True)[
+                :top_k
+            ]
 
             best_lam = None
             best_median = -np.inf
@@ -168,7 +177,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
     results = []
 
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
-        print(f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}")
+        print(
+            f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}"
+        )
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],

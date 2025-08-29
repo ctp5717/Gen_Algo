@@ -5,10 +5,12 @@ Configuration File for the GA Trading Framework
 (This version includes automated rolling date ranges that adapt to the selected timeframe)
 """
 
+import os
+
 # Import necessary libraries for date calculation
 from datetime import datetime
+
 from dateutil.relativedelta import relativedelta
-import os
 
 # Global random seed for deterministic runs. Can be overridden via the
 # GA_SEED environment variable which acts like a CLI flag.
@@ -29,7 +31,7 @@ API_KEYS = {
     "binance": {
         "tld": os.environ.get("BINANCE_TLD", "us"),
         "api_key": os.environ.get("BINANCE_API_KEY", ""),
-        "api_secret": os.environ.get("BINANCE_API_SECRET", "")
+        "api_secret": os.environ.get("BINANCE_API_SECRET", ""),
     }
 }
 
@@ -38,7 +40,6 @@ CRYPTO_UNIVERSE = {
     # Tier 1 / Major Pairs
     "Bitcoin": "BTC-USD",
     "Ethereum": "ETH-USD",
-
     # Major Altcoins
     "Solana": "SOL-USD",
     "XRP": "XRP-USD",
@@ -52,7 +53,6 @@ CRYPTO_UNIVERSE = {
     "Bitcoin_Cash": "BCH-USD",
     "Shiba_Inu": "SHIB-USD",
     "Toncoin": "TON-USD",
-
     # Other Prominent L1s / L2s / DeFi
     "Uniswap": "UNI-USD",
     "TRON": "TRX-USD",
@@ -64,7 +64,7 @@ CRYPTO_UNIVERSE = {
     "VeChain": "VET-USD",
     "Filecoin": "FIL-USD",
     "Optimism": "OP-USD",
-    "The_Graph": "GRT-USD"
+    "The_Graph": "GRT-USD",
 }
 
 # Default asset group used when multi-asset optimisation is enabled.  Each
@@ -103,30 +103,35 @@ VALIDATION_MONTHS = 3
 DEFAULT_MAX_PERIOD = 200
 ENABLE_WALK_FORWARD_VALIDATION = True
 today = datetime.now()
-if 'h' in TIMEFRAME.lower() or 'm' in TIMEFRAME.lower():
-    VALIDATION_BARS = 91 * (24 if 'h' in TIMEFRAME.lower() else 24 * (60 / int(TIMEFRAME.replace('m',''))))
-else: VALIDATION_BARS = 91
+if "h" in TIMEFRAME.lower() or "m" in TIMEFRAME.lower():
+    VALIDATION_BARS = 91 * (
+        24 if "h" in TIMEFRAME.lower() else 24 * (60 / int(TIMEFRAME.replace("m", "")))
+    )
+else:
+    VALIDATION_BARS = 91
 max_lookback_period = max(20, min(DEFAULT_MAX_PERIOD, int(VALIDATION_BARS - 2)))
-if 'm' in TIMEFRAME.lower() or 'h' in TIMEFRAME.lower():
-    minutes = 60 if TIMEFRAME.endswith('h') else int(TIMEFRAME[:-1])
+if "m" in TIMEFRAME.lower() or "h" in TIMEFRAME.lower():
+    minutes = 60 if TIMEFRAME.endswith("h") else int(TIMEFRAME[:-1])
     bars_per_day = int(24 * 60 / minutes)
     MAX_HOLD_PERIOD = MAX_HOLD_DAYS * bars_per_day
 else:
     MAX_HOLD_PERIOD = MAX_HOLD_DAYS
 training_years_daily, training_months_intraday = 3, 20
 training_end_date = today - relativedelta(months=VALIDATION_MONTHS)
-if TIMEFRAME in ['1d', '1wk', '1mo']:
+if TIMEFRAME in ["1d", "1wk", "1mo"]:
     training_start_date = training_end_date - relativedelta(years=training_years_daily)
 else:
-    training_start_date = training_end_date - relativedelta(months=training_months_intraday)
+    training_start_date = training_end_date - relativedelta(
+        months=training_months_intraday
+    )
 
 # --- 3. FINAL CONFIGURATION OUTPUTS ---
-if DATA_SOURCE == 'binance':
-    TICKER = TICKER.replace('-', '')
+if DATA_SOURCE == "binance":
+    TICKER = TICKER.replace("-", "")
     # Binance typically provides deep history for USDT pairs rather than USD.
     # Convert "BTCUSD" -> "BTCUSDT" to ensure sufficient historical data.
-    if TICKER.endswith('USD') and not TICKER.endswith('USDT'):
-        TICKER = TICKER[:-3] + 'USDT'
+    if TICKER.endswith("USD") and not TICKER.endswith("USDT"):
+        TICKER = TICKER[:-3] + "USDT"
 TRAINING_PERIOD = {
     "start": training_start_date.strftime("%Y-%m-%d"),
     "end": training_end_date.strftime("%Y-%m-%d"),
@@ -156,6 +161,7 @@ def to_pandas_freq(tf: str) -> str:
         # Pandas deprecated the 'T' alias for minutes; use 'min' instead
         return tf[:-1] + "min"
     return tf
+
 
 # Walk-forward validation will leverage a longer history than the main
 # optimisation phase.  Start three years back from today regardless of the
@@ -201,7 +207,10 @@ HYPERPARAMETER_SEARCH_SPACE = [
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
 FITNESS_WEIGHTS = {
-    "sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2, "min_trades": 0
+    "sortino_ratio": 0.5,
+    "profit_factor": 0.3,
+    "max_drawdown": 0.2,
+    "min_trades": 0,
 }
 
 # --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
@@ -252,18 +261,10 @@ MULTI_ASSET = {
 
 # Validate core multi-asset parameters on import so that misconfigured
 # values fail fast regardless of whether the evaluator runs.
-assert MULTI_ASSET["lambda_dispersion"] >= 0, (
-    "lambda_dispersion must be >= 0"
-)
-assert MULTI_ASSET["winsorize_pf_cap"] >= 1, (
-    "winsorize_pf_cap must be >= 1"
-)
-assert MULTI_ASSET["soft_penalty_strength"] >= 0, (
-    "soft_penalty_strength must be >= 0"
-)
-assert MULTI_ASSET["min_total_trades"] >= 0, (
-    "min_total_trades must be >= 0"
-)
+assert MULTI_ASSET["lambda_dispersion"] >= 0, "lambda_dispersion must be >= 0"
+assert MULTI_ASSET["winsorize_pf_cap"] >= 1, "winsorize_pf_cap must be >= 1"
+assert MULTI_ASSET["soft_penalty_strength"] >= 0, "soft_penalty_strength must be >= 0"
+assert MULTI_ASSET["min_total_trades"] >= 0, "min_total_trades must be >= 0"
 
 # Basic charting options for the multi-asset analysis overview.
 CHARTS = {
@@ -289,77 +290,107 @@ CHAMPION_SELECTION_SETTINGS = {
 # Here you can define a "master list" of all potential conditions.
 # Use the `is_active` flag to control which ones are used in a given run.
 STRATEGY_RULES = {
-    'entry_rules': {
-        'combination_logic': 'AND',
-        'conditions': [
+    "entry_rules": {
+        "combination_logic": "AND",
+        "conditions": [
             {
-                'is_active': True, # This rule is ON
-                'rule_name': 'Long_Term_Trend_Filter',
-                'indicator': 'ema',
-                'params': {
-                    'period': {'gene': 'ema_period', 'low': 20, 'high': max_lookback_period, 'step': 5}
+                "is_active": True,  # This rule is ON
+                "rule_name": "Long_Term_Trend_Filter",
+                "indicator": "ema",
+                "params": {
+                    "period": {
+                        "gene": "ema_period",
+                        "low": 20,
+                        "high": max_lookback_period,
+                        "step": 5,
+                    }
                 },
-                'condition': {'type': 'price_is_above_indicator'}
+                "condition": {"type": "price_is_above_indicator"},
             },
             {
-                'is_active': True, # This rule is ON
-                'rule_name': 'RSI_Momentum_Filter',
-                'indicator': 'rsi',
-                'params': {
-                    'period': {'gene': 'rsi_period', 'low': 3, 'high': 35, 'step': 1}
+                "is_active": True,  # This rule is ON
+                "rule_name": "RSI_Momentum_Filter",
+                "indicator": "rsi",
+                "params": {
+                    "period": {"gene": "rsi_period", "low": 3, "high": 35, "step": 1}
                 },
-                'condition': {
-                    'type': 'indicator_is_above_value',
-                    'value': {'gene': 'rsi_threshold', 'low': 30, 'high': 84, 'step': 2}
-                }
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "rsi_threshold",
+                        "low": 30,
+                        "high": 84,
+                        "step": 2,
+                    },
+                },
             },
             {
-                'is_active': False,
-                'rule_name': 'MACD_Momentum_Cross',
-                'indicator': 'macd',
-                'params': {
-                    'fast': {'gene': 'macd_fast', 'low': 4, 'high': 20, 'step': 1},
-                    'slow': {'gene': 'macd_slow', 'low': 15, 'high': 35, 'step': 1},
-                    'signal': {'gene': 'macd_signal', 'low': 4, 'high': 16, 'step': 1}
+                "is_active": False,
+                "rule_name": "MACD_Momentum_Cross",
+                "indicator": "macd",
+                "params": {
+                    "fast": {"gene": "macd_fast", "low": 4, "high": 20, "step": 1},
+                    "slow": {"gene": "macd_slow", "low": 15, "high": 35, "step": 1},
+                    "signal": {"gene": "macd_signal", "low": 4, "high": 16, "step": 1},
                 },
-                'condition': {'type': 'indicator_crosses_above_value', 'value': 0}
+                "condition": {"type": "indicator_crosses_above_value", "value": 0},
             },
             {
-                'is_active': False,
-                'rule_name': 'Bollinger_Band_Breakout',
-                'indicator': 'bbands',
-                'params': {
-                    'period': {'gene': 'bband_period', 'low': 10, 'high': 35, 'step': 1},
-                    'std_dev': {'gene': 'bband_std', 'low': 0.5, 'high': 5, 'step': 0.25}
+                "is_active": False,
+                "rule_name": "Bollinger_Band_Breakout",
+                "indicator": "bbands",
+                "params": {
+                    "period": {
+                        "gene": "bband_period",
+                        "low": 10,
+                        "high": 35,
+                        "step": 1,
+                    },
+                    "std_dev": {
+                        "gene": "bband_std",
+                        "low": 0.5,
+                        "high": 5,
+                        "step": 0.25,
+                    },
                 },
-                'condition': {
-                    'type': 'price_crosses_above_upper_band',
-                    'column': 'BBU_20_2.0' # Specify which band to check against
-                }
-            }
-        ]
+                "condition": {
+                    "type": "price_crosses_above_upper_band",
+                    "column": "BBU_20_2.0",  # Specify which band to check against
+                },
+            },
+        ],
     },
-    'exit_rules': {
-        'stop_loss': {
-            'is_active': True, # Turn off regular stop to use trailing stop
-            'type': 'percentage',
-            'params': { # Correctly nested
-                'value': {'gene': 'stop_loss_pct', 'low': 0.01, 'high': 0.10, 'step': 0.005}
-            }
+    "exit_rules": {
+        "stop_loss": {
+            "is_active": True,  # Turn off regular stop to use trailing stop
+            "type": "percentage",
+            "params": {  # Correctly nested
+                "value": {
+                    "gene": "stop_loss_pct",
+                    "low": 0.01,
+                    "high": 0.10,
+                    "step": 0.005,
+                }
+            },
         },
-        'trailing_stop': {
-            'is_active': False, # Turn on trailing stop
-            'type': 'percentage',
-            'params': { # Correctly nested
-                'value': {'gene': 'tsl_pct', 'low': 0.01, 'high': 0.10, 'step': 0.005}
-            }
+        "trailing_stop": {
+            "is_active": False,  # Turn on trailing stop
+            "type": "percentage",
+            "params": {  # Correctly nested
+                "value": {"gene": "tsl_pct", "low": 0.01, "high": 0.10, "step": 0.005}
+            },
         },
-        'take_profit': {
-            'is_active': True,
-            'type': 'percentage',
-            'params': { # Correctly nested
-                'value': {'gene': 'take_profit_pct', 'low': 0.02, 'high': 0.20, 'step': 0.01}
-            }
-        }
-    }
+        "take_profit": {
+            "is_active": True,
+            "type": "percentage",
+            "params": {  # Correctly nested
+                "value": {
+                    "gene": "take_profit_pct",
+                    "low": 0.02,
+                    "high": 0.20,
+                    "step": 0.01,
+                }
+            },
+        },
+    },
 }
