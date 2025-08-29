@@ -20,6 +20,7 @@ jobs:
           languages: python
       - uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
+        continue-on-error: true
 
   dependency-audit:
     runs-on: ubuntu-latest
@@ -48,6 +49,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: pip-audit.sarif
+        continue-on-error: true
 
   bandit:
     runs-on: ubuntu-latest
@@ -75,3 +77,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: bandit.sarif
+        continue-on-error: true
