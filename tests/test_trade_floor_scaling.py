@@ -1,5 +1,7 @@
 import datetime as dt
+
 import pytest
+
 from trade_floor import scale_floor
 
 

@@ -1,3 +1,15 @@
 [flake8]
 max-line-length = 100
-exclude = config.py,fitness.py,gene_parser.py,strategy_engine.py,analysis.py,data_loader.py,indicator_library.py,main.py,walk_forward.py,tests/test_walk_forward.py
+extend-ignore = E203
+per-file-ignores =
+    config.py: E231,E261,E305,E501,E701
+    fitness.py: E261,E302,E501,E701,W293
+    gene_parser.py: E501
+    strategy_engine.py: E261,E302,E501,E701,W293
+    analysis.py: E501
+    data_loader.py: E501,W293,W391
+    indicator_library.py: E302,E501,F401,W293
+    main.py: E261,E302,E305,E501,E701,E702,W293
+    walk_forward.py: E203,E501
+    tests/test_walk_forward.py: E303,E501
+    tests/test_multi_asset_fitness.py: B010

@@ -7,7 +7,9 @@ This module contains helper functions for working with strategy rules.
 from typing import Any, Dict, List, Tuple
 
 
-def parse_genes_from_config(rules: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]], List[type]]:
+def parse_genes_from_config(
+    rules: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]], List[type]]:
     """Parse STRATEGY_RULES and return gene_space, gene_map, and gene_types.
 
     Only rules with ``is_active`` set to ``True`` will be considered when
@@ -30,7 +32,9 @@ def parse_genes_from_config(rules: Dict[str, Any]) -> Tuple[List[Dict[str, Any]]
                 if isinstance(value, dict) and "gene" in value:
                     gene_info = value
                     gene_name = gene_info["gene"]
-                    gene_type = int if isinstance(gene_info.get("step", 1.0), int) else float
+                    gene_type = (
+                        int if isinstance(gene_info.get("step", 1.0), int) else float
+                    )
 
                     space_item: Dict[str, Any] = {
                         "low": gene_info["low"],

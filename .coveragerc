@@ -1,0 +1,6 @@
+[run]
+branch = True
+omit = */tests/*, */.venv/*, analysis.py, data_loader.py, indicator_library.py, main.py, strategy_engine.py
+
+[report]
+show_missing = True
