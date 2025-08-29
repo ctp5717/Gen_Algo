@@ -1,55 +1,66 @@
 import sys
 import types
 from pathlib import Path
+
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # Stub heavy deps
-sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
+sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 
 import analysis  # noqa: E402
 
 
 def test_run_champion_analysis_non_blocking(monkeypatch):
-    df = pd.DataFrame({
-        'Open': [1, 2],
-        'High': [1, 2],
-        'Low': [1, 2],
-        'Close': [1, 2],
-        'Volume': [1, 1],
-    }, index=pd.date_range('2020-01-01', periods=2))
+    df = pd.DataFrame(
+        {
+            "Open": [1, 2],
+            "High": [1, 2],
+            "Low": [1, 2],
+            "Close": [1, 2],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
 
-    monkeypatch.setattr(analysis.config, 'MAX_HOLD_PERIOD', 1, raising=False)
-    monkeypatch.setattr(analysis.config, 'TIMEFRAME', '1d', raising=False)
+    monkeypatch.setattr(analysis.config, "MAX_HOLD_PERIOD", 1, raising=False)
+    monkeypatch.setattr(analysis.config, "TIMEFRAME", "1d", raising=False)
     monkeypatch.setattr(
         analysis.config,
-        'VALIDATION_PERIOD',
-        {'start': '2020-01-01', 'end': '2020-01-02'},
+        "VALIDATION_PERIOD",
+        {"start": "2020-01-01", "end": "2020-01-02"},
         raising=False,
     )
-    monkeypatch.setattr(analysis.config, 'TICKER', 'TEST', raising=False)
-    monkeypatch.setattr(analysis.config, 'SELECTED_ASSET_NAME', 'Test', raising=False)
-    monkeypatch.setattr(analysis.config, 'STRATEGY_RULES', {}, raising=False)
-    monkeypatch.setitem(analysis.config.MULTI_ASSET, 'enabled', False)
+    monkeypatch.setattr(analysis.config, "TICKER", "TEST", raising=False)
+    monkeypatch.setattr(analysis.config, "SELECTED_ASSET_NAME", "Test", raising=False)
+    monkeypatch.setattr(analysis.config, "STRATEGY_RULES", {}, raising=False)
+    monkeypatch.setitem(analysis.config.MULTI_ASSET, "enabled", False)
 
     monkeypatch.setattr(
-        analysis.fitness,
-        '_inject_genes_into_rules',
-        lambda *a, **k: {'exit_rules': {}}
+        analysis.fitness, "_inject_genes_into_rules", lambda *a, **k: {"exit_rules": {}}
     )
     monkeypatch.setattr(
         analysis.engine,
-        'process_strategy_rules',
-        lambda *a, **k: pd.Series([True, False], index=df.index)
+        "process_strategy_rules",
+        lambda *a, **k: pd.Series([True, False], index=df.index),
     )
 
     metrics = [
-        'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
-        'Max Drawdown [%]', 'Sortino Ratio', 'Sharpe Ratio', 'Profit Factor',
-        'Win Rate [%]', 'Total Trades', 'Avg Winning Trade [%]',
-        'Avg Losing Trade [%]'
+        "Start",
+        "End",
+        "Period",
+        "Total Return [%]",
+        "Benchmark Return [%]",
+        "Max Drawdown [%]",
+        "Sortino Ratio",
+        "Sharpe Ratio",
+        "Profit Factor",
+        "Win Rate [%]",
+        "Total Trades",
+        "Avg Winning Trade [%]",
+        "Avg Losing Trade [%]",
     ]
 
     class DummyPortfolio:
@@ -59,15 +70,15 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         def plot(self, *a, **k):
             class DummyFig:
                 def show(self):
-                    calls.append('show')
+                    calls.append("show")
 
             return DummyFig()
 
     monkeypatch.setattr(
         analysis.vbt,
-        'Portfolio',
+        "Portfolio",
         types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
-        raising=False
+        raising=False,
     )
 
     calls = []
@@ -75,17 +86,17 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
 
     monkeypatch.setattr(
         analysis,
-        'plt',
+        "plt",
         types.SimpleNamespace(
-            ion=lambda: ion_called.setdefault('ion', True),
+            ion=lambda: ion_called.setdefault("ion", True),
         ),
     )
 
     analysis.run_champion_analysis(
         [0],
-        {0: {'name': 'x', 'path': [], 'type': float}},
+        {0: {"name": "x", "path": [], "type": float}},
         df,
     )
 
-    assert ion_called['ion']
-    assert calls == ['show']
+    assert ion_called["ion"]
+    assert calls == ["show"]

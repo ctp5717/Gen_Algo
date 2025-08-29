@@ -6,11 +6,13 @@ Fitness Function for Genetic Algorithm
 """
 import copy
 from collections import Counter
-import pandas as pd
+
 import numpy as np
-import vectorbt as vbt
-import strategy_engine as engine
+import pandas as pd
+
 import config
+import strategy_engine as engine
+import vectorbt as vbt
 
 
 def weighted_mean_std(values, weights):
@@ -67,6 +69,7 @@ def print_floor_failures(counter: Counter):
     else:
         print(f"Hard-floor failures: {dict(counter)}")
 
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """
     Injects the gene values from a GA solution into a copy of the strategy rules.
@@ -105,53 +108,68 @@ class FitnessEvaluator:
         try:
             rules = _inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
-            
-            if entries.sum() < config.FITNESS_WEIGHTS['min_trades']:
+
+            if entries.sum() < config.FITNESS_WEIGHTS["min_trades"]:
                 return -1.0
 
             # --- NEW: Logic to handle multiple, selectable exit types ---
-            exit_rules = rules.get('exit_rules', {})
-            sl_rule = exit_rules.get('stop_loss', {})
-            tsl_rule = exit_rules.get('trailing_stop', {})
-            tp_rule = exit_rules.get('take_profit', {})
+            exit_rules = rules.get("exit_rules", {})
+            sl_rule = exit_rules.get("stop_loss", {})
+            tsl_rule = exit_rules.get("trailing_stop", {})
+            tp_rule = exit_rules.get("take_profit", {})
 
-            sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
-            sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
-            tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
-            
+            sl_stop = (
+                sl_rule.get("params", {}).get("value")
+                if sl_rule.get("is_active", False)
+                else None
+            )
+            sl_trail = (
+                tsl_rule.get("params", {}).get("value")
+                if tsl_rule.get("is_active", False)
+                else None
+            )
+            tp_stop = (
+                tp_rule.get("params", {}).get("value")
+                if tp_rule.get("is_active", False)
+                else None
+            )
+
             time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
             time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
             portfolio = vbt.Portfolio.from_signals(
-                close=self.ohlc_data['Close'],
+                close=self.ohlc_data["Close"],
                 entries=entries,
                 exits=time_based_exit,
                 sl_stop=sl_stop,
                 tp_stop=tp_stop,
-                sl_trail=sl_trail, # Pass the trailing stop value to the backtester
+                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
                 fees=config.FEES,
-                freq=config.to_pandas_freq(config.TIMEFRAME)
+                freq=config.to_pandas_freq(config.TIMEFRAME),
             )
-            
-            stats = portfolio.stats()
-            sortino = stats.get('Sortino Ratio')
-            profit_factor = stats.get('Profit Factor')
-            max_drawdown = stats.get('Max Drawdown [%]')
 
-            cap = getattr(config, 'MULTI_ASSET', {}).get('winsorize_pf_cap', 5.0)
+            stats = portfolio.stats()
+            sortino = stats.get("Sortino Ratio")
+            profit_factor = stats.get("Profit Factor")
+            max_drawdown = stats.get("Max Drawdown [%]")
+
+            cap = getattr(config, "MULTI_ASSET", {}).get("winsorize_pf_cap", 5.0)
             if np.isinf(profit_factor) or profit_factor > cap:
                 profit_factor = cap
-            if np.isnan(sortino): sortino = 0
-            if np.isnan(profit_factor): profit_factor = 0
-            if np.isnan(max_drawdown): max_drawdown = 100.0
+            if np.isnan(sortino):
+                sortino = 0
+            if np.isnan(profit_factor):
+                profit_factor = 0
+            if np.isnan(max_drawdown):
+                max_drawdown = 100.0
 
             drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
 
             fitness_score = (
-                (sortino * weights['sortino_ratio']) +
-                (profit_factor * weights['profit_factor']) +
-                (drawdown_score * weights['max_drawdown'])
+                (sortino * weights["sortino_ratio"])
+                + (profit_factor * weights["profit_factor"])
+                + (drawdown_score * weights["max_drawdown"])
             )
 
             return fitness_score if not np.isnan(fitness_score) else -1.0
@@ -170,7 +188,13 @@ class MultiAssetFitnessEvaluator:
     but can be overridden by passing a custom ``settings`` dictionary.
     """
 
-    def __init__(self, group_data: dict, base_rules: dict, gene_map: dict, settings: dict | None = None):
+    def __init__(
+        self,
+        group_data: dict,
+        base_rules: dict,
+        gene_map: dict,
+        settings: dict | None = None,
+    ):
         self.group_data = group_data  # dict[ticker -> OHLCV DataFrame]
         self.base_rules = base_rules
         self.gene_map = gene_map
@@ -182,18 +206,18 @@ class MultiAssetFitnessEvaluator:
         self.floor_failures = Counter()
 
         # Validate key configuration values to catch misconfiguration early.
-        assert self.settings.get("lambda_dispersion", 0.0) >= 0, (
-            "lambda_dispersion must be >= 0"
-        )
-        assert self.settings.get("winsorize_pf_cap", 1.0) >= 1, (
-            "winsorize_pf_cap must be >= 1"
-        )
-        assert self.settings.get("soft_penalty_strength", 0.0) >= 0, (
-            "soft_penalty_strength must be >= 0"
-        )
-        assert self.settings.get("min_total_trades", 0) >= 0, (
-            "min_total_trades must be >= 0"
-        )
+        assert (
+            self.settings.get("lambda_dispersion", 0.0) >= 0
+        ), "lambda_dispersion must be >= 0"
+        assert (
+            self.settings.get("winsorize_pf_cap", 1.0) >= 1
+        ), "winsorize_pf_cap must be >= 1"
+        assert (
+            self.settings.get("soft_penalty_strength", 0.0) >= 0
+        ), "soft_penalty_strength must be >= 0"
+        assert (
+            self.settings.get("min_total_trades", 0) >= 0
+        ), "min_total_trades must be >= 0"
 
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
@@ -221,9 +245,21 @@ class MultiAssetFitnessEvaluator:
         tsl_rule = exit_rules.get("trailing_stop", {})
         tp_rule = exit_rules.get("take_profit", {})
 
-        sl_stop = sl_rule.get("params", {}).get("value") if sl_rule.get("is_active", False) else None
-        sl_trail = tsl_rule.get("params", {}).get("value") if tsl_rule.get("is_active", False) else None
-        tp_stop = tp_rule.get("params", {}).get("value") if tp_rule.get("is_active", False) else None
+        sl_stop = (
+            sl_rule.get("params", {}).get("value")
+            if sl_rule.get("is_active", False)
+            else None
+        )
+        sl_trail = (
+            tsl_rule.get("params", {}).get("value")
+            if tsl_rule.get("is_active", False)
+            else None
+        )
+        tp_stop = (
+            tp_rule.get("params", {}).get("value")
+            if tp_rule.get("is_active", False)
+            else None
+        )
 
         time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_exit = time_exit.reindex(entries.index, fill_value=False)
@@ -312,7 +348,9 @@ class MultiAssetFitnessEvaluator:
                         }
                     else:
                         reason = eval_reason or (
-                            "ignored_zero_trades" if trades == 0 else "below_per_asset_min_trades"
+                            "ignored_zero_trades"
+                            if trades == 0
+                            else "below_per_asset_min_trades"
                         )
                         per_asset_details[ticker] = {
                             **stats,
@@ -326,16 +364,20 @@ class MultiAssetFitnessEvaluator:
                 else:
                     metric_type = self.settings.get("metric", "composite")
                     if metric_type == "sortino":
-                        val = stats.get("sortino", self.settings.get("nan_fallback", 0.0))
+                        val = stats.get(
+                            "sortino", self.settings.get("nan_fallback", 0.0)
+                        )
                     elif metric_type == "profit_factor":
                         val = pf_capped
                     elif metric_type == "return":
-                        val = stats.get("total_return", self.settings.get("nan_fallback", 0.0))
+                        val = stats.get(
+                            "total_return", self.settings.get("nan_fallback", 0.0)
+                        )
                     else:  # composite metric
                         sortino = stats.get("sortino")
                         pf = pf_capped
                         dd = stats.get("max_drawdown")
-                        
+
                         if sortino is None or np.isnan(sortino):
                             sortino = self.settings.get("nan_fallback", 0.0)
 
@@ -373,7 +415,11 @@ class MultiAssetFitnessEvaluator:
                     "assets_included": 0,
                     "assets_traded": 0,
                     "assets_ignored": len(self.group_data),
-                    "penalties": {"trade_floor": reason, "coverage": 0.0, "min_assets": reason},
+                    "penalties": {
+                        "trade_floor": reason,
+                        "coverage": 0.0,
+                        "min_assets": reason,
+                    },
                     "min_total_trades": self.settings.get("min_total_trades", 0),
                     "fitness": poor_score,
                 }
@@ -481,9 +527,7 @@ class MultiAssetFitnessEvaluator:
                 mode = self.settings.get("soft_penalty_mode", "multiplicative")
                 strength = self.settings.get("soft_penalty_strength", 1.0)
                 if mode == "additive":
-                    penalty = strength * (
-                        1 - total_trades / max(1, min_trades)
-                    )
+                    penalty = strength * (1 - total_trades / max(1, min_trades))
                     F -= penalty
                     trade_penalty = {"mode": "additive", "penalty": penalty}
                 else:

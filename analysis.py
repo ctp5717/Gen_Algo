@@ -5,23 +5,24 @@ Analysis & Reporting Module
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 
-import vectorbt as vbt
-import config
-import fitness
-import strategy_engine as engine
-import traceback
-import matplotlib.pyplot as plt  # To display plots without blocking
-import numpy as np
-import pandas as pd
-import trade_floor
+import hashlib
 import json
 import os
 import subprocess
-import hashlib
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
+import matplotlib.pyplot as plt  # To display plots without blocking
+import numpy as np
+import pandas as pd
+
+import config
 import data_loader
+import fitness
+import strategy_engine as engine
+import trade_floor
+import vectorbt as vbt
 
 
 def _get_commit_hash() -> str:
@@ -118,34 +119,48 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
         return
 
     try:
-        rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
+        rules = fitness._inject_genes_into_rules(
+            config.STRATEGY_RULES, gene_map, best_solution
+        )
         entries = engine.process_strategy_rules(validation_data, rules)
 
         if entries.sum() < 1:
             print("\nChampion strategy produced no trades in the validation period.")
             return
 
-        exit_rules = rules.get('exit_rules', {})
-        sl_rule = exit_rules.get('stop_loss', {})
-        tsl_rule = exit_rules.get('trailing_stop', {})
-        tp_rule = exit_rules.get('take_profit', {})
+        exit_rules = rules.get("exit_rules", {})
+        sl_rule = exit_rules.get("stop_loss", {})
+        tsl_rule = exit_rules.get("trailing_stop", {})
+        tp_rule = exit_rules.get("take_profit", {})
 
-        sl_stop = sl_rule.get('params', {}).get('value') if sl_rule.get('is_active', False) else None
-        sl_trail = tsl_rule.get('params', {}).get('value') if tsl_rule.get('is_active', False) else None
-        tp_stop = tp_rule.get('params', {}).get('value') if tp_rule.get('is_active', False) else None
+        sl_stop = (
+            sl_rule.get("params", {}).get("value")
+            if sl_rule.get("is_active", False)
+            else None
+        )
+        sl_trail = (
+            tsl_rule.get("params", {}).get("value")
+            if tsl_rule.get("is_active", False)
+            else None
+        )
+        tp_stop = (
+            tp_rule.get("params", {}).get("value")
+            if tp_rule.get("is_active", False)
+            else None
+        )
 
         time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
         time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
         portfolio = vbt.Portfolio.from_signals(
-            close=validation_data['Close'],
+            close=validation_data["Close"],
             entries=entries,
             exits=time_based_exit,
             sl_stop=sl_stop,
             tp_stop=tp_stop,
             sl_trail=sl_trail,
             fees=config.FEES,
-            freq=config.to_pandas_freq(config.TIMEFRAME)
+            freq=config.to_pandas_freq(config.TIMEFRAME),
         )
 
     except Exception as e:
@@ -157,9 +172,19 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
     print("\n--- Validation Period Performance Stats ---")
     stats = portfolio.stats()
     metrics_to_show = [
-        'Start', 'End', 'Period', 'Total Return [%]', 'Benchmark Return [%]',
-        'Max Drawdown [%]', 'Sortino Ratio', 'Sharpe Ratio', 'Profit Factor',
-        'Win Rate [%]', 'Total Trades', 'Avg Winning Trade [%]', 'Avg Losing Trade [%]'
+        "Start",
+        "End",
+        "Period",
+        "Total Return [%]",
+        "Benchmark Return [%]",
+        "Max Drawdown [%]",
+        "Sortino Ratio",
+        "Sharpe Ratio",
+        "Profit Factor",
+        "Win Rate [%]",
+        "Total Trades",
+        "Avg Winning Trade [%]",
+        "Avg Losing Trade [%]",
     ]
     print(stats[metrics_to_show].to_string())
 
@@ -189,7 +214,7 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
         floor, info = trade_floor.scale_floor(rate, start, end)
         settings["min_total_trades"] = floor
         print(f"Scaled min_total_trades (validation): {floor} | info={info}")
-    end_str = end.strftime('%Y-%m-%d')
+    end_str = end.strftime("%Y-%m-%d")
     evaluator = fitness.MultiAssetFitnessEvaluator(
         group_data, config.STRATEGY_RULES, gene_map, settings
     )
@@ -201,12 +226,8 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
         t for t, d in details["per_asset"].items() if d["score"] is not None
     )
     per_asset_scores = {t: details["per_asset"][t]["score"] for t in tickers}
-    per_asset_trades = {
-        t: details["per_asset"][t].get("trades", 0) for t in tickers
-    }
-    equity_curves = {
-        t: details["per_asset"][t].get("equity_curve") for t in tickers
-    }
+    per_asset_trades = {t: details["per_asset"][t].get("trades", 0) for t in tickers}
+    equity_curves = {t: details["per_asset"][t].get("equity_curve") for t in tickers}
     mu = details.get("mu")
     sigma = details.get("sigma")
     lam_sigma = details.get("lambda_sigma")
@@ -350,7 +371,9 @@ def _plot_multi_asset_overview(
     asset_weights = settings.get("asset_weights") or {}
     weights = np.array([asset_weights.get(t, 1.0) for t in tickers], dtype=float)
     weight_sum = weights.sum()
-    weights = weights / weight_sum if weight_sum else np.ones_like(weights) / len(weights)
+    weights = (
+        weights / weight_sum if weight_sum else np.ones_like(weights) / len(weights)
+    )
 
     combined_equity = pd.Series(dtype=float)
     for w, ticker in zip(weights, tickers):
@@ -434,7 +457,7 @@ def _plot_multi_asset_overview(
 
     fig.tight_layout()
     end_dt = pd.to_datetime(end_date)
-    end_str = end_dt.strftime('%Y-%m-%d')
+    end_str = end_dt.strftime("%Y-%m-%d")
     if charts_cfg.get("save_pngs"):
         fname = f"multi_asset_overview_{config.TIMEFRAME}_{end_str}.png"
         fig.savefig(fname, dpi=144, bbox_inches="tight")

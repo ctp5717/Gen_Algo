@@ -1,18 +1,18 @@
 import sys
 import types
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 from dateutil.relativedelta import relativedelta
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
-sys.modules.setdefault('pandas_ta', types.ModuleType('pandas_ta'))
-sys.modules.setdefault('vectorbt', types.ModuleType('vectorbt'))
+sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
+sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import walk_forward  # noqa: E402
-
 
 
 def test_generate_periods_produces_windows():
@@ -37,12 +37,14 @@ def test_generate_periods_window_consistency():
     periods = walk_forward._generate_periods(start, end, train_months, test_months)
     assert periods
     for idx, p in enumerate(periods):
-        assert p['train_end'] == p['train_start'] + relativedelta(months=train_months)
-        assert p['test_start'] == p['train_end']
-        assert p['test_end'] == p['test_start'] + relativedelta(months=test_months)
+        assert p["train_end"] == p["train_start"] + relativedelta(months=train_months)
+        assert p["test_start"] == p["train_end"]
+        assert p["test_end"] == p["test_start"] + relativedelta(months=test_months)
         if idx > 0:
-            expected_start = periods[idx - 1]['train_start'] + relativedelta(months=test_months)
-            assert p['train_start'] == expected_start
+            expected_start = periods[idx - 1]["train_start"] + relativedelta(
+                months=test_months
+            )
+            assert p["train_start"] == expected_start
 
 
 def test_three_year_history_yields_more_windows():
@@ -53,15 +55,21 @@ def test_three_year_history_yields_more_windows():
 
 
 def test_config_walk_forward_start_date():
-    expected_start = (walk_forward.config.today - relativedelta(years=3)).strftime("%Y-%m-%d")
-    assert walk_forward.config.WALK_FORWARD_SETTINGS["total_data_range"]["start"] == expected_start
+    expected_start = (walk_forward.config.today - relativedelta(years=3)).strftime(
+        "%Y-%m-%d"
+    )
+    assert (
+        walk_forward.config.WALK_FORWARD_SETTINGS["total_data_range"]["start"]
+        == expected_start
+    )
 
 
 def test_walk_forward_uses_all_cores(monkeypatch):
     """GA in walk-forward should leverage all available CPU cores"""
     import os
-    import pandas as pd
     import types
+
+    import pandas as pd
 
     captured = {}
 
@@ -88,7 +96,9 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
-    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: (df, 'cache'))
+    monkeypatch.setattr(
+        walk_forward.data_loader, "get_data", lambda *a, **k: (df, "cache")
+    )
 
     monkeypatch.setattr(
         walk_forward,
@@ -132,7 +142,9 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         raising=False,
     )
 
-    monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setattr(
+        walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False
+    )
 
     walk_forward.run_walk_forward_validation()
 
@@ -141,8 +153,9 @@ def test_walk_forward_uses_all_cores(monkeypatch):
 
 def test_walk_forward_returns_summary(monkeypatch):
     """run_walk_forward_validation should return aggregate metrics"""
-    import pandas as pd
     import types
+
+    import pandas as pd
 
     df = pd.DataFrame(
         {
@@ -155,7 +168,9 @@ def test_walk_forward_returns_summary(monkeypatch):
         index=pd.date_range("2020-01-01", periods=2),
     )
 
-    monkeypatch.setattr(walk_forward.data_loader, "get_data", lambda *a, **k: (df, 'cache'))
+    monkeypatch.setattr(
+        walk_forward.data_loader, "get_data", lambda *a, **k: (df, "cache")
+    )
     monkeypatch.setattr(
         walk_forward,
         "_generate_periods",
@@ -170,7 +185,9 @@ def test_walk_forward_returns_summary(monkeypatch):
     )
 
     # Simplify gene parsing and fitness evaluation
-    monkeypatch.setattr(walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, []))
+    monkeypatch.setattr(
+        walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, [])
+    )
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
@@ -216,8 +233,10 @@ def test_walk_forward_returns_summary(monkeypatch):
         raising=False,
     )
 
-    monkeypatch.setattr(walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
-    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, 'enabled', False)
+    monkeypatch.setattr(
+        walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False
+    )
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "enabled", False)
 
     summary = walk_forward.run_walk_forward_validation()
 
