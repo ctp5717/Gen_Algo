@@ -193,7 +193,7 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
 
 ---
 #### **V1.2: Strategy Enhancement & Robustness**
-* **Status:** **In Progress**
+* **Status:** ✅ Complete.
 * **Features:**
     * **Expanded Indicator Library:** ✅ Complete.
     * **Advanced Exit Logic (Trailing Stops):** ✅ Complete.
@@ -202,12 +202,13 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
 
 ---
 #### **V2.0: Major Architectural Upgrade**
-* **Status:** **Planned**
+* **Status:** **In Progress**
 * **Features:**
-    * **Portfolio-Level Optimization Engine:** (Planned)
-        * *This is a major upgrade to the core engine. Instead of optimizing a strategy on a single asset, it will allow the GA to run backtests on a **basket of multiple assets** (e.g., BTC, ETH, and SOL) simultaneously. This is a powerful defense against overfitting, as it forces the AI to find a single, robust set of rules that performs well across different market behaviors, rather than a fragile strategy that only works on one asset's specific history.*
+    * **Portfolio-Level Optimization Engine:** ✅ Complete.
     * **Advanced Combination Logic:** (Planned)
         * *This is an upgrade to the `strategy_engine.py` to handle more complex ways of combining indicator signals. Currently, our engine can only combine entry rules with a logical `AND`. This feature will add support for **`OR`** logic (e.g., "enter if EMA is bullish OR RSI is oversold") and **`VOTE`** systems (e.g., "enter if at least 3 out of 5 conditions are true"), dramatically increasing the strategic flexibility of the framework.*
+    * **Strategy Recommendation Engine:** (Planned)
+        * *Turns multi-asset backtests and walk-forward validation into a single, production-ready trading strategy recommendation with a confidence score, asset stance, and clear rationale.
     * **Complete Indicator Library:** (Planned)
         * *This is the process of building out the remaining functions in `indicator_library.py` to include all 25 indicators we originally planned. This gives the AI the widest possible set of tools to build strategies with, increasing the potential for discovering novel patterns.*
 
