@@ -80,7 +80,15 @@ def test_walk_forward_determinism(monkeypatch, tmp_path):
         def __call__(self, *a, **k):
             return 1.0
 
-    monkeypatch.setattr(walk_forward.fitness, "MultiAssetFitnessEvaluator", DummyEval)
+    fitness_stub = types.SimpleNamespace(
+        MultiAssetFitnessEvaluator=DummyEval,
+        _inject_genes_into_rules=lambda *a, **k: {"exit_rules": {}},
+        get_fitness_evaluator=lambda *a, **k: DummyEval(),
+        print_floor_failures=lambda *a, **k: None,
+    )
+    engine_stub = types.ModuleType("strategy_engine")
+    monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
+    monkeypatch.setitem(sys.modules, "strategy_engine", engine_stub)
 
     class DummyGA:
         def __init__(self, *a, **k):
@@ -97,6 +105,7 @@ def test_walk_forward_determinism(monkeypatch, tmp_path):
 
     def run_once():
         np.random.seed(config.SEED)
+        monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
         summary = walk_forward.run_walk_forward_validation()
         with open("walk_forward_summary.json", "r") as fh:
             blob = json.load(fh)

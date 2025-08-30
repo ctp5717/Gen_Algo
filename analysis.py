@@ -16,13 +16,14 @@ from pathlib import Path
 import matplotlib.pyplot as plt  # To display plots without blocking
 import numpy as np
 import pandas as pd
+import vectorbt as vbt
 
 import config
 import data_loader
 import fitness
 import strategy_engine as engine
 import trade_floor
-import vectorbt as vbt
+from deps import ensure_real_vectorbt
 
 
 def _get_commit_hash() -> str:
@@ -98,7 +99,10 @@ def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
         "library_versions": {
             "numpy": np.__version__,
             "pandas": pd.__version__,
-            "vectorbt": vbt.__version__,
+            "vectorbt": {
+                "version": vbt.__version__,
+                "path": str(Path(vbt.__file__).resolve()),
+            },
         },
         "artifacts": artifacts,
     }
@@ -108,6 +112,7 @@ def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
 
 def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
     """Run analysis on the champion solution using preloaded data."""
+    ensure_real_vectorbt(Path(__file__).resolve().parent)
     start_time = datetime.now(timezone.utc)
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
         _run_multi_asset_analysis(best_solution, gene_map, validation_data)
