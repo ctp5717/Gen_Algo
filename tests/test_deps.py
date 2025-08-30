@@ -1,15 +1,14 @@
 import importlib
 import sys
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from importlib.metadata import PackageNotFoundError
-
 import deps
-from deps import ensure_real_vectorbt
 import vbt_stub
+from deps import ensure_real_vectorbt
 
 
 def test_ensure_real_vectorbt_requires_accessor():
@@ -52,7 +51,11 @@ def test_ensure_real_vectorbt_version_guard(monkeypatch, tmp_path):
     fake_path = tmp_path / "vectorbt.py"
     monkeypatch.setattr(vbt_stub, "__file__", str(fake_path))
     monkeypatch.setattr(sys.modules["vectorbt"], "__file__", str(fake_path))
-    monkeypatch.setattr(Path, "is_relative_to", lambda self, other: (_ for _ in ()).throw(AttributeError))
+    monkeypatch.setattr(
+        Path,
+        "is_relative_to",
+        lambda self, other: (_ for _ in ()).throw(AttributeError),
+    )
 
     def fake_version(name):
         raise PackageNotFoundError
@@ -80,6 +83,10 @@ def test_ensure_real_vectorbt_requires_portfolio(monkeypatch, tmp_path):
 def test_ensure_real_vectorbt_is_relative_to_fallback(monkeypatch):
     root = Path(__file__).resolve().parents[1]
     monkeypatch.setattr(pd.Series, "vbt", object, raising=False)
-    monkeypatch.setattr(Path, "is_relative_to", lambda self, other: (_ for _ in ()).throw(AttributeError))
+    monkeypatch.setattr(
+        Path,
+        "is_relative_to",
+        lambda self, other: (_ for _ in ()).throw(AttributeError),
+    )
     with pytest.raises(ImportError):
         ensure_real_vectorbt(root)
