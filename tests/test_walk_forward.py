@@ -70,6 +70,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     import types
 
     import pandas as pd
+    import vectorbt as vbt
 
     captured = {}
 
@@ -120,13 +121,17 @@ def test_walk_forward_uses_all_cores(monkeypatch):
         def __call__(self, *a, **k):
             return 1.0
 
-    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
-
-    monkeypatch.setattr(
-        walk_forward.engine,
-        "process_strategy_rules",
-        lambda *a, **k: pd.Series([True, False], index=df.index),
+    fitness_stub = types.SimpleNamespace(
+        FitnessEvaluator=DummyEvaluator,
+        get_fitness_evaluator=lambda *a, **k: DummyEvaluator(),
+        _inject_genes_into_rules=lambda *a, **k: {},
+        print_floor_failures=lambda *a, **k: None,
     )
+    engine_stub = types.SimpleNamespace(
+        process_strategy_rules=lambda *a, **k: pd.Series([True, False], index=df.index)
+    )
+    monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
+    monkeypatch.setitem(sys.modules, "strategy_engine", engine_stub)
 
     class DummyPortfolio:
         def __init__(self, *a, **k):
@@ -136,15 +141,17 @@ def test_walk_forward_uses_all_cores(monkeypatch):
             return {"Total Return [%]": 0, "Max Drawdown [%]": 0}
 
     monkeypatch.setattr(
-        walk_forward.vbt,
+        vbt,
         "Portfolio",
         types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
         raising=False,
     )
+    monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
 
     monkeypatch.setattr(
         walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False
     )
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "enabled", False)
 
     walk_forward.run_walk_forward_validation()
 
@@ -156,6 +163,7 @@ def test_walk_forward_returns_summary(monkeypatch):
     import types
 
     import pandas as pd
+    import vectorbt as vbt
 
     df = pd.DataFrame(
         {
@@ -196,7 +204,13 @@ def test_walk_forward_returns_summary(monkeypatch):
         def __call__(self, *a, **k):
             return 1.0
 
-    monkeypatch.setattr(walk_forward.fitness, "FitnessEvaluator", DummyEvaluator)
+    fitness_stub = types.SimpleNamespace(
+        FitnessEvaluator=DummyEvaluator,
+        get_fitness_evaluator=lambda *a, **k: DummyEvaluator(),
+        _inject_genes_into_rules=lambda *a, **k: {},
+        print_floor_failures=lambda *a, **k: None,
+    )
+    monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
 
     class DummyGA:
         def __init__(self, *args, **kwargs):
@@ -210,11 +224,10 @@ def test_walk_forward_returns_summary(monkeypatch):
 
     monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
 
-    monkeypatch.setattr(
-        walk_forward.engine,
-        "process_strategy_rules",
-        lambda *a, **k: pd.Series([True, False], index=df.index),
+    engine_stub = types.SimpleNamespace(
+        process_strategy_rules=lambda *a, **k: pd.Series([True, False], index=df.index)
     )
+    monkeypatch.setitem(sys.modules, "strategy_engine", engine_stub)
 
     class DummyPortfolio:
         def stats(self):
@@ -227,11 +240,12 @@ def test_walk_forward_returns_summary(monkeypatch):
             }
 
     monkeypatch.setattr(
-        walk_forward.vbt,
+        vbt,
         "Portfolio",
         types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
         raising=False,
     )
+    monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
 
     monkeypatch.setattr(
         walk_forward.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False

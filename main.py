@@ -8,22 +8,30 @@ import os
 import pprint
 import time  # <-- NEW: Import the time module
 import traceback
+import types
+from pathlib import Path
 
 import matplotlib.pyplot as plt  # For non-blocking plot display
 import pandas as pd
 import pygad
 
-import analysis
-
-# Import our custom modules
 import config
 import data_loader
-import fitness
-import tuner
+from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
+
+
+# Placeholders for delayed imports (useful for tests to monkeypatch)
+def _default_run_champion(*a, **k):
+    return None
+
+
+analysis = types.SimpleNamespace(run_champion_analysis=_default_run_champion)
+fitness = types.SimpleNamespace(FitnessEvaluator=None)
+tuner = types.SimpleNamespace(find_best_hyperparameters=None)
 
 
 def on_generation(ga_instance):
@@ -56,6 +64,33 @@ def on_generation(ga_instance):
 
 def main():
     """The main execution function."""
+    ensure_real_vectorbt(Path(__file__).resolve().parent)
+
+    # Delay heavy imports until after vectorbt is validated
+    global analysis, fitness, tuner
+    patched_analysis = analysis
+    patched_fitness = fitness
+    patched_tuner = tuner
+
+    import analysis as _analysis
+    import fitness as _fitness
+
+    if patched_analysis.run_champion_analysis is not _default_run_champion:
+        _analysis.run_champion_analysis = patched_analysis.run_champion_analysis
+    if patched_fitness.FitnessEvaluator is not None:
+        _fitness.FitnessEvaluator = patched_fitness.FitnessEvaluator
+    analysis, fitness = _analysis, _fitness
+
+    if getattr(config, "AUTO_TUNE_ENABLED", False):
+        if patched_tuner.find_best_hyperparameters is not None:
+            tuner = patched_tuner
+        else:
+            import tuner as _tuner
+
+            tuner = _tuner
+    else:
+        tuner = patched_tuner
+
     print("--- GA Trading Strategy Framework ---")
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
         assets = [name for name, _ in getattr(config, "ASSET_GROUP", [])]

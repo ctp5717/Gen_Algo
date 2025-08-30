@@ -14,10 +14,8 @@ from dateutil.relativedelta import relativedelta
 
 import config
 import data_loader
-import fitness
-import strategy_engine as engine
 import trade_floor
-import vectorbt as vbt
+from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config
 
 
@@ -66,7 +64,11 @@ def _get_cache_hashes(start_date: str, end_date: str) -> dict:
 
 
 def _write_run_metadata(
-    start: datetime, start_date: str, end_date: str, artifacts: list[str]
+    start: datetime,
+    start_date: str,
+    end_date: str,
+    artifacts: list[str],
+    vbt,
 ) -> None:
     """Persist run metadata to ``run_metadata.json``."""
     end = datetime.now(timezone.utc)
@@ -81,7 +83,10 @@ def _write_run_metadata(
         "library_versions": {
             "numpy": np.__version__,
             "pandas": pd.__version__,
-            "vectorbt": vbt.__version__,
+            "vectorbt": {
+                "version": vbt.__version__,
+                "path": str(Path(vbt.__file__).resolve()),
+            },
             "pygad": pygad.__version__,
         },
         "artifacts": artifacts,
@@ -167,6 +172,12 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     data : DataFrame or dict, optional
         Preloaded dataset to reuse instead of fetching from disk/API.
     """
+    ensure_real_vectorbt(Path(__file__).resolve().parent)
+    import vectorbt as vbt
+
+    import fitness
+    import strategy_engine as engine
+
     print("\n=== Running Walk-Forward Validation ===")
     np.random.seed(config.SEED)
     num_cores = os.cpu_count()
@@ -183,7 +194,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         if multi:
             if not all_data:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [])
+                _write_run_metadata(start_time, start_date, end_date, [], vbt)
                 return
             sample_df = next(iter(all_data.values()))
             start = sample_df.index[0]
@@ -191,7 +202,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         else:
             if all_data.empty:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [])
+                _write_run_metadata(start_time, start_date, end_date, [], vbt)
                 return
             start = all_data.index[0]
             end = all_data.index[-1]
@@ -207,7 +218,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             if not all_data:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [])
+                _write_run_metadata(start_time, start_date, end_date, [], vbt)
                 return
             sample_df = next(iter(all_data.values()))
             start = sample_df.index[0]
@@ -222,7 +233,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             if all_data.empty:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [])
+                _write_run_metadata(start_time, start_date, end_date, [], vbt)
                 return
             start = all_data.index[0]
             end = all_data.index[-1]
@@ -238,7 +249,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     periods = _generate_periods(start, end, train_months, test_months)
     if not periods:
         print("Insufficient data for the requested walk-forward windows.")
-        _write_run_metadata(start_time, start_date, end_date, [])
+        _write_run_metadata(start_time, start_date, end_date, [], vbt)
         return
 
     results = []
@@ -597,7 +608,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
 
     if not results:
         print("\nNo walk-forward runs produced trades.")
-        _write_run_metadata(start_time, start_date, end_date, [])
+        _write_run_metadata(start_time, start_date, end_date, [], vbt)
         return None
 
     results_df = pd.DataFrame(results)
@@ -662,7 +673,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         artifacts = ["walk_forward_results.csv", "walk_forward_summary.json"]
         if per_asset_records:
             artifacts.append("walk_forward_per_asset.csv")
-        _write_run_metadata(start_time, start_date, end_date, artifacts)
+        _write_run_metadata(start_time, start_date, end_date, artifacts, vbt)
         return summary
 
     avg_return = results_df["Total Return [%]"].mean()
@@ -700,5 +711,5 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     artifacts = ["walk_forward_results.csv", "walk_forward_summary.json"]
     if per_asset_records:
         artifacts.append("walk_forward_per_asset.csv")
-    _write_run_metadata(start_time, start_date, end_date, artifacts)
+    _write_run_metadata(start_time, start_date, end_date, artifacts, vbt)
     return summary

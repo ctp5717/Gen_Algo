@@ -3,12 +3,12 @@ import os
 import numpy as np
 import pandas as pd
 import pygad
+import vectorbt as vbt
 
 import config
 import fitness
 import strategy_engine as engine
 import trade_floor
-import vectorbt as vbt
 
 
 def _evaluate_on_validation(solution, gene_map, val_data):
