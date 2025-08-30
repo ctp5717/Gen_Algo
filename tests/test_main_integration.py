@@ -60,6 +60,7 @@ def test_main_runs(monkeypatch):
 
     # Patch analysis and fitness evaluator
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
 
     monkeypatch.setattr(
         main,
@@ -155,6 +156,7 @@ def test_main_uses_tuner(monkeypatch):
 
     monkeypatch.setattr(main.pygad, "GA", DummyGA)
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
     monkeypatch.setattr(
         main,
         "plt",
@@ -263,6 +265,7 @@ def test_fitness_plot_non_blocking(monkeypatch):
 
     monkeypatch.setattr(main.pygad, "GA", DummyGA)
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
 
     class DummyEvaluator:
         def __init__(self, *a, **k):

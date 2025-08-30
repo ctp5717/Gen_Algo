@@ -80,6 +80,7 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         types.SimpleNamespace(from_signals=lambda *a, **k: DummyPortfolio()),
         raising=False,
     )
+    monkeypatch.setattr(analysis, "ensure_real_vectorbt", lambda *a, **k: None)
 
     calls = []
     ion_called = {}

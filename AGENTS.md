@@ -118,22 +118,18 @@ export GA_SEED=42  # overrides config.SEED
 ```
 
 ### Using the real `vectorbt` (important)
-This repo ships a lightweight `vectorbt.py` stub for tests. Running from the repo root imports the stub instead of the real package.
+This repo ships a lightweight `vbt_stub.py` for tests. The real `vectorbt` package is used by default; the stub only takes effect when explicitly injected.
 
-**To run real backtests:**
-1. Temporarily rename `vectorbt.py` to `_vectorbt_stub.py`, or
-2. Run scripts from outside the repo root with site-packages ahead of `PWD` on `PYTHONPATH`:
+**To use the stub in tests:**
+1. Run tests with `USE_VBT_STUB=1` to inject the stub automatically via `tests/conftest.py`.
+2. Or manually: `import vbt_stub as vbt; sys.modules["vectorbt"] = vbt`.
 
-```bash
-cd ..
-PYTHONPATH="$(python -c 'import site,sys;print(site.getsitepackages()[0])')":$(pwd)/Gen_Algo-Multi-Asset-Fitness-2-Final \
-  python Gen_Algo-Multi-Asset-Fitness-2-Final/main.py
-```
+`main.main()` and `walk_forward.run_walk_forward_validation()` call `deps.ensure_real_vectorbt()` to fail fast if a local stub shadows the real package. If you invoke `walk_forward` directly, ensure this guard runs before importing `vectorbt`.
 
-Quick check:
+Quick check for real runs:
 
 ```bash
-python -c "import vectorbt as vbt; print(vbt.__version__)"  # should not print 0.0.0
+python -c "import vectorbt as vbt; import pandas as pd; assert hasattr(pd.Series, 'vbt'); print(vbt.__version__)"  # should not print 0.0.0
 ```
 
 ---
