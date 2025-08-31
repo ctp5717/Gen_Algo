@@ -159,8 +159,8 @@ def to_pandas_freq(tf: str) -> str:
         return tf[:-2] + "W"
     if tf.endswith("d"):
         return tf[:-1] + "D"
-    if tf.endswith("h"):
-        return tf[:-1] + "H"
+    if tf.endswith("H"):
+        return tf[:-1] + "h"
     if tf.endswith("m"):
         # Pandas deprecated the 'T' alias for minutes; use 'min' instead
         return tf[:-1] + "min"
