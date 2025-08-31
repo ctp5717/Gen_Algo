@@ -56,7 +56,6 @@ CRYPTO_UNIVERSE = {
     # Other Prominent L1s / L2s / DeFi
     "Uniswap": "UNI-USD",
     "TRON": "TRX-USD",
-    "Dai": "DAI-USD",
     "Stellar": "XLM-USD",
     "Near_Protocol": "NEAR-USD",
     "Internet_Computer": "ICP-USD",
@@ -85,7 +84,12 @@ ASSET_GROUP = [
     ("Avalanche", CRYPTO_UNIVERSE["Avalanche"]),
     ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
     ("Chainlink", CRYPTO_UNIVERSE["Chainlink"]),
+    ("Polkadot", CRYPTO_UNIVERSE["Polkadot"]),
+    ("Polygon", CRYPTO_UNIVERSE["Polygon"]),
+    ("Litecoin", CRYPTO_UNIVERSE["Litecoin"]),
     ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
+    ("TRON", CRYPTO_UNIVERSE["TRON"]),
+    ("Stellar", CRYPTO_UNIVERSE["Stellar"]),
     ("Near_Protocol", CRYPTO_UNIVERSE["Near_Protocol"]),
 ]
 
@@ -94,7 +98,7 @@ ASSET_GROUP = [
 SELECTED_ASSET_NAME = "Dogecoin"
 
 # Set your desired timeframe here. This now controls everything.
-TIMEFRAME = "15m"
+TIMEFRAME = "1h"
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
@@ -184,7 +188,7 @@ WALK_FORWARD_SETTINGS = {
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Use these settings for quick tests
 GA_POPULATION_SIZE = 50
-GA_NUM_GENERATIONS = 25
+GA_NUM_GENERATIONS = 30
 GA_PARENTS_MATING = 20
 GA_MUTATION_NUM_GENES = 1
 
@@ -226,9 +230,9 @@ MULTI_ASSET = {
     "lambda_dispersion": 0.25,
     # Optional coarse tuning grid for lambda. If provided the tuner can try
     # multiple values and pick the best one.
-    "lambda_grid": [0.15, 0.25, 0.35],
+    "lambda_grid": [0.1, 0.2, 0.3, 0.4, 0.5],
     # Number of top lambda candidates to re-score after the initial sweep
-    "lambda_top_k": 2,
+    "lambda_top_k": 3,
     # Seeds used when re-scoring lambda candidates without mutation
     "lambda_rescore_seeds": [SEED, SEED + 1, SEED + 2],
     # Which per-asset metric to aggregate; typically "composite"
@@ -248,11 +252,11 @@ MULTI_ASSET = {
     # Penalty applied when ignoring assets
     "coverage_penalty": 0.3,
     # Minimal trades to consider an asset as traded
-    "per_asset_min_trades": 1,
+    "per_asset_min_trades": 2,
     # Minimal number of assets that must be included
-    "min_included_assets": 1,
+    "min_included_assets": 3,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 24,
+    "min_total_trades_per_year": 36,
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs
