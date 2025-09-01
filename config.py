@@ -242,7 +242,7 @@ MULTI_ASSET = {
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Group trade floor configuration
-    "min_total_trades": 10,
+    "min_total_trades": 6,
     "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
     "soft_penalty_strength": 1.0,
     "soft_penalty_mode": "multiplicative",  # multiplicative | additive
@@ -256,7 +256,7 @@ MULTI_ASSET = {
     # Minimal number of assets that must be included
     "min_included_assets": 3,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 36,
+    "min_total_trades_per_year": 24,
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs
