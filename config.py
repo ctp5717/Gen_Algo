@@ -243,7 +243,7 @@ MULTI_ASSET = {
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Group trade floor configuration
-    "min_total_trades": 6,
+    "min_total_trades": 0,
     "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
     "soft_penalty_strength": 1.0,
     "soft_penalty_mode": "multiplicative",  # multiplicative | additive
