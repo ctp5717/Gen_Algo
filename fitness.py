@@ -422,6 +422,7 @@ class MultiAssetFitnessEvaluator:
                     },
                     "min_total_trades": self.settings.get("min_total_trades", 0),
                     "fitness": poor_score,
+                    "asset_weights": {},
                 }
                 return poor_score
 
