@@ -16,6 +16,7 @@ vbt = types.ModuleType("vectorbt")
 vbt.Portfolio = types.SimpleNamespace()
 sys.modules.setdefault("vectorbt", vbt)
 
+import config  # noqa: E402
 import fitness  # noqa: E402
 
 
@@ -231,6 +232,7 @@ def test_negative_weights_clipped_and_renormalized(monkeypatch):
 
 
 def test_fitness_evaluator_uses_to_pandas_freq(monkeypatch):
+    monkeypatch.setattr(config, "TIMEFRAME", "15m", raising=False)
     ohlc = pd.DataFrame({"Close": [1, 2, 3]})
     evaluator = fitness.FitnessEvaluator(ohlc, {}, {})
 
