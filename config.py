@@ -99,7 +99,7 @@ SELECTED_ASSET_NAME = "Dogecoin"
 
 # Set your desired timeframe here. This now controls everything.
 # Allow overrides by checking for an existing global.
-TIMEFRAME = globals().get("TIMEFRAME", "15m")
+TIMEFRAME = globals().get("TIMEFRAME", "1h")
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
