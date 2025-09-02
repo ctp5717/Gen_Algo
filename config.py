@@ -98,7 +98,8 @@ ASSET_GROUP = [
 SELECTED_ASSET_NAME = "Dogecoin"
 
 # Set your desired timeframe here. This now controls everything.
-TIMEFRAME = "1h"
+# Allow overrides by checking for an existing global.
+TIMEFRAME = globals().get("TIMEFRAME", "15m")
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
@@ -252,9 +253,9 @@ MULTI_ASSET = {
     # Penalty applied when ignoring assets
     "coverage_penalty": 0.3,
     # Minimal trades to consider an asset as traded
-    "per_asset_min_trades": 2,
+    "per_asset_min_trades": 1,
     # Minimal number of assets that must be included
-    "min_included_assets": 3,
+    "min_included_assets": 1,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 24,
     # Verbose logging of per-asset evaluation errors (can be noisy)
