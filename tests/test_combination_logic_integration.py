@@ -10,7 +10,10 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy deps
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+try:  # prefer real vectorbt if available
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import fitness  # noqa: E402
 import indicator_library  # noqa: E402

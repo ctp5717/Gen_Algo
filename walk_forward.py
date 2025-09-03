@@ -4,8 +4,10 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -124,6 +126,13 @@ def _generate_periods(
         )
         current_start += relativedelta(months=test_months)
     return periods
+
+
+def _normalize_trade_floor_penalty(pen: Optional[Any]) -> Dict[str, Any]:
+    """Ensure trade floor penalty is a plain dict."""
+    if isinstance(pen, Mapping):
+        return dict(pen)
+    return {"reason": pen} if pen is not None else {}
 
 
 def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
@@ -330,20 +339,22 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         if multi and settings_train.get("trade_floor_policy") == "soft_penalty":
             _ = evaluator(None, best_solution, 0)
             train_details = evaluator.last_details
-            pen = train_details.get("penalties", {}).get("trade_floor") or {}
+            pen = _normalize_trade_floor_penalty(
+                train_details.get("penalties", {}).get("trade_floor")
+            )
             mode = settings_train.get("soft_penalty_mode", "multiplicative")
             floor_tr = train_details.get("min_total_trades")
             total_tr = train_details.get("total_trades")
+            reason = pen.get("reason")
             if mode == "additive":
                 delta = pen.get("penalty", 0.0)
-                print(
-                    f"Training soft floor (additive): floor={floor_tr}, total trades={total_tr}, delta={delta:.4f}"
-                )
+                msg = f"Training soft floor (additive): floor={floor_tr}, total trades={total_tr}, delta={delta:.4f}"
             else:
                 mult = pen.get("scale", 1.0)
-                print(
-                    f"Training soft floor (multiplicative): floor={floor_tr}, total trades={total_tr}, multiplier={mult:.4f}"
-                )
+                msg = f"Training soft floor (multiplicative): floor={floor_tr}, total trades={total_tr}, multiplier={mult:.4f}"
+            if reason:
+                msg += f" | reason={reason}"
+            print(msg)
 
         winning_params = {
             gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
@@ -381,20 +392,22 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
             if policy_val == "soft_penalty":
-                pen = details.get("penalties", {}).get("trade_floor") or {}
+                pen = _normalize_trade_floor_penalty(
+                    details.get("penalties", {}).get("trade_floor")
+                )
                 mode = settings_val.get("soft_penalty_mode", "multiplicative")
                 floor_v = details.get("min_total_trades")
                 total_v = details.get("total_trades")
+                reason = pen.get("reason")
                 if mode == "additive":
                     delta = pen.get("penalty", 0.0)
-                    print(
-                        f"Validation soft floor (additive): floor={floor_v}, total trades={total_v}, delta={delta:.4f}"
-                    )
+                    msg = f"Validation soft floor (additive): floor={floor_v}, total trades={total_v}, delta={delta:.4f}"
                 else:
                     mult = pen.get("scale", 1.0)
-                    print(
-                        f"Validation soft floor (multiplicative): floor={floor_v}, total trades={total_v}, multiplier={mult:.4f}"
-                    )
+                    msg = f"Validation soft floor (multiplicative): floor={floor_v}, total trades={total_v}, multiplier={mult:.4f}"
+                if reason:
+                    msg += f" | reason={reason}"
+                print(msg)
             per_details = details.get("per_asset", {})
             for t, d in per_details.items():
                 per_asset_records.append(
