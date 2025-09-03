@@ -139,7 +139,9 @@ def test_stop_loss_and_trailing_stop(monkeypatch):
         captured["sl_trail"] = kwargs.get("sl_trail")
         return DummyPF()
 
-    monkeypatch.setattr(fitness.vbt.Portfolio, "from_signals", fake_from_signals, raising=False)
+    monkeypatch.setattr(
+        fitness.vbt.Portfolio, "from_signals", fake_from_signals, raising=False
+    )
 
     rules = {
         "exit_rules": {

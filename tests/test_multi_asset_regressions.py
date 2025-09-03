@@ -15,7 +15,11 @@ def _make_evaluator(stats_list, settings=None, group_data=None):
         "B": pd.DataFrame({"Close": [1, 2, 3]}),
         "C": pd.DataFrame({"Close": [1, 2, 3]}),
     }
-    base = {"per_asset_min_trades": 1, "min_included_assets": 1, "coverage_penalty": 0.0}
+    base = {
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
+        "coverage_penalty": 0.0,
+    }
     if settings:
         base.update(settings)
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, base)
