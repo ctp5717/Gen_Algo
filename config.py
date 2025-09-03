@@ -296,7 +296,13 @@ CHAMPION_SELECTION_SETTINGS = {
 # Use the `is_active` flag to control which ones are used in a given run.
 STRATEGY_RULES = {
     "entry_rules": {
+        # Optional keys:
+        #   combination_logic (str): "AND" | "OR" | "VOTE" (default "AND")
+        #   vote_threshold (int | None): min signals for "VOTE" (default majority)
+        #   treat_nan_as_false (bool): replace NaNs before combining (default True)
         "combination_logic": "AND",
+        "vote_threshold": None,
+        "treat_nan_as_false": True,
         "conditions": [
             {
                 "is_active": True,  # This rule is ON

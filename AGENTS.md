@@ -65,10 +65,16 @@
   - Consumes `STRATEGY_RULES`, calls indicators by name, applies `condition`:
     - Examples: `price_is_above_indicator`, `indicator_is_above_value`,
       `indicator_crosses_above_value`, and symmetric variants.
-  - Combines conditions by `combination_logic` (`AND`/`OR`) to produce a boolean **entry signal**.
+    - Combines conditions by case-insensitive `combination_logic` (`AND`/`OR`/`VOTE`, default `AND`).
+      `VOTE` uses a majority threshold when `vote_threshold` is `None`; values
+      outside `1..N` raise. With a single condition all modes behave identically.
+      NaNs in signals default to `False`; set `treat_nan_as_false=False` in
+      `entry_rules` to propagate them instead.
   - Handles **multi-output indicators** (pick the right column).
 
-- `gene_parser.py` – Finds all **active** gene definitions → returns `gene_space`, `gene_map`, `gene_types`.
+- `gene_parser.py` – Finds all **active** gene definitions, including top-level
+  options like `combination_logic` or `vote_threshold`, and returns
+  `gene_space`, `gene_map`, `gene_types`.
 
 - `fitness.py` – **Fitness evaluators**:
   - Single-asset `FitnessEvaluator` uses **vectorbt** to backtest, exit handling with **`.shift()`** for time-based rules, stats (Sortino, Profit Factor with cap/winsorization, Max DD, total return, trades).

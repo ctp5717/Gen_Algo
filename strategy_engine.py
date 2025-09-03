@@ -20,6 +20,9 @@ Design Philosophy:
   `indicator_library.py` and `config.py`.
 """
 
+import math
+from functools import reduce
+
 import pandas as pd
 
 import indicator_library as ind_lib  # Import our toolbox of indicators
@@ -92,19 +95,97 @@ def _generate_signal_from_value(
         return pd.Series(False, index=indicator_series.index)
 
 
-def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
+def _combine_signals(
+    signals: list[pd.Series],
+    combination_logic: str,
+    vote_threshold: int | None = None,
+    treat_nan_as_false: bool = True,
+) -> pd.Series:
+    """Combine individual condition signals into a final entry signal.
+
+    Parameters
+    ----------
+    signals : list[pd.Series]
+        Boolean Series for each active condition.
+    combination_logic : str
+        Logical operator to use ("AND", "OR", "VOTE").
+    vote_threshold : int, optional
+        Minimum number of conditions that must be true when using
+        ``combination_logic="VOTE"``.  ``None`` defaults to a majority.
+    treat_nan_as_false : bool, optional
+        Whether to replace NaNs with ``False`` before combining.  Defaults to
+        ``True``; set to ``False`` to allow NaNs to propagate to the result.
     """
-    Processes the full strategy rules dictionary to generate final entry signals.
-    (This version can intelligently select columns from multi-output indicators).
+
+    if not signals:
+        return pd.Series(dtype=bool)
+
+    prepared = (
+        [s.fillna(False) for s in signals]
+        if treat_nan_as_false
+        else [s.astype("boolean") for s in signals]
+    )
+
+    if combination_logic == "AND":
+        return reduce(lambda x, y: x & y, prepared)
+
+    if combination_logic == "OR":
+        return reduce(lambda x, y: x | y, prepared)
+
+    if combination_logic == "VOTE":
+        threshold = (
+            vote_threshold
+            if vote_threshold is not None
+            else math.ceil(len(prepared) / 2)
+        )
+        if threshold < 1 or threshold > len(prepared):
+            raise ValueError(
+                "vote_threshold must be between 1 and the number of active conditions"
+            )
+        if treat_nan_as_false:
+            signal_sum = pd.concat(prepared, axis=1).astype(int).sum(axis=1)
+            return signal_sum >= threshold
+        signal_df = pd.concat(prepared, axis=1)
+        signal_sum = signal_df.astype("Int64").sum(axis=1, min_count=len(prepared))
+        return signal_sum >= threshold
+
+    raise ValueError(
+        f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
+    )
+
+
+def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
+    """Generate entry signals based on configured rules.
+
+    Parameters
+    ----------
+    ohlc_data : pd.DataFrame
+        OHLCV data.
+    rules : dict
+        Strategy rules from ``config.STRATEGY_RULES``.
+
+    Returns
+    -------
+    pd.Series
+        Boolean Series representing combined entry signals.
     """
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
     combination_logic = entry_rules.get("combination_logic", "AND").upper()
+    vote_threshold = entry_rules.get("vote_threshold")
+    treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
 
-    if not conditions:
-        return pd.Series(False, index=ohlc_data.index)
+    if vote_threshold is not None and not isinstance(vote_threshold, int):
+        raise TypeError("vote_threshold must be an integer or None")
+    if not isinstance(treat_nan_as_false, bool):
+        raise TypeError("treat_nan_as_false must be a boolean")
 
-    final_entry_signal = pd.Series(True, index=ohlc_data.index)
+    if combination_logic not in {"AND", "OR", "VOTE"}:
+        raise ValueError(
+            f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
+        )
+
+    signals = []
 
     for rule in conditions:
         if not rule.get("is_active", True):
@@ -122,25 +203,19 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
         indicator_output = indicator_func(ohlc_data, **params)
         condition_type = condition_logic.get("type")
 
-        # --- NEW: Intelligent Column Selection ---
+        # --- Intelligent Column Selection ---
         target_series = indicator_output
         if isinstance(indicator_output, pd.DataFrame):
-            # If the output is a DataFrame, find the correct column to use.
             if "bbands" in indicator_name:
                 if "upper" in condition_type:
                     target_series = indicator_output.filter(like="BBU").iloc[:, 0]
                 elif "lower" in condition_type:
                     target_series = indicator_output.filter(like="BBL").iloc[:, 0]
                 else:
-                    target_series = indicator_output.filter(like="BBM").iloc[
-                        :, 0
-                    ]  # Default to middle band
+                    target_series = indicator_output.filter(like="BBM").iloc[:, 0]
             elif "macd" in indicator_name:
-                target_series = indicator_output.filter(like="MACDh").iloc[
-                    :, 0
-                ]  # Default to histogram
+                target_series = indicator_output.filter(like="MACDh").iloc[:, 0]
             else:
-                # Fallback for other multi-column indicators if not specified
                 target_series = indicator_output.iloc[:, 0]
 
         individual_signal = pd.Series(False, index=ohlc_data.index)
@@ -153,7 +228,21 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
                 target_series, condition_logic
             )
 
-        if combination_logic == "AND":
-            final_entry_signal &= individual_signal
+        signals.append(individual_signal)
 
-    return final_entry_signal
+    if not signals:
+        return pd.Series(False, index=ohlc_data.index)
+
+    if len(signals) == 1:
+        if combination_logic == "VOTE":
+            threshold = vote_threshold if vote_threshold is not None else 1
+            if threshold < 1 or threshold > 1:
+                raise ValueError(
+                    "vote_threshold must be between 1 and the number of active conditions"
+                )
+        single = signals[0]
+        return single.fillna(False) if treat_nan_as_false else single.astype("boolean")
+
+    return _combine_signals(
+        signals, combination_logic, vote_threshold, treat_nan_as_false
+    )

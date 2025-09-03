@@ -32,16 +32,26 @@ def parse_genes_from_config(
                 if isinstance(value, dict) and "gene" in value:
                     gene_info = value
                     gene_name = gene_info["gene"]
-                    gene_type = (
-                        int if isinstance(gene_info.get("step", 1.0), int) else float
-                    )
 
-                    space_item: Dict[str, Any] = {
-                        "low": gene_info["low"],
-                        "high": gene_info["high"],
-                    }
-                    if "step" in gene_info:
-                        space_item["step"] = gene_info["step"]
+                    if "options" in gene_info:
+                        space_item = {"options": gene_info["options"]}
+                        gene_type = (
+                            type(gene_info["options"][0])
+                            if gene_info["options"]
+                            else str
+                        )
+                    else:
+                        gene_type = (
+                            int
+                            if isinstance(gene_info.get("step", 1.0), int)
+                            else float
+                        )
+                        space_item = {
+                            "low": gene_info["low"],
+                            "high": gene_info["high"],
+                        }
+                        if "step" in gene_info:
+                            space_item["step"] = gene_info["step"]
 
                     gene_space.append(space_item)
                     gene_types.append(gene_type)

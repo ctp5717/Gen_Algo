@@ -72,3 +72,30 @@ def test_parse_genes_respects_is_active():
     assert "sma_period" not in gene_names
     assert "tp" not in gene_names
     assert len(gene_space) == 2
+
+
+def test_parse_top_level_combination_genes():
+    sample_rules = {
+        "entry_rules": {
+            "combination_logic": {
+                "gene": "logic",
+                "options": ["AND", "OR"],
+            },
+            "vote_threshold": {
+                "gene": "vt",
+                "low": 1,
+                "high": 3,
+                "step": 1,
+            },
+            "conditions": [],
+        }
+    }
+
+    gene_space, gene_map, gene_types = parse_genes_from_config(sample_rules)
+
+    names = [info["name"] for info in gene_map.values()]
+    assert "logic" in names
+    assert "vt" in names
+    assert {"options": ["AND", "OR"]} in gene_space
+    assert any(gs.get("low") == 1 and gs.get("high") == 3 for gs in gene_space)
+    assert str in gene_types and int in gene_types
