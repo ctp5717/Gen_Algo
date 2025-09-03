@@ -99,3 +99,10 @@ def test_parse_top_level_combination_genes():
     assert {"options": ["AND", "OR"]} in gene_space
     assert any(gs.get("low") == 1 and gs.get("high") == 3 for gs in gene_space)
     assert str in gene_types and int in gene_types
+
+
+def test_vote_threshold_gene_present():
+    import config
+
+    _, gene_map, _ = parse_genes_from_config(config.STRATEGY_RULES)
+    assert any(info["name"] == "vote_threshold" for info in gene_map.values())

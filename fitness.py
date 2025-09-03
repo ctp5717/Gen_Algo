@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+import warnings
 from collections import Counter
 
 import numpy as np
@@ -13,6 +14,7 @@ import vectorbt as vbt
 
 import config
 import strategy_engine as engine
+import trade_floor
 
 
 def weighted_mean_std(values, weights):
@@ -202,6 +204,9 @@ class MultiAssetFitnessEvaluator:
         self.settings = copy.deepcopy(defaults)
         if settings:
             self.settings.update(settings)
+        # Clamp min_included_assets to available data after alignment
+        mia = self.settings.get("min_included_assets", 1)
+        self.settings["min_included_assets"] = min(mia, len(group_data))
         self.last_details = {}
         self.floor_failures = Counter()
 
@@ -218,6 +223,20 @@ class MultiAssetFitnessEvaluator:
         assert (
             self.settings.get("min_total_trades", 0) >= 0
         ), "min_total_trades must be >= 0"
+
+        # Warn if the configured floors are unreachable
+        min_group = self.settings.get("min_total_trades", 0)
+        need = self.settings.get("min_included_assets", 0) * self.settings.get(
+            "per_asset_min_trades", 0
+        )
+        if min_group and need > min_group:
+            if self.settings.get("trade_floor_policy") == "soft_penalty":
+                self.settings["min_total_trades"] = need
+            else:
+                warnings.warn(
+                    "min_total_trades < min_included_assets * per_asset_min_trades; run may be infeasible.",
+                    stacklevel=2,
+                )
 
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
@@ -593,7 +612,13 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
         mapping of ticker -> DataFrame.  Otherwise it is a single DataFrame.
     """
 
-    settings = getattr(config, "MULTI_ASSET", {})
+    settings = copy.deepcopy(getattr(config, "MULTI_ASSET", {}))
     if settings.get("enabled"):
+        rate = settings.get("min_total_trades_per_year")
+        if rate:
+            start = pd.to_datetime(config.TRAINING_PERIOD["start"])
+            end = pd.to_datetime(config.TRAINING_PERIOD["end"])
+            floor, _ = trade_floor.scale_floor(rate, start, end)
+            settings["min_total_trades"] = floor
         return MultiAssetFitnessEvaluator(ohlc_data, base_rules, gene_map, settings)
     return FitnessEvaluator(ohlc_data, base_rules, gene_map)

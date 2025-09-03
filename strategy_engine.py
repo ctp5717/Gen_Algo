@@ -21,6 +21,7 @@ Design Philosophy:
 """
 
 import math
+import warnings
 from functools import reduce
 
 import pandas as pd
@@ -65,9 +66,25 @@ def _generate_signal(
     elif condition_type == "price_crosses_below_lower_band":
         # In this case, 'indicator_series' will be the lower band
         return close_price.vbt.crossed_below(indicator_series)
+    elif condition_type == "price_crosses_below_upper_band":
+        return close_price.vbt.crossed_below(indicator_series)
+    elif condition_type == "price_crosses_above_lower_band":
+        return close_price.vbt.crossed_above(indicator_series)
+    elif condition_type == "price_is_above_upper_band":
+        return close_price > indicator_series
+    elif condition_type == "price_is_below_lower_band":
+        return close_price < indicator_series
+    elif condition_type == "price_is_below_upper_band":
+        return close_price < indicator_series
+    elif condition_type == "price_is_above_lower_band":
+        return close_price > indicator_series
+    elif condition_type == "price_is_above_middle_band":
+        return close_price > indicator_series
+    elif condition_type == "price_is_below_middle_band":
+        return close_price < indicator_series
 
     else:
-        print(f"Warning: Unknown condition type '{condition_type}'.")
+        warnings.warn(f"Unknown condition type '{condition_type}'.", stacklevel=2)
         return pd.Series(False, index=ohlc_data.index)
 
 
@@ -89,8 +106,9 @@ def _generate_signal_from_value(
     elif condition_type == "indicator_crosses_below_value":
         return indicator_series.vbt.crossed_below(value)
     else:
-        print(
-            f"Warning: Unknown condition type '{condition_type}' for value comparison."
+        warnings.warn(
+            f"Unknown condition type '{condition_type}' for value comparison.",
+            stacklevel=2,
         )
         return pd.Series(False, index=indicator_series.index)
 
@@ -197,7 +215,10 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
         indicator_func = INDICATOR_MAPPING.get(indicator_name)
 
         if not indicator_func:
-            print(f"Warning: Indicator '{indicator_name}' not found. Skipping rule.")
+            warnings.warn(
+                f"Indicator '{indicator_name}' not found. Skipping rule.",
+                stacklevel=2,
+            )
             continue
 
         indicator_output = indicator_func(ohlc_data, **params)
@@ -206,15 +227,82 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
         # --- Intelligent Column Selection ---
         target_series = indicator_output
         if isinstance(indicator_output, pd.DataFrame):
-            if "bbands" in indicator_name:
-                if "upper" in condition_type:
-                    target_series = indicator_output.filter(like="BBU").iloc[:, 0]
-                elif "lower" in condition_type:
-                    target_series = indicator_output.filter(like="BBL").iloc[:, 0]
+            col_hint = condition_logic.get("column")
+            if col_hint:
+                if col_hint in indicator_output.columns:
+                    target_series = indicator_output[col_hint]
                 else:
-                    target_series = indicator_output.filter(like="BBM").iloc[:, 0]
+                    df = indicator_output.filter(regex=col_hint)
+                    if df.shape[1] == 0:
+                        raise KeyError(
+                            f"Requested column '{col_hint}' not found; available: {list(indicator_output.columns)}"
+                        )
+                    target_series = df.iloc[:, 0]
+            elif "bbands" in indicator_name:
+                band = condition_logic.get("band")
+                if band:
+                    band = band.lower()
+                    if band == "upper":
+                        df = indicator_output.filter(like="BBU")
+                        if df.shape[1] == 0:
+                            raise KeyError(
+                                "Upper band not found in BBands output; expected columns like 'BBU_*'",
+                            )
+                        target_series = df.iloc[:, 0]
+                    elif band == "lower":
+                        df = indicator_output.filter(like="BBL")
+                        if df.shape[1] == 0:
+                            raise KeyError(
+                                "Lower band not found in BBands output; expected columns like 'BBL_*'",
+                            )
+                        target_series = df.iloc[:, 0]
+                    else:
+                        if band not in {"middle", "mid", "basis"}:
+                            warnings.warn(
+                                f"Unknown band '{band}' for Bollinger Bands; defaulting to middle",
+                                stacklevel=2,
+                            )
+                        df = indicator_output.filter(like="BBM")
+                        if df.shape[1] == 0:
+                            raise KeyError(
+                                "Middle band not found in BBands output; expected columns like 'BBM_*'",
+                            )
+                        target_series = df.iloc[:, 0]
+                else:
+                    if "upper" in condition_type:
+                        df = indicator_output.filter(like="BBU")
+                        if df.shape[1] == 0:
+                            raise KeyError(
+                                "Upper band not found in BBands output; expected columns like 'BBU_*'",
+                            )
+                        target_series = df.iloc[:, 0]
+                    elif "lower" in condition_type:
+                        df = indicator_output.filter(like="BBL")
+                        if df.shape[1] == 0:
+                            raise KeyError(
+                                "Lower band not found in BBands output; expected columns like 'BBL_*'",
+                            )
+                        target_series = df.iloc[:, 0]
+                    else:
+                        df = indicator_output.filter(like="BBM")
+                        if df.shape[1] == 0:
+                            raise KeyError(
+                                "Middle band not found in BBands output; expected columns like 'BBM_*'",
+                            )
+                        target_series = df.iloc[:, 0]
             elif "macd" in indicator_name:
-                target_series = indicator_output.filter(like="MACDh").iloc[:, 0]
+                df = indicator_output.filter(
+                    regex=r"(?i)\bmacdh\b|\bmacd[_-]?hist(?:ogram)?\b"
+                )
+                if df.shape[1] == 0:
+                    avail = ", ".join(map(str, indicator_output.columns[:6]))
+                    if indicator_output.shape[1] > 6:
+                        avail += ", ..."
+                    raise KeyError(
+                        "MACD histogram not found (looked for MACDh*/MACD_Hist*). "
+                        f"Available: {avail}"
+                    )
+                target_series = df.iloc[:, 0]
             else:
                 target_series = indicator_output.iloc[:, 0]
 

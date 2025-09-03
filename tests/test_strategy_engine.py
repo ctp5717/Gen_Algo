@@ -193,6 +193,76 @@ def test_combination_logic_invalid(monkeypatch):
         strategy_engine.process_strategy_rules(data, rules_invalid_vote)
 
 
+def test_combination_logic_case_insensitive(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+
+    def ind(ohlc, period=None):
+        return pd.Series([1, 0], index=ohlc.index)
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ind)
+    cond = {
+        "indicator": "ema",
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+
+    rules_or = {"entry_rules": {"combination_logic": "or", "conditions": [cond, cond]}}
+    res_or = strategy_engine.process_strategy_rules(data, rules_or)
+    pd.testing.assert_series_equal(
+        res_or.astype(bool), pd.Series([True, False], index=data.index)
+    )
+
+    rules_vote = {
+        "entry_rules": {"combination_logic": "vote", "conditions": [cond, cond]}
+    }
+    res_vote = strategy_engine.process_strategy_rules(data, rules_vote)
+    pd.testing.assert_series_equal(
+        res_vote.astype(bool), pd.Series([True, False], index=data.index)
+    )
+
+
+def test_single_condition_vote(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020", periods=2))
+
+    def ind(ohlc, period=None):
+        return pd.Series([1, 2], index=ohlc.index)
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ind)
+    cond = {
+        "indicator": "ema",
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+
+    rules_default = {"entry_rules": {"combination_logic": "VOTE", "conditions": [cond]}}
+    res_default = strategy_engine.process_strategy_rules(data, rules_default)
+    pd.testing.assert_series_equal(
+        res_default.astype(bool), pd.Series([True, True], index=data.index)
+    )
+
+    rules_explicit = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": 1,
+            "conditions": [cond],
+        }
+    }
+    res_explicit = strategy_engine.process_strategy_rules(data, rules_explicit)
+    pd.testing.assert_series_equal(
+        res_explicit.astype(bool), pd.Series([True, True], index=data.index)
+    )
+
+    rules_bad = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": 2,
+            "conditions": [cond],
+        }
+    }
+    with pytest.raises(ValueError):
+        strategy_engine.process_strategy_rules(data, rules_bad)
+
+
 def test_nan_handling_toggle(monkeypatch):
     data = pd.DataFrame(
         {"Close": [1, 1, 1]}, index=pd.date_range("2020-01-01", periods=3)
@@ -295,6 +365,364 @@ def test_nan_handling_toggle(monkeypatch):
     )
 
 
+def test_bband_band_hint_and_fallback(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]}, index=pd.date_range("2020", periods=3))
+
+    class Accessor:
+        def __init__(self, series):
+            self._s = series
+
+        def crossed_above(self, other):
+            return self._s > other
+
+        def crossed_below(self, other):
+            return self._s < other
+
+    monkeypatch.setattr(
+        pd.Series, "vbt", property(lambda s: Accessor(s)), raising=False
+    )
+
+    def bb_func(ohlc, period=None, std_dev=None):
+        return pd.DataFrame(
+            {
+                "BBU": [0, 5, 0],
+                "BBM": [0, 0, 5],
+                "BBL": [5, 0, 0],
+            },
+            index=ohlc.index,
+        )
+
+    monkeypatch.setattr(indicator_library, "calculate_bbands", bb_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "bbands", bb_func)
+
+    # Explicit band hints
+    rules_upper = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "upper",
+                    },
+                }
+            ]
+        }
+    }
+    res_upper = strategy_engine.process_strategy_rules(data, rules_upper)
+    pd.testing.assert_series_equal(
+        res_upper.astype(bool), pd.Series([True, False, True], index=data.index)
+    )
+
+    rules_middle = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "middle",
+                    },
+                }
+            ]
+        }
+    }
+    res_middle = strategy_engine.process_strategy_rules(data, rules_middle)
+    pd.testing.assert_series_equal(
+        res_middle.astype(bool), pd.Series([True, True, False], index=data.index)
+    )
+
+    rules_mid_syn = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "mid",
+                    },
+                }
+            ]
+        }
+    }
+    res_mid_syn = strategy_engine.process_strategy_rules(data, rules_mid_syn)
+    pd.testing.assert_series_equal(
+        res_mid_syn.astype(bool), pd.Series([True, True, False], index=data.index)
+    )
+
+    rules_basis_syn = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "basis",
+                    },
+                }
+            ]
+        }
+    }
+    res_basis_syn = strategy_engine.process_strategy_rules(data, rules_basis_syn)
+    pd.testing.assert_series_equal(
+        res_basis_syn.astype(bool),
+        pd.Series([True, True, False], index=data.index),
+    )
+
+    rules_lower = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "lower",
+                    },
+                }
+            ]
+        }
+    }
+    res_lower = strategy_engine.process_strategy_rules(data, rules_lower)
+    pd.testing.assert_series_equal(
+        res_lower.astype(bool), pd.Series([False, True, True], index=data.index)
+    )
+
+    # Fallback to condition type keywords
+    rules_fallback_upper = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_crosses_above_upper_band"},
+                }
+            ]
+        }
+    }
+    res_fu = strategy_engine.process_strategy_rules(data, rules_fallback_upper)
+    pd.testing.assert_series_equal(
+        res_fu.astype(bool), pd.Series([True, False, True], index=data.index)
+    )
+
+    rules_fallback_default = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_above_indicator"},
+                }
+            ]
+        }
+    }
+    res_fd = strategy_engine.process_strategy_rules(data, rules_fallback_default)
+    pd.testing.assert_series_equal(
+        res_fd.astype(bool), pd.Series([True, True, False], index=data.index)
+    )
+
+    # Variant condition types
+    rules_is_above_upper = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_above_upper_band"},
+                }
+            ]
+        }
+    }
+    res_is_above_upper = strategy_engine.process_strategy_rules(
+        data, rules_is_above_upper
+    )
+    pd.testing.assert_series_equal(
+        res_is_above_upper.astype(bool),
+        pd.Series([True, False, True], index=data.index),
+    )
+
+    rules_is_below_lower = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_below_lower_band"},
+                }
+            ]
+        }
+    }
+    res_is_below_lower = strategy_engine.process_strategy_rules(
+        data, rules_is_below_lower
+    )
+    pd.testing.assert_series_equal(
+        res_is_below_lower.astype(bool),
+        pd.Series([True, False, False], index=data.index),
+    )
+
+    rules_is_below_upper = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_below_upper_band"},
+                }
+            ]
+        }
+    }
+    res_is_below_upper = strategy_engine.process_strategy_rules(
+        data, rules_is_below_upper
+    )
+    pd.testing.assert_series_equal(
+        res_is_below_upper.astype(bool),
+        pd.Series([False, True, False], index=data.index),
+    )
+
+    rules_is_above_lower = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_above_lower_band"},
+                }
+            ]
+        }
+    }
+    res_is_above_lower = strategy_engine.process_strategy_rules(
+        data, rules_is_above_lower
+    )
+    pd.testing.assert_series_equal(
+        res_is_above_lower.astype(bool),
+        pd.Series([False, True, True], index=data.index),
+    )
+
+    rules_is_above_middle = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_above_middle_band"},
+                }
+            ]
+        }
+    }
+    res_is_above_middle = strategy_engine.process_strategy_rules(
+        data, rules_is_above_middle
+    )
+    pd.testing.assert_series_equal(
+        res_is_above_middle.astype(bool),
+        pd.Series([True, True, False], index=data.index),
+    )
+
+    rules_is_below_middle = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_below_middle_band"},
+                }
+            ]
+        }
+    }
+    res_is_below_middle = strategy_engine.process_strategy_rules(
+        data, rules_is_below_middle
+    )
+    pd.testing.assert_series_equal(
+        res_is_below_middle.astype(bool),
+        pd.Series([False, False, True], index=data.index),
+    )
+
+    rules_cross_below_upper = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_crosses_below_upper_band"},
+                }
+            ]
+        }
+    }
+    res_cross_below_upper = strategy_engine.process_strategy_rules(
+        data, rules_cross_below_upper
+    )
+    pd.testing.assert_series_equal(
+        res_cross_below_upper.astype(bool),
+        pd.Series([False, True, False], index=data.index),
+    )
+
+    rules_cross_above_lower = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_crosses_above_lower_band"},
+                }
+            ]
+        }
+    }
+    res_cross_above_lower = strategy_engine.process_strategy_rules(
+        data, rules_cross_above_lower
+    )
+    pd.testing.assert_series_equal(
+        res_cross_above_lower.astype(bool),
+        pd.Series([False, True, True], index=data.index),
+    )
+
+    # Unknown band falls back to middle
+    rules_unknown_band = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "weird",
+                    },
+                }
+            ]
+        }
+    }
+    res_unknown = strategy_engine.process_strategy_rules(data, rules_unknown_band)
+    pd.testing.assert_series_equal(
+        res_unknown.astype(bool), pd.Series([True, True, False], index=data.index)
+    )
+
+
+def test_bband_missing_column(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]}, index=pd.date_range("2020", periods=3))
+
+    def bb_bad(ohlc, period=None, std_dev=None):
+        return pd.DataFrame({"XX": [1, 2, 3]}, index=ohlc.index)
+
+    monkeypatch.setattr(indicator_library, "calculate_bbands", bb_bad)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "bbands", bb_bad)
+
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "bbands",
+                    "params": {},
+                    "condition": {"type": "price_is_above_upper_band"},
+                }
+            ]
+        }
+    }
+    with pytest.raises(KeyError):
+        strategy_engine.process_strategy_rules(data, rules)
+
+
 def test_combination_logic_default(monkeypatch):
     data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
 
@@ -384,3 +812,96 @@ def test_parameter_type_validation():
         strategy_engine.process_strategy_rules(
             data, {"entry_rules": {"treat_nan_as_false": "no", "conditions": []}}
         )
+
+
+def test_macd_missing_histogram(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
+
+    def macd_bad(df, fast, slow, signal):
+        return pd.DataFrame({"MACD": [0, 0]})
+
+    monkeypatch.setattr(indicator_library, "calculate_macd", macd_bad)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_bad)
+
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {"fast": 12, "slow": 26, "signal": 9},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+
+    with pytest.raises(KeyError, match="MACDh"):
+        strategy_engine.process_strategy_rules(data, rules)
+
+
+def test_macd_histogram_variants_and_column_hint(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
+
+    def macd_alt(df, fast, slow, signal):
+        return pd.DataFrame({"MACD_Hist": [-1, 1], "MACD": [-1, 1], "Other": [0, 0]})
+
+    monkeypatch.setattr(indicator_library, "calculate_macd", macd_alt)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_alt)
+
+    rules_default = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {"fast": 12, "slow": 26, "signal": 9},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+    res_default = strategy_engine.process_strategy_rules(data, rules_default)
+    pd.testing.assert_series_equal(
+        res_default.astype(bool),
+        pd.Series([False, True], index=data.index),
+        check_names=False,
+    )
+
+    rules_column = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {"fast": 12, "slow": 26, "signal": 9},
+                    "condition": {
+                        "type": "indicator_is_above_value",
+                        "value": 0,
+                        "column": "MACD",
+                    },
+                }
+            ]
+        }
+    }
+    res_column = strategy_engine.process_strategy_rules(data, rules_column)
+    pd.testing.assert_series_equal(
+        res_column.astype(bool),
+        pd.Series([False, True], index=data.index),
+        check_names=False,
+    )
+
+    rules_missing = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {"fast": 12, "slow": 26, "signal": 9},
+                    "condition": {
+                        "type": "indicator_is_above_value",
+                        "value": 0,
+                        "column": "NOPE",
+                    },
+                }
+            ]
+        }
+    }
+    with pytest.raises(KeyError, match="NOPE"):
+        strategy_engine.process_strategy_rules(data, rules_missing)

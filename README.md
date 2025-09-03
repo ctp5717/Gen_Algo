@@ -69,7 +69,7 @@ This is the core processor that translates your ideas from the config file into 
     * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from the config.
     * **Dynamic Indicator Calls:** It uses the `INDICATOR_MAPPING` dictionary to dynamically call the correct calculation functions from the `indicator_library.py` based on the active rules.
     * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
-    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type.
+    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type. For MACD the histogram (`MACDh_*` or `MACD_Hist*`) is chosen by default; supply `condition.column` to use another component.
     * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (case-insensitive, defaults to `"AND"`). NaNs are treated as `False` by default but can be propagated by setting `treat_nan_as_false=False`. For `"VOTE"`, a majority threshold is used when `vote_threshold` is `None`.
     * **Output:** It returns a final, single pandas Series of `True`/`False` entry signals to the backtester.
 
@@ -171,11 +171,11 @@ The `entry_rules` section supports three ways to combine individual indicator co
 * `"AND"` – all conditions must be true.
 * `"OR"` – any condition being true triggers a signal.
 * `"VOTE"` – at least *k* conditions must be true.  If `vote_threshold` is
-  `None` or omitted, the engine uses a majority (`ceil(N/2)`).
+  `None` or omitted, the engine uses a majority (`ceil(N/2)`).  Values outside
+  `1..N` raise a `ValueError`.
 
 `combination_logic` is case-insensitive and defaults to `"AND"` when omitted.
-With only one active condition, all combination types behave the same.  The
-`vote_threshold` must be between 1 and the number of active conditions.
+With only one active condition, all combination types behave the same.
 `treat_nan_as_false` (default `True`) controls whether missing indicator values
 are replaced with `False` before combining; set it to `False` to propagate
 NaNs and skip trading when any condition is undefined.
@@ -213,6 +213,24 @@ Example configurations:
 Both `combination_logic` and `vote_threshold` may be declared as genes (using
 the `gene` key) so the GA can explore different combination modes and
 thresholds.
+
+To target specific Bollinger Bands, provide a `band` hint or use the `*_band`
+condition types. The `band` hint accepts `"upper"`, `"middle"`/`"mid"`/`"basis"`,
+or `"lower"`:
+
+```python
+{
+    "indicator": "bbands",
+    "params": {"period": 20, "std_dev": 2},
+    "condition": {"type": "price_is_above_indicator", "band": "upper"},
+}
+# equivalent shorthand
+{
+    "indicator": "bbands",
+    "params": {"period": 20, "std_dev": 2},
+    "condition": {"type": "price_is_above_upper_band"},
+}
+```
 
 2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
 

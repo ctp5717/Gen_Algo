@@ -253,10 +253,17 @@ Notes:
 - **Binance normalization:** `data_loader._normalize_ticker("BTC-USD") -> "BTCUSDT"`.
 - **Multi-asset:** confirm `MULTI_ASSET["enabled"] = true` and tune:
   - `lambda_dispersion`, `min_total_trades_per_year`, `coverage_penalty`,
-  - `zero_trade_policy` ("ignore" or "penalize"), `per_asset_min_trades`.
+  - `zero_trade_policy` ("ignore" or "penalize"), `per_asset_min_trades` (per fold, not time-scaled).
 - **Coverage threshold:** `COVERAGE_THRESHOLD` (default `0.8`) controls asset retention when aligning data.
 
-**BBands tips:** To target upper/lower/middle bands, include `"upper"` / `"lower"` in the condition type names (e.g., `"price_crosses_above_upper_band"`). The engine auto-selects `BBU` / `BBL` / `BBM` columns.
+**BBands tips:** Select specific bands either by adding a `band` hint
+(`"upper"`, `"middle"`/`"mid"`/`"basis"`, `"lower"`) to the condition or by using the
+`*_band` condition types such as `"price_is_above_upper_band"` or
+`"price_crosses_below_lower_band"`. The engine maps these to the `BBU` / `BBM`
+/ `BBL` columns.
+
+**MACD tips:** The engine expects the histogram (`MACDh_*` or `MACD_Hist*`) by
+default; override with `condition.column` to use another component.
 
 ---
 
@@ -290,6 +297,13 @@ python walk_forward.py
 # Coarse hyperparameter sweep (GA & lambda)
 python tuner.py
 ```
+
+The tuning module also supports a deeper GA candidate for exhaustive searches:
+
+```python
+{"sol_per_pop": 250, "num_parents_mating": 60, "mutation_num_genes": 4}
+```
+Add it to `config.HYPERPARAMETER_SEARCH_SPACE` when exploring larger populations.
 
 CI expectations:
 - Linux, Python 3.11, `pytest -q -n auto` with coverage.

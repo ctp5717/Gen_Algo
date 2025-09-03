@@ -114,3 +114,52 @@ def test_backtester_integration_or_vote(monkeypatch):
     evaluator_vote_strict(None, [], 0)
 
     assert trade_counts == [3, 3, 0]
+
+
+def test_stop_loss_and_trailing_stop(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]}, index=pd.date_range("2020", periods=3))
+
+    monkeypatch.setattr(
+        strategy_engine,
+        "process_strategy_rules",
+        lambda o, r: pd.Series([True, True, True], index=data.index),
+    )
+
+    captured = {}
+
+    class DummyPF:
+        def __init__(self):
+            self._trades = types.SimpleNamespace(count=lambda: 1)
+
+        def stats(self):
+            return {"Sortino Ratio": 1.0, "Profit Factor": 1.0, "Max Drawdown [%]": 0.0}
+
+    def fake_from_signals(**kwargs):
+        captured["sl_stop"] = kwargs.get("sl_stop")
+        captured["sl_trail"] = kwargs.get("sl_trail")
+        return DummyPF()
+
+    monkeypatch.setattr(
+        fitness.vbt.Portfolio, "from_signals", fake_from_signals, raising=False
+    )
+
+    rules = {
+        "exit_rules": {
+            "stop_loss": {
+                "is_active": True,
+                "type": "percentage",
+                "params": {"value": 0.05},
+            },
+            "trailing_stop": {
+                "is_active": True,
+                "type": "percentage",
+                "params": {"value": 0.03},
+            },
+        }
+    }
+
+    evaluator = fitness.FitnessEvaluator(data, rules, {})
+    evaluator(None, [], 0)
+
+    assert captured["sl_stop"] == 0.05
+    assert captured["sl_trail"] == 0.03
