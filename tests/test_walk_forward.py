@@ -3,6 +3,7 @@ import types
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from dateutil.relativedelta import relativedelta
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,7 +11,10 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+try:  # prefer real vectorbt when installed
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover - fallback stub
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import walk_forward  # noqa: E402
 
@@ -284,3 +288,108 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert len(pool) == 1 + 1 + settings["num_clones"]
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
+
+
+def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
+    import types
+
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "get_group_data",
+        lambda *a, **k: {"AAA": df},
+    )
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, [])
+    )
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            self.last_details = {}
+
+        def __call__(self, *a, **k):
+            self.last_details = {
+                "penalties": {"trade_floor": penalty},
+                "min_total_trades": 10,
+                "total_trades": 0,
+                "per_asset": {},
+                "mu": 0.0,
+                "lambda_sigma": 0.0,
+            }
+            return -999.0
+
+    fitness_stub = types.SimpleNamespace(
+        MultiAssetFitnessEvaluator=lambda *a, **k: DummyEvaluator(),
+        _inject_genes_into_rules=lambda *a, **k: {},
+        print_floor_failures=lambda *a, **k: None,
+    )
+    monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
+    monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(walk_forward, "_write_run_metadata", lambda *a, **k: None)
+    monkeypatch.setattr(
+        walk_forward.trade_floor, "scale_floor", lambda rate, s, e: (0, {})
+    )
+    if mode:
+        monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "soft_penalty_mode", mode)
+
+    return walk_forward.run_walk_forward_validation()
+
+
+@pytest.mark.parametrize(
+    "penalty, mode, expected",
+    [
+        ("no_assets", None, ["reason=no_assets"]),
+        (
+            {"penalty": -0.25, "reason": "low_trades"},
+            "additive",
+            ["additive", "reason=low_trades"],
+        ),
+        (None, None, []),
+    ],
+)
+def test_walk_forward_trade_floor_penalties(
+    monkeypatch, capsys, penalty, mode, expected
+):
+    summary = _run_walk_forward_with_penalty(monkeypatch, penalty, mode)
+    assert isinstance(summary, dict)
+    out = capsys.readouterr().out
+    for token in expected:
+        assert token in out
+    if not expected:
+        assert "reason=" not in out

@@ -8,7 +8,10 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+try:  # prefer real vectorbt
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402

@@ -11,10 +11,12 @@ sys.path.insert(0, str(ROOT))
 
 # Stub optional heavy dependencies before importing project modules
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-
-vbt = types.ModuleType("vectorbt")
-vbt.Portfolio = types.SimpleNamespace()
-sys.modules.setdefault("vectorbt", vbt)
+try:  # use installed vectorbt if present
+    import vectorbt as vbt  # noqa: F401
+except Exception:  # pragma: no cover - fallback stub
+    vbt = types.ModuleType("vectorbt")
+    vbt.Portfolio = types.SimpleNamespace()
+    sys.modules.setdefault("vectorbt", vbt)
 
 import config  # noqa: E402
 import fitness  # noqa: E402
