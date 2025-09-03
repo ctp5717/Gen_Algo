@@ -15,7 +15,10 @@ def _make_evaluator(stats_list, settings=None, group_data=None):
         "B": pd.DataFrame({"Close": [1, 2, 3]}),
         "C": pd.DataFrame({"Close": [1, 2, 3]}),
     }
-    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings or {})
+    base = {"per_asset_min_trades": 1, "min_included_assets": 1, "coverage_penalty": 0.0}
+    if settings:
+        base.update(settings)
+    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, base)
     stats_iter = iter(stats_list)
 
     def fake_eval(self, ohlc, rules):
@@ -145,6 +148,9 @@ def test_csv_and_json_include_exclusions(tmp_path, monkeypatch):
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades_per_year", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "asset_weights", {"A": 1, "B": 1})
+    monkeypatch.setitem(config.MULTI_ASSET, "per_asset_min_trades", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "min_included_assets", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "coverage_penalty", 0.0)
     monkeypatch.setattr(analysis, "_plot_multi_asset_overview", lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
 
@@ -188,6 +194,9 @@ def test_evaluation_error_reason(tmp_path, monkeypatch):
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades_per_year", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "asset_weights", {"A": 1, "B": 1})
+    monkeypatch.setitem(config.MULTI_ASSET, "per_asset_min_trades", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "min_included_assets", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "coverage_penalty", 0.0)
     monkeypatch.setattr(analysis, "_plot_multi_asset_overview", lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
 

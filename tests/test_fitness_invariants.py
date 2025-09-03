@@ -54,6 +54,8 @@ def test_hard_floor_forbids_coverage_penalty(monkeypatch):
         "coverage_penalty": 1.0,
         "trade_floor_policy": "hard_floor",
         "min_total_trades": 5,
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
     }
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
@@ -101,6 +103,9 @@ def test_zero_trade_penalize_includes_asset(monkeypatch):
         "zero_trade_policy": "penalize",
         "zero_trade_penalty": -2.0,
         "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
+        "coverage_penalty": 0.0,
     }
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
@@ -148,6 +153,9 @@ def test_zero_trade_ignore_excludes_asset(monkeypatch):
         "lambda_dispersion": 0.0,
         "zero_trade_policy": "ignore",
         "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
+        "coverage_penalty": 0.3,
     }
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
@@ -195,6 +203,9 @@ def test_negative_weights_clipped_and_renormalized(monkeypatch):
         "metric": "sortino",
         "lambda_dispersion": 0.0,
         "asset_weights": {"A": 2.0, "B": -1.0},
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
+        "coverage_penalty": 0.0,
     }
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
