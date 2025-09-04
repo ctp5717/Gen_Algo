@@ -363,7 +363,19 @@ def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
     monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
     monkeypatch.setattr(walk_forward, "_write_run_metadata", lambda *a, **k: None)
     monkeypatch.setattr(
-        walk_forward.trade_floor, "scale_floor", lambda rate, s, e: (0, {})
+        walk_forward.trade_floor,
+        "scale_floor",
+        lambda rate, s, e, td=252: (
+            0,
+            {
+                "base_floor": rate,
+                "window_days": 0,
+                "trading_days_per_year": td,
+                "years": 0,
+                "raw": 0,
+                "ceil": 0,
+            },
+        ),
     )
     if mode:
         monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "soft_penalty_mode", mode)

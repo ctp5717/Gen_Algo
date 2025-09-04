@@ -19,6 +19,7 @@ import data_loader
 import trade_floor
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config
+from run_metadata import merge_run_metadata
 
 
 def _get_commit_hash() -> str:
@@ -93,8 +94,7 @@ def _write_run_metadata(
         },
         "artifacts": artifacts,
     }
-    with open("run_metadata.json", "w") as fh:
-        json.dump(metadata, fh, indent=2)
+    merge_run_metadata("run_metadata.json", metadata)
 
 
 def _generate_periods(
@@ -283,10 +283,27 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         )
         if multi:
             settings_train = dict(config.MULTI_ASSET)
+            per_asset_base = settings_train.get("per_asset_min_trades")
+            if per_asset_base:
+                floor_pa, info_pa = trade_floor.scale_floor(
+                    per_asset_base,
+                    p["train_start"],
+                    p["train_end"],
+                    settings_train.get("trading_days_per_year", 252),
+                )
+                settings_train["per_asset_min_trades"] = floor_pa
+                settings_train["per_asset_floor_info"] = info_pa
+                print(
+                    f"Per-asset floor: base={per_asset_base} → scaled={floor_pa} "
+                    f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+                )
             rate = settings_train.get("min_total_trades_per_year")
             if rate:
                 floor, info = trade_floor.scale_floor(
-                    rate, p["train_start"], p["train_end"]
+                    rate,
+                    p["train_start"],
+                    p["train_end"],
+                    settings_train.get("trading_days_per_year", 252),
                 )
                 settings_train["min_total_trades"] = floor
                 print(f"Scaled min_total_trades (train): {floor} | info={info}")
@@ -365,10 +382,27 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         )
         if multi:
             settings_val = dict(config.MULTI_ASSET)
+            per_asset_base_val = settings_val.get("per_asset_min_trades")
+            if per_asset_base_val:
+                floor_pa_val, info_pa_val = trade_floor.scale_floor(
+                    per_asset_base_val,
+                    p["test_start"],
+                    p["test_end"],
+                    settings_val.get("trading_days_per_year", 252),
+                )
+                settings_val["per_asset_min_trades"] = floor_pa_val
+                settings_val["per_asset_floor_info"] = info_pa_val
+                print(
+                    f"Per-asset floor: base={per_asset_base_val} → scaled={floor_pa_val} "
+                    f"(window={info_pa_val['window_days']}d, base={info_pa_val['trading_days_per_year']}d)"
+                )
             rate = settings_val.get("min_total_trades_per_year")
             if rate:
                 floor_val, info_val = trade_floor.scale_floor(
-                    rate, p["test_start"], p["test_end"]
+                    rate,
+                    p["test_start"],
+                    p["test_end"],
+                    settings_val.get("trading_days_per_year", 252),
                 )
                 settings_val["min_total_trades"] = floor_val
                 print(

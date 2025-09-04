@@ -41,11 +41,27 @@ def _evaluate_on_validation(solution, gene_map, val_data):
         if not val_data:
             return -np.inf
         settings = dict(config.MULTI_ASSET)
+        start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
+        end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+        per_asset_base = settings.get("per_asset_min_trades")
+        if per_asset_base:
+            floor_pa, info_pa = trade_floor.scale_floor(
+                per_asset_base,
+                start,
+                end,
+                settings.get("trading_days_per_year", 252),
+            )
+            settings["per_asset_min_trades"] = floor_pa
+            settings["per_asset_floor_info"] = info_pa
+            print(
+                f"Per-asset floor: base={per_asset_base} → scaled={floor_pa} "
+                f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+            )
         rate = settings.get("min_total_trades_per_year")
         if rate:
-            start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
-            end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
-            floor, info = trade_floor.scale_floor(rate, start, end)
+            floor, info = trade_floor.scale_floor(
+                rate, start, end, settings.get("trading_days_per_year", 252)
+            )
             settings["min_total_trades"] = floor
             print(f"Scaled min_total_trades (validation): {floor} | info={info}")
         settings["trade_floor_policy"] = "soft_penalty"

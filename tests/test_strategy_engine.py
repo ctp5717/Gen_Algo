@@ -216,7 +216,7 @@ def test_combination_logic_invalid(monkeypatch):
     with pytest.raises(ValueError):
         strategy_engine.process_strategy_rules(data, rules_invalid_logic)
 
-    # Invalid vote_threshold
+    # Invalid vote_threshold now normalized to 1
     rules_invalid_vote = {
         "entry_rules": {
             "combination_logic": "VOTE",
@@ -224,8 +224,7 @@ def test_combination_logic_invalid(monkeypatch):
             "conditions": [cond],
         }
     }
-    with pytest.raises(ValueError):
-        strategy_engine.process_strategy_rules(data, rules_invalid_vote)
+    strategy_engine.process_strategy_rules(data, rules_invalid_vote)
 
 
 def test_combination_logic_case_insensitive(monkeypatch):
@@ -294,8 +293,11 @@ def test_single_condition_vote(monkeypatch):
             "conditions": [cond],
         }
     }
-    with pytest.raises(ValueError):
-        strategy_engine.process_strategy_rules(data, rules_bad)
+    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+        res_bad = strategy_engine.process_strategy_rules(data, rules_bad)
+    pd.testing.assert_series_equal(
+        res_bad.astype(bool), pd.Series([True, True], index=data.index)
+    )
 
 
 def test_nan_handling_toggle(monkeypatch):
@@ -983,3 +985,93 @@ def test_signal_counts_name_and_nan_policy(monkeypatch):
         data, rules, collect_counts=True
     )
     assert counts == {"foo:indicator_is_above_value": 2}
+
+
+def test_vote_threshold_normalization(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]})
+    monkeypatch.setitem(
+        strategy_engine.INDICATOR_MAPPING,
+        "ema",
+        lambda df, **p: pd.Series([1, 2, 3], name="ema"),
+    )
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ],
+        }
+    }
+    with pytest.warns(RuntimeWarning, match="Normalized vote_threshold to 1"):
+        strategy_engine.process_strategy_rules(data, rules)
+
+
+def test_vote_threshold_clamped(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]})
+
+    monkeypatch.setitem(
+        strategy_engine.INDICATOR_MAPPING,
+        "ema",
+        lambda df, **p: pd.Series([1, 2, 3], name="ema"),
+    )
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": 5,
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+                {
+                    "indicator": "ema",
+                    "params": {},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+            ],
+        }
+    }
+    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+        res = strategy_engine.process_strategy_rules(data, rules)
+    assert res.all()
+
+
+def test_nan_policy(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]})
+
+    def base_ind(df, **p):
+        return pd.Series([0, 0, 0], index=df.index)
+
+    def fake_gen(series, condition):  # noqa: ANN001, ANN201
+        return pd.Series([True, np.nan, True], index=series.index)
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "nan_ind", base_ind)
+    monkeypatch.setattr(strategy_engine, "_generate_signal_from_value", fake_gen)
+
+    rules = {
+        "entry_rules": {
+            "treat_nan_as_false": True,
+            "conditions": [
+                {
+                    "indicator": "nan_ind",
+                    "params": {},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ],
+        }
+    }
+    sig, counts = strategy_engine.process_strategy_rules(
+        data, rules, collect_counts=True
+    )
+    assert not sig.isna().any()
+    key = next(iter(counts))
+    assert counts[key] == 2
+
+    rules["entry_rules"]["treat_nan_as_false"] = False
+    sig = strategy_engine.process_strategy_rules(data, rules)
+    assert sig.isna().any()
