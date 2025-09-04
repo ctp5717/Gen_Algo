@@ -74,10 +74,20 @@ def print_floor_failures(counter: Counter):
 
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
-    """
-    Injects the gene values from a GA solution into a copy of the strategy rules.
-    """
-    injected_rules = copy.deepcopy(base_rules)
+    """Inject gene values into a copy of strategy rules, resolving defaults."""
+
+    def _resolve_defaults(obj):
+        if isinstance(obj, dict):
+            if "gene" in obj:
+                if "options" in obj:
+                    return obj.get("options", [None])[0]
+                return obj.get("low", obj.get("high"))
+            return {k: _resolve_defaults(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_resolve_defaults(v) for v in obj]
+        return obj
+
+    injected_rules = _resolve_defaults(copy.deepcopy(base_rules))
     for i, gene_value in enumerate(solution):
         gene_info = gene_map.get(i)
         if not gene_info:

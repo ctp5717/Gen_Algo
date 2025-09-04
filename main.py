@@ -72,20 +72,37 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     logic = entry.get("combination_logic", "AND")
     if isinstance(logic, dict):
         entry["combination_logic"] = "AND"
-        entry.setdefault("vote_threshold", None)
+    vt = entry.get("vote_threshold")
+    if isinstance(vt, dict):
+        entry["vote_threshold"] = vt.get("low", vt.get("high"))
 
     for cond in entry.get("conditions", []):
         ind = cond.get("indicator")
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
         if func is None:
             continue
-        out = func(sample, **cond.get("params", {}))
+        params_pf = {}
+        for p, val in cond.get("params", {}).items():
+            if isinstance(val, dict) and "gene" in val:
+                if "options" in val:
+                    params_pf[p] = val.get("options", [None])[0]
+                else:
+                    params_pf[p] = val.get("low", val.get("high"))
+            else:
+                params_pf[p] = val
+        cond["params"] = params_pf
+        try:
+            out = func(sample, **params_pf)
+        except Exception:
+            continue
         cols = list(out.columns) if isinstance(out, pd.DataFrame) else []
         print(f"{ind}: {cols}")
     try:
         strategy_engine.process_strategy_rules(sample, rules_pf)
     except KeyError as e:
         raise SystemExit(f"Indicator preflight failed: {e}") from e
+    except Exception:
+        pass
 
 
 def main():

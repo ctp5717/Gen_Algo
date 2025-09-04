@@ -137,9 +137,13 @@ def run_champion_analysis(
         rules = fitness._inject_genes_into_rules(
             config.STRATEGY_RULES, gene_map, best_solution
         )
-        entries, signal_counts = engine.process_strategy_rules(
+        outputs = engine.process_strategy_rules(
             validation_data, rules, collect_counts=True
         )
+        if isinstance(outputs, tuple):
+            entries, signal_counts = outputs
+        else:  # pragma: no cover - backward compatibility
+            entries, signal_counts = outputs, {}
 
         if entries.sum() < 1:
             print("\nChampion strategy produced no trades in the validation period.")

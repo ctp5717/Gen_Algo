@@ -195,6 +195,8 @@ def process_strategy_rules(
     conditions = entry_rules.get("conditions", [])
     combination_logic = entry_rules.get("combination_logic", "AND").upper()
     vote_threshold = entry_rules.get("vote_threshold")
+    if isinstance(vote_threshold, dict):
+        vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
     treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
 
     if vote_threshold is not None and not isinstance(vote_threshold, int):

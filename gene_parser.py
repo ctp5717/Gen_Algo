@@ -59,11 +59,22 @@ def parse_genes_from_config(
                             if isinstance(gene_info.get("step", 1.0), int)
                             else float
                         )
-                        high = gene_info.get("high")
-                        low = gene_info.get("low", 1)
                         if key == "vote_threshold":
-                            high = min(high, n_active) if high is not None else n_active
-                            low = max(1, low)
+                            if isinstance(comb_logic, dict):
+                                high = gene_info.get("high")
+                                low = gene_info.get("low", 1)
+                            else:
+                                high = gene_info.get("high")
+                                low = gene_info.get("low", 1)
+                                high = (
+                                    min(high, n_active)
+                                    if high is not None
+                                    else n_active
+                                )
+                                low = max(1, low)
+                        else:
+                            high = gene_info.get("high")
+                            low = gene_info.get("low", 1)
                         space_item = {"low": low, "high": high}
                         if "step" in gene_info:
                             space_item["step"] = gene_info["step"]
