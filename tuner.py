@@ -11,6 +11,26 @@ import strategy_engine as engine
 import trade_floor
 
 
+def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
+    """Sample MACD parameters while enforcing basic constraints.
+
+    Ensures ``fast < slow`` and ``1 <= signal < slow`` by repairing
+    any invalid random draws. Returns a dictionary suitable for use
+    in strategy rule parameters.
+    """
+
+    rng = rng or np.random.default_rng()
+
+    fast = int(rng.integers(4, 21))
+    slow = int(rng.integers(15, 36))
+    signal = int(rng.integers(4, 17))
+
+    slow = max(slow, fast + 1)
+    signal = min(max(signal, 1), slow - 1)
+
+    return {"fast": fast, "slow": slow, "signal": signal}
+
+
 def _evaluate_on_validation(solution, gene_map, val_data):
     """Evaluate solution on preloaded validation data and return the score."""
     # Skip evaluation gracefully if optional heavy dependencies are missing.

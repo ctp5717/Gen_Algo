@@ -116,8 +116,17 @@ def calculate_macd(
     Returns:
         pd.DataFrame: A DataFrame containing MACD line, histogram, and signal line.
     """
-    if not all([fast, slow, signal]):
-        raise ValueError("MACD 'fast', 'slow', and 'signal' parameters cannot be None.")
+    params = {"fast": fast, "slow": slow, "signal": signal}
+    for name, val in params.items():
+        if not isinstance(val, int):
+            raise TypeError(f"MACD '{name}' must be int, got {type(val).__name__}")
+    if fast < 1 or slow < 2:
+        raise ValueError("MACD 'fast' must be ≥1 and 'slow' ≥2.")
+    if fast >= slow or signal < 1 or signal >= slow:
+        raise ValueError(
+            "MACD invalid: fast < slow and 1 ≤ signal < slow "
+            f"(got fast={fast}, slow={slow}, signal={signal})"
+        )
 
     # The .ta.macd() function returns a DataFrame with multiple columns
     macd_df = ohlc_data.ta.macd(fast=fast, slow=slow, signal=signal)
