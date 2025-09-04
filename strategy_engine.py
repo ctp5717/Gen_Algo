@@ -40,6 +40,20 @@ INDICATOR_MAPPING = {
 }
 
 
+def canonical_rule_label(rule: dict) -> str:
+    """Return a stable label for a rule used in counts and metadata."""
+    name = rule.get("rule_name")
+    if not name:
+        indicator_name = rule.get("indicator")
+        condition = rule.get("condition", {})
+        condition_type = condition.get("type")
+        name = f"{indicator_name}:{condition_type}"
+        column = condition.get("column")
+        if column:
+            name += f":{column}"
+    return name
+
+
 def _generate_signal(
     ohlc_data: pd.DataFrame, indicator_series: pd.Series, condition: dict
 ) -> pd.Series:
@@ -198,6 +212,31 @@ def process_strategy_rules(
     if isinstance(vote_threshold, dict):
         vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
     treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
+    active_conds = [c for c in conditions if c.get("is_active", True)]
+    if combination_logic == "VOTE":
+        n = len(active_conds)
+        if vote_threshold is None:
+            vote_threshold = 1 if n == 1 else math.ceil(n / 2)
+            if n == 1:
+                warnings.warn(
+                    "Normalized vote_threshold to 1 for VOTE combination",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        elif vote_threshold < 1:
+            vote_threshold = 1
+            warnings.warn(
+                "Normalized vote_threshold to 1 for VOTE combination",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if vote_threshold > n:
+            warnings.warn(
+                "vote_threshold > active conditions; clamping to n",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            vote_threshold = n
 
     if vote_threshold is not None and not isinstance(vote_threshold, int):
         raise TypeError("vote_threshold must be an integer or None")
@@ -342,11 +381,7 @@ def process_strategy_rules(
 
         signals.append(individual_signal)
         if collect_counts:
-            name = rule.get("rule_name") or f"{indicator_name}:{condition_type}" + (
-                f":{condition_logic.get('column')}"
-                if condition_logic.get("column")
-                else ""
-            )
+            name = canonical_rule_label(rule)
             val = (
                 individual_signal.fillna(False)
                 if treat_nan_as_false

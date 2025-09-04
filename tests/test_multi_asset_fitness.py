@@ -183,7 +183,7 @@ def test_training_floor_scaling(monkeypatch):
         cfg, "TRAINING_PERIOD", {"start": "2020-01-01", "end": "2021-01-01"}
     )
     ev = fitness.get_fitness_evaluator({"A": pd.DataFrame({"Close": [1]})}, {}, {})
-    assert ev.settings["min_total_trades"] == 13
+    assert ev.settings["min_total_trades"] == 18
 
 
 def test_zero_trade_policy_penalize_vs_ignore():
@@ -534,7 +534,8 @@ def test_ga_and_tuner_consistency(monkeypatch):
     monkeypatch.setitem(cfg.MULTI_ASSET, "lambda_dispersion", 0.0)
     monkeypatch.setitem(cfg.MULTI_ASSET, "min_total_trades", 0)
     monkeypatch.setitem(cfg.MULTI_ASSET, "trade_floor_policy", "hard_floor")
-    monkeypatch.setitem(cfg.MULTI_ASSET, "per_asset_min_trades", 1)
+    monkeypatch.setitem(cfg.MULTI_ASSET, "per_asset_min_trades", 0)
+    monkeypatch.setitem(cfg.MULTI_ASSET, "min_total_trades_per_year", 0)
     monkeypatch.setitem(cfg.MULTI_ASSET, "min_included_assets", 1)
     monkeypatch.setitem(cfg.MULTI_ASSET, "coverage_penalty", 0.0)
 

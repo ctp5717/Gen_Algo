@@ -1,0 +1,62 @@
+import analysis
+import config
+
+
+def test_per_asset_counts_columns_and_defaults():
+    per_asset_signal_counts = {
+        "AAA": {"Long_Term_Trend_Filter": 2, "RSI_Momentum_Filter": 1},
+        "BBB": {"MACD_Momentum_Cross": 3},
+    }
+    df = analysis._build_per_asset_counts(
+        per_asset_signal_counts, config.STRATEGY_RULES
+    )
+    slugs, _ = analysis._canonical_rule_slugs(config.STRATEGY_RULES)
+    expected_cols = [
+        "asset",
+        "combination_logic",
+        "vote_threshold",
+        "treat_nan_as_false",
+    ] + [f"count_{s}" for s in slugs]
+    assert list(df.columns) == expected_cols
+    row_aaa = df[df["asset"] == "AAA"].iloc[0]
+    assert row_aaa["count_long_term_trend_filter"] == 2
+    assert row_aaa["count_macd_momentum_cross"] == 0
+    row_bbb = df[df["asset"] == "BBB"].iloc[0]
+    assert row_bbb["count_rsi_momentum_filter"] == 0
+    # Inactive rule should be present with zero
+    assert "count_bollinger_band_breakout" in df.columns
+
+
+def test_slug_collision_unique():
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {"period": 10},
+                    "condition": {"type": "price_is_above_indicator"},
+                },
+                {
+                    "indicator": "ema",
+                    "params": {"period": 20},
+                    "condition": {"type": "price_is_above_indicator"},
+                },
+            ]
+        }
+    }
+    slugs, _ = analysis._canonical_rule_slugs(rules)
+    assert slugs == [
+        "ema_price_is_above_indicator",
+        "ema_price_is_above_indicator__1",
+    ]
+    df = analysis._build_per_asset_counts(
+        {"AAA": {"ema:price_is_above_indicator": 2}}, rules
+    )
+    assert list(df.columns) == [
+        "asset",
+        "combination_logic",
+        "vote_threshold",
+        "treat_nan_as_false",
+        "count_ema_price_is_above_indicator",
+        "count_ema_price_is_above_indicator__1",
+    ]

@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+import logging
 import traceback
 import warnings
 from collections import Counter
@@ -16,6 +17,9 @@ import vectorbt as vbt
 import config
 import strategy_engine as engine
 import trade_floor
+
+logger = logging.getLogger(__name__)
+MACD_REPAIR_COUNT = 0
 
 
 def weighted_mean_std(values, weights):
@@ -73,6 +77,33 @@ def print_floor_failures(counter: Counter):
         print(f"Hard-floor failures: {dict(counter)}")
 
 
+def _normalize_macd_params(params: dict) -> dict:
+    """Repair MACD params so they satisfy fast < slow and 1 <= signal < slow."""
+
+    fast, slow, signal = (
+        params.get("fast"),
+        params.get("slow"),
+        params.get("signal"),
+    )
+    if fast is None or slow is None or signal is None:
+        raise ValueError("MACD params must be non-null: fast, slow, signal")
+    original = (fast, slow, signal)
+    if slow <= fast:
+        slow = fast + 1
+    if signal < 1:
+        signal = 1
+    if signal >= slow:
+        signal = slow - 1
+    fast, slow, signal = int(fast), int(slow), int(signal)
+    params.update({"fast": fast, "slow": slow, "signal": signal})
+    repaired = (fast, slow, signal)
+    if repaired != original:
+        logger.debug("Repaired MACD params %s -> %s", original, repaired)
+        global MACD_REPAIR_COUNT
+        MACD_REPAIR_COUNT += 1
+    return params
+
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """Inject gene values into a copy of strategy rules, resolving defaults."""
 
@@ -108,6 +139,19 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
 
         current_level[param_key] = gene_value
 
+    def _apply_macd_repair(obj):
+        if isinstance(obj, dict):
+            if obj.get("indicator") == "macd":
+                params = obj.get("params", {})
+                if {"fast", "slow", "signal"} <= params.keys():
+                    _normalize_macd_params(params)
+            for val in obj.values():
+                _apply_macd_repair(val)
+        elif isinstance(obj, list):
+            for item in obj:
+                _apply_macd_repair(item)
+
+    _apply_macd_repair(injected_rules)
     return injected_rules
 
 
@@ -373,8 +417,6 @@ class MultiAssetFitnessEvaluator:
 
                 trades = stats.get("trades", 0)
                 total_trades += trades
-                if trades > 0:
-                    assets_traded += 1
 
                 weight = asset_weights_cfg.get(ticker, 1.0)
                 pf_raw = stats.get("profit_factor")
@@ -389,6 +431,8 @@ class MultiAssetFitnessEvaluator:
                         val = self.settings.get("zero_trade_penalty", -1.0)
                         per_asset_metrics.append(val)
                         included_assets.append(ticker)
+                        if trades > 0:
+                            assets_traded += 1
                         details = {
                             **stats,
                             "score": val,
@@ -409,6 +453,13 @@ class MultiAssetFitnessEvaluator:
                             if trades == 0
                             else "below_per_asset_min_trades"
                         )
+                        info = self.settings.get("per_asset_floor_info")
+                        if info:
+                            reason += (
+                                "; Per-asset floor: base="
+                                f"{info['base_floor']} → scaled={info['ceil']} "
+                                f"(window={info['window_days']}d, base={info['trading_days_per_year']}d)"
+                            )
                         details = {
                             **stats,
                             "score": None,
@@ -458,6 +509,8 @@ class MultiAssetFitnessEvaluator:
 
                     per_asset_metrics.append(val)
                     included_assets.append(ticker)
+                    if trades > 0:
+                        assets_traded += 1
                     details = {
                         **stats,
                         "score": val,
@@ -666,11 +719,31 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
 
     settings = copy.deepcopy(getattr(config, "MULTI_ASSET", {}))
     if settings.get("enabled"):
+        start = pd.to_datetime(config.TRAINING_PERIOD["start"])
+        end = pd.to_datetime(config.TRAINING_PERIOD["end"])
+
+        per_asset_base = settings.get("per_asset_min_trades")
+        if per_asset_base:
+            floor_pa, info_pa = trade_floor.scale_floor(
+                per_asset_base,
+                start,
+                end,
+                settings.get("trading_days_per_year", 252),
+            )
+            settings["per_asset_min_trades"] = floor_pa
+            settings["per_asset_floor_info"] = info_pa
+            print(
+                "Per-asset floor: base="
+                f"{per_asset_base} → scaled={floor_pa} "
+                f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+            )
+
         rate = settings.get("min_total_trades_per_year")
         if rate:
-            start = pd.to_datetime(config.TRAINING_PERIOD["start"])
-            end = pd.to_datetime(config.TRAINING_PERIOD["end"])
-            floor, _ = trade_floor.scale_floor(rate, start, end)
+            floor, info = trade_floor.scale_floor(
+                rate, start, end, settings.get("trading_days_per_year", 252)
+            )
             settings["min_total_trades"] = floor
+            settings["group_floor_info"] = info
         return MultiAssetFitnessEvaluator(ohlc_data, base_rules, gene_map, settings)
     return FitnessEvaluator(ohlc_data, base_rules, gene_map)

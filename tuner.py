@@ -11,6 +11,26 @@ import strategy_engine as engine
 import trade_floor
 
 
+def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
+    """Sample MACD parameters while enforcing basic constraints.
+
+    Ensures ``fast < slow`` and ``1 <= signal < slow`` by repairing
+    any invalid random draws. Returns a dictionary suitable for use
+    in strategy rule parameters.
+    """
+
+    rng = rng or np.random.default_rng()
+
+    fast = int(rng.integers(4, 21))
+    slow = int(rng.integers(15, 36))
+    signal = int(rng.integers(4, 17))
+
+    slow = max(slow, fast + 1)
+    signal = min(max(signal, 1), slow - 1)
+
+    return {"fast": fast, "slow": slow, "signal": signal}
+
+
 def _evaluate_on_validation(solution, gene_map, val_data):
     """Evaluate solution on preloaded validation data and return the score."""
     # Skip evaluation gracefully if optional heavy dependencies are missing.
@@ -21,11 +41,27 @@ def _evaluate_on_validation(solution, gene_map, val_data):
         if not val_data:
             return -np.inf
         settings = dict(config.MULTI_ASSET)
+        start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
+        end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+        per_asset_base = settings.get("per_asset_min_trades")
+        if per_asset_base:
+            floor_pa, info_pa = trade_floor.scale_floor(
+                per_asset_base,
+                start,
+                end,
+                settings.get("trading_days_per_year", 252),
+            )
+            settings["per_asset_min_trades"] = floor_pa
+            settings["per_asset_floor_info"] = info_pa
+            print(
+                f"Per-asset floor: base={per_asset_base} → scaled={floor_pa} "
+                f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+            )
         rate = settings.get("min_total_trades_per_year")
         if rate:
-            start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
-            end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
-            floor, info = trade_floor.scale_floor(rate, start, end)
+            floor, info = trade_floor.scale_floor(
+                rate, start, end, settings.get("trading_days_per_year", 252)
+            )
             settings["min_total_trades"] = floor
             print(f"Scaled min_total_trades (validation): {floor} | info={info}")
         settings["trade_floor_policy"] = "soft_penalty"

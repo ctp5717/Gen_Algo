@@ -10,6 +10,7 @@ import pprint
 import time  # <-- NEW: Import the time module
 import traceback
 import types
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt  # For non-blocking plot display
@@ -67,6 +68,7 @@ def on_generation(ga_instance):
 def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     """Compute indicators once to ensure required components exist."""
     print("Performing indicator preflight...")
+    start = datetime.now(timezone.utc)
     rules_pf = copy.deepcopy(rules)
     entry = rules_pf.setdefault("entry_rules", {})
     logic = entry.get("combination_logic", "AND")
@@ -76,6 +78,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     if isinstance(vt, dict):
         entry["vote_threshold"] = vt.get("low", vt.get("high"))
 
+    indicator_columns = {}
     for cond in entry.get("conditions", []):
         ind = cond.get("indicator")
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
@@ -95,14 +98,20 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
             out = func(sample, **params_pf)
         except Exception:
             continue
-        cols = list(out.columns) if isinstance(out, pd.DataFrame) else []
-        print(f"{ind}: {cols}")
+        if isinstance(out, pd.DataFrame):
+            cols = list(out.columns)
+            print(f"{ind}: {cols}")
+            indicator_columns[ind] = {"type": "DataFrame", "columns": cols}
+        else:
+            print(f"{ind}: (Series)")
+            indicator_columns[ind] = {"type": "Series", "columns": []}
     try:
         strategy_engine.process_strategy_rules(sample, rules_pf)
     except KeyError as e:
         raise SystemExit(f"Indicator preflight failed: {e}") from e
     except Exception:
         pass
+    analysis._write_run_metadata(start, [], {"indicator_columns": indicator_columns})
 
 
 def main():
