@@ -106,3 +106,37 @@ def test_vote_threshold_gene_present():
 
     _, gene_map, _ = parse_genes_from_config(config.STRATEGY_RULES)
     assert any(info["name"] == "vote_threshold" for info in gene_map.values())
+
+
+def test_vote_threshold_gene_absent_when_not_vote():
+    sample_rules = {
+        "entry_rules": {
+            "combination_logic": "AND",
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 3, "step": 1},
+            "conditions": [],
+        }
+    }
+    _, gene_map, _ = parse_genes_from_config(sample_rules)
+    assert all(info["name"] != "vt" for info in gene_map.values())
+
+
+def test_vote_threshold_gene_bounds_update():
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 10, "step": 1},
+            "conditions": [
+                {"is_active": True},
+                {"is_active": True},
+                {"is_active": False},
+            ],
+        }
+    }
+    space, gene_map, _ = parse_genes_from_config(rules)
+    idx = next(i for i, info in gene_map.items() if info["name"] == "vt")
+    assert space[idx]["high"] == 2
+    # deactivate one more condition
+    rules["entry_rules"]["conditions"][1]["is_active"] = False
+    space2, gene_map2, _ = parse_genes_from_config(rules)
+    idx2 = next(i for i, info in gene_map2.items() if info["name"] == "vt")
+    assert space2[idx2]["high"] == 1

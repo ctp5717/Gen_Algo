@@ -5,6 +5,7 @@ Configuration File for the GA Trading Framework
 (This version includes automated rolling date ranges that adapt to the selected timeframe)
 """
 
+import math
 import os
 
 # Import necessary libraries for date calculation
@@ -431,3 +432,33 @@ _active = len(
 _vt = STRATEGY_RULES["entry_rules"].get("vote_threshold")
 if isinstance(_vt, dict) and "high" in _vt:
     _vt["high"] = max(1, min(_vt["high"], _active))
+
+
+class ConfigurationError(ValueError):
+    """Raised when configuration options are invalid."""
+
+
+def _validate_combination_logic(rules: dict) -> None:
+    entry = rules.get("entry_rules", {})
+    conditions = [c for c in entry.get("conditions", []) if c.get("is_active", True)]
+    n = len(conditions) or 1
+    logic = entry.get("combination_logic", "AND")
+    if isinstance(logic, dict):
+        return
+    logic_u = str(logic).upper()
+    if logic_u not in {"AND", "OR", "VOTE"}:
+        raise ConfigurationError(
+            f"combination_logic must be AND, OR, or VOTE (got {logic})"
+        )
+    entry["combination_logic"] = logic_u
+    if logic_u == "VOTE":
+        vt = entry.get("vote_threshold")
+        if isinstance(vt, dict):
+            return
+        if vt is None:
+            entry["vote_threshold"] = math.ceil(n / 2)
+        elif vt < 1 or vt > n:
+            raise ConfigurationError(f"vote_threshold {vt} must be between 1 and {n}")
+
+
+_validate_combination_logic(STRATEGY_RULES)

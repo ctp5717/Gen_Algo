@@ -647,9 +647,18 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
 
     monkeypatch.setattr(fitness, "MultiAssetFitnessEvaluator", DummyEval)
     monkeypatch.setattr(analysis, "_plot_multi_asset_overview", lambda *a, **k: None)
+
+    class _VBT:
+        __version__ = "0.0.0"
+        __file__ = __file__
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "vectorbt", _VBT)
+    monkeypatch.setattr(analysis, "vbt", _VBT)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {}, group)
+    analysis._run_multi_asset_analysis([], {}, group, [])
     fname = tmp_path / "multi_asset_stats_1d_2024-01-31.csv"
     assert fname.exists()
     df = pd.read_csv(fname)
@@ -664,6 +673,8 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
         "max_drawdown",
         "per_asset_min_trades",
         "reason",
+        "reason_detail",
+        "reason_trace",
     ]
     scores = df["score"].tolist()
     assert scores == sorted(scores, reverse=True)

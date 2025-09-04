@@ -172,7 +172,9 @@ def _combine_signals(
     )
 
 
-def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
+def process_strategy_rules(
+    ohlc_data: pd.DataFrame, rules: dict, collect_counts: bool = False
+) -> pd.Series | tuple[pd.Series, dict]:
     """Generate entry signals based on configured rules.
 
     Parameters
@@ -181,11 +183,13 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
         OHLCV data.
     rules : dict
         Strategy rules from ``config.STRATEGY_RULES``.
+    collect_counts : bool, optional
+        If ``True``, also return per-condition true counts.
 
     Returns
     -------
-    pd.Series
-        Boolean Series representing combined entry signals.
+    pd.Series or (pd.Series, dict)
+        Combined entry signals and optionally per-condition counts.
     """
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
@@ -204,6 +208,7 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
         )
 
     signals = []
+    counts = {} if collect_counts else None
 
     for rule in conditions:
         if not rule.get("is_active", True):
@@ -291,20 +296,37 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
                             )
                         target_series = df.iloc[:, 0]
             elif "macd" in indicator_name:
-                df = indicator_output.filter(
-                    regex=r"(?i)\bmacdh\b|\bmacd[_-]?hist(?:ogram)?\b"
-                )
-                if df.shape[1] == 0:
-                    avail = ", ".join(map(str, indicator_output.columns[:6]))
-                    if indicator_output.shape[1] > 6:
-                        avail += ", ..."
-                    raise KeyError(
-                        "MACD histogram not found (looked for MACDh*/MACD_Hist*). "
-                        f"Available: {avail}"
+                if isinstance(indicator_output, pd.Series):
+                    target_series = indicator_output
+                else:
+                    hist = indicator_output.filter(
+                        regex=r"(?i)macdh(?:\b|_)|macd[_-]?hist(?:ogram)?"
                     )
-                target_series = df.iloc[:, 0]
+                    if hist.shape[1]:
+                        target_series = hist.iloc[:, 0]
+                    else:
+                        macd_line = indicator_output.filter(
+                            regex=r"(?i)^macd(?:\b|_)(?!h|s)"
+                        )
+                        if macd_line.shape[1]:
+                            target_series = macd_line.iloc[:, 0]
+                        elif indicator_output.shape[1]:
+                            target_series = indicator_output.iloc[:, 0]
+                        else:
+                            raise KeyError(
+                                "No MACD columns found; available: "
+                                f"{list(indicator_output.columns)}"
+                            )
             else:
-                target_series = indicator_output.iloc[:, 0]
+                if isinstance(indicator_output, pd.Series):
+                    target_series = indicator_output
+                elif indicator_output.shape[1]:
+                    target_series = indicator_output.iloc[:, 0]
+                else:
+                    raise KeyError(
+                        "Indicator produced no columns; available: "
+                        f"{list(indicator_output.columns)}"
+                    )
 
         individual_signal = pd.Series(False, index=ohlc_data.index)
         if "price" in condition_type:
@@ -317,9 +339,22 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
             )
 
         signals.append(individual_signal)
+        if collect_counts:
+            name = rule.get("rule_name") or f"{indicator_name}:{condition_type}" + (
+                f":{condition_logic.get('column')}"
+                if condition_logic.get("column")
+                else ""
+            )
+            val = (
+                individual_signal.fillna(False)
+                if treat_nan_as_false
+                else individual_signal
+            )
+            counts[name] = int(pd.Series(val, dtype="boolean").sum(skipna=True))
 
     if not signals:
-        return pd.Series(False, index=ohlc_data.index)
+        empty = pd.Series(False, index=ohlc_data.index)
+        return (empty, {}) if collect_counts else empty
 
     if len(signals) == 1:
         if combination_logic == "VOTE":
@@ -329,8 +364,12 @@ def process_strategy_rules(ohlc_data: pd.DataFrame, rules: dict) -> pd.Series:
                     "vote_threshold must be between 1 and the number of active conditions"
                 )
         single = signals[0]
-        return single.fillna(False) if treat_nan_as_false else single.astype("boolean")
+        result = (
+            single.fillna(False) if treat_nan_as_false else single.astype("boolean")
+        )
+        return (result, counts) if collect_counts else result
 
-    return _combine_signals(
+    combined = _combine_signals(
         signals, combination_logic, vote_threshold, treat_nan_as_false
     )
+    return (combined, counts) if collect_counts else combined
