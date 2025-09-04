@@ -94,6 +94,8 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         "plt",
         types.SimpleNamespace(
             ion=lambda: ion_called.setdefault("ion", True),
+            savefig=lambda *a, **k: None,
+            close=lambda *a, **k: None,
         ),
     )
 

@@ -5,6 +5,7 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+import traceback
 import warnings
 from collections import Counter
 
@@ -73,10 +74,20 @@ def print_floor_failures(counter: Counter):
 
 
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
-    """
-    Injects the gene values from a GA solution into a copy of the strategy rules.
-    """
-    injected_rules = copy.deepcopy(base_rules)
+    """Inject gene values into a copy of strategy rules, resolving defaults."""
+
+    def _resolve_defaults(obj):
+        if isinstance(obj, dict):
+            if "gene" in obj:
+                if "options" in obj:
+                    return obj.get("options", [None])[0]
+                return obj.get("low", obj.get("high"))
+            return {k: _resolve_defaults(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_resolve_defaults(v) for v in obj]
+        return obj
+
+    injected_rules = _resolve_defaults(copy.deepcopy(base_rules))
     for i, gene_value in enumerate(solution):
         gene_info = gene_map.get(i)
         if not gene_info:
@@ -254,9 +265,12 @@ class MultiAssetFitnessEvaluator:
                 "trades": 0,
                 "total_return": None,
                 "equity_curve": pd.Series(dtype=float),
+                "signal_counts": {},
             }
 
-        entries = engine.process_strategy_rules(ohlc, rules)
+        entries, signal_counts = engine.process_strategy_rules(
+            ohlc, rules, collect_counts=True
+        )
 
         # Record the actual executed trades using vectorbt.
         exit_rules = rules.get("exit_rules", {})
@@ -303,6 +317,7 @@ class MultiAssetFitnessEvaluator:
             "trades": trades,
             "total_return": stats.get("Total Return [%]"),
             "equity_curve": portfolio.value(),
+            "signal_counts": signal_counts,
         }
 
     # ------------------------------------------------------------------
@@ -316,21 +331,15 @@ class MultiAssetFitnessEvaluator:
             total_trades = 0
             assets_traded = 0
             asset_weights_cfg = self.settings.get("asset_weights") or {}
+            verbose = bool(self.settings.get("verbose_asset_errors"))
 
             for ticker in sorted(self.group_data):
                 ohlc = self.group_data[ticker]
                 eval_reason = None
+                reason_detail = None
+                reason_trace = None
                 if ohlc is None or ohlc.empty:
                     eval_reason = "insufficient_coverage"
-                try:
-                    stats = self._evaluate_single_asset(ohlc, rules)
-                except Exception as e:
-                    # If a single asset fails to evaluate we shouldn't abort
-                    # the entire multi-asset evaluation.  Treat it as having
-                    # zero trades and log the issue for debugging purposes.
-                    if self.settings.get("verbose_asset_errors"):
-                        print(f"Error evaluating asset {ticker}: {e}")
-                    eval_reason = "evaluation_error"
                     stats = {
                         "sortino": None,
                         "profit_factor": None,
@@ -338,7 +347,29 @@ class MultiAssetFitnessEvaluator:
                         "trades": 0,
                         "total_return": None,
                         "equity_curve": pd.Series(dtype=float),
+                        "signal_counts": {},
                     }
+                else:
+                    try:
+                        stats = self._evaluate_single_asset(ohlc, rules)
+                    except Exception as e:
+                        if verbose:
+                            print(f"Error evaluating asset {ticker}: {e}")
+                            tb = traceback.format_exception(
+                                e.__class__, e, e.__traceback__
+                            )
+                            reason_trace = (tb[0].strip(), tb[-1].strip())
+                        eval_reason = "evaluation_error"
+                        reason_detail = repr(e)
+                        stats = {
+                            "sortino": None,
+                            "profit_factor": None,
+                            "max_drawdown": None,
+                            "trades": 0,
+                            "total_return": None,
+                            "equity_curve": pd.Series(dtype=float),
+                            "signal_counts": {},
+                        }
 
                 trades = stats.get("trades", 0)
                 total_trades += trades
@@ -358,20 +389,27 @@ class MultiAssetFitnessEvaluator:
                         val = self.settings.get("zero_trade_penalty", -1.0)
                         per_asset_metrics.append(val)
                         included_assets.append(ticker)
-                        per_asset_details[ticker] = {
+                        details = {
                             **stats,
                             "score": val,
                             "included": True,
                             "asset_weight": weight,
                             "profit_factor_capped": pf_capped,
                         }
+                        if reason_detail:
+                            details["reason_detail"] = reason_detail
+                        if reason_trace:
+                            details["reason_trace"] = " | ".join(
+                                str(x) for x in reason_trace
+                            )
+                        per_asset_details[ticker] = details
                     else:
                         reason = eval_reason or (
                             "ignored_zero_trades"
                             if trades == 0
                             else "below_per_asset_min_trades"
                         )
-                        per_asset_details[ticker] = {
+                        details = {
                             **stats,
                             "score": None,
                             "included": False,
@@ -379,6 +417,13 @@ class MultiAssetFitnessEvaluator:
                             "profit_factor_capped": pf_capped,
                             "reason": reason,
                         }
+                        if reason_detail:
+                            details["reason_detail"] = reason_detail
+                        if reason_trace:
+                            details["reason_trace"] = " | ".join(
+                                str(x) for x in reason_trace
+                            )
+                        per_asset_details[ticker] = details
                         continue
                 else:
                     metric_type = self.settings.get("metric", "composite")
@@ -413,13 +458,20 @@ class MultiAssetFitnessEvaluator:
 
                     per_asset_metrics.append(val)
                     included_assets.append(ticker)
-                    per_asset_details[ticker] = {
+                    details = {
                         **stats,
                         "score": val,
                         "included": True,
                         "asset_weight": weight,
                         "profit_factor_capped": pf_capped,
                     }
+                    if reason_detail:
+                        details["reason_detail"] = reason_detail
+                    if reason_trace:
+                        details["reason_trace"] = " | ".join(
+                            str(x) for x in reason_trace
+                        )
+                    per_asset_details[ticker] = details
 
             if not per_asset_metrics:
                 poor_score = self.settings.get("poor_score", -999.0)

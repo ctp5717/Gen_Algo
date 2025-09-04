@@ -4,6 +4,7 @@
 Main Application Orchestrator for the GA Trading Framework
 (This version includes a progress indicator for the GA run)
 """
+import copy
 import os
 import pprint
 import time  # <-- NEW: Import the time module
@@ -17,6 +18,7 @@ import pygad
 
 import config
 import data_loader
+import strategy_engine
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
@@ -60,6 +62,47 @@ def on_generation(ga_instance):
         end="\r",
         flush=True,
     )
+
+
+def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
+    """Compute indicators once to ensure required components exist."""
+    print("Performing indicator preflight...")
+    rules_pf = copy.deepcopy(rules)
+    entry = rules_pf.setdefault("entry_rules", {})
+    logic = entry.get("combination_logic", "AND")
+    if isinstance(logic, dict):
+        entry["combination_logic"] = "AND"
+    vt = entry.get("vote_threshold")
+    if isinstance(vt, dict):
+        entry["vote_threshold"] = vt.get("low", vt.get("high"))
+
+    for cond in entry.get("conditions", []):
+        ind = cond.get("indicator")
+        func = strategy_engine.INDICATOR_MAPPING.get(ind)
+        if func is None:
+            continue
+        params_pf = {}
+        for p, val in cond.get("params", {}).items():
+            if isinstance(val, dict) and "gene" in val:
+                if "options" in val:
+                    params_pf[p] = val.get("options", [None])[0]
+                else:
+                    params_pf[p] = val.get("low", val.get("high"))
+            else:
+                params_pf[p] = val
+        cond["params"] = params_pf
+        try:
+            out = func(sample, **params_pf)
+        except Exception:
+            continue
+        cols = list(out.columns) if isinstance(out, pd.DataFrame) else []
+        print(f"{ind}: {cols}")
+    try:
+        strategy_engine.process_strategy_rules(sample, rules_pf)
+    except KeyError as e:
+        raise SystemExit(f"Indicator preflight failed: {e}") from e
+    except Exception:
+        pass
 
 
 def main():
@@ -166,6 +209,13 @@ def main():
             config.VALIDATION_PERIOD["start"] : config.VALIDATION_PERIOD["end"]
         ]
 
+    sample = (
+        next(iter(training_data.values()))
+        if isinstance(training_data, dict)
+        else training_data
+    )
+    indicator_preflight(sample, config.STRATEGY_RULES)
+
     print("Parsing strategy rules to identify genes for optimization...")
     gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
     if not gene_space:
@@ -241,18 +291,24 @@ def main():
             print(f"  - {gene_name}: {gene_value:.4f}")
     print("\nDisplaying GA fitness evolution plot...")
     plt.ion()
+    fig, ax = plt.subplots()
     if getattr(ga_instance, "best_solutions_fitness", None):
-        plt.plot(ga_instance.best_solutions_fitness, label="Best Fitness")
-        handles, labels = plt.gca().get_legend_handles_labels()
+        ax.plot(ga_instance.best_solutions_fitness, label="Best Fitness")
+        handles, labels = ax.get_legend_handles_labels()
         if handles:
-            plt.legend(handles, labels)
-        plt.title("GA Fitness Evolution")
-        plt.xlabel("Generation")
-        plt.ylabel("Fitness")
-        plt.show()
+            ax.legend(handles, labels)
+        ax.set_title("GA Fitness Evolution")
+        ax.set_xlabel("Generation")
+        ax.set_ylabel("Fitness")
+    fig_path = "ga_fitness_evolution.png"
+    plt.savefig(fig_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    artifacts = [fig_path]
 
     try:
-        analysis.run_champion_analysis(best_solution, gene_map, validation_data)
+        analysis.run_champion_analysis(
+            best_solution, gene_map, validation_data, artifacts
+        )
     except Exception as e:
         print(f"\nAn error occurred during the analysis phase: {e}")
         traceback.print_exc()

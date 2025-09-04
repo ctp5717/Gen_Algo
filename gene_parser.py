@@ -20,6 +20,13 @@ def parse_genes_from_config(
     gene_types: List[type] = []
     gene_index = 0
 
+    entry_rules = rules.get("entry_rules", {})
+    active_conditions = [
+        c for c in entry_rules.get("conditions", []) if c.get("is_active", True)
+    ]
+    n_active = len(active_conditions) or 1
+    comb_logic = entry_rules.get("combination_logic", "AND")
+
     def find_genes(sub_config: Any, path: List[Any]) -> None:
         nonlocal gene_index
         # Skip entire branch if rule is explicitly inactive
@@ -32,6 +39,12 @@ def parse_genes_from_config(
                 if isinstance(value, dict) and "gene" in value:
                     gene_info = value
                     gene_name = gene_info["gene"]
+
+                    if key == "vote_threshold" and not (
+                        isinstance(comb_logic, dict)
+                        or str(comb_logic).upper() == "VOTE"
+                    ):
+                        continue
 
                     if "options" in gene_info:
                         space_item = {"options": gene_info["options"]}
@@ -46,10 +59,23 @@ def parse_genes_from_config(
                             if isinstance(gene_info.get("step", 1.0), int)
                             else float
                         )
-                        space_item = {
-                            "low": gene_info["low"],
-                            "high": gene_info["high"],
-                        }
+                        if key == "vote_threshold":
+                            if isinstance(comb_logic, dict):
+                                high = gene_info.get("high")
+                                low = gene_info.get("low", 1)
+                            else:
+                                high = gene_info.get("high")
+                                low = gene_info.get("low", 1)
+                                high = (
+                                    min(high, n_active)
+                                    if high is not None
+                                    else n_active
+                                )
+                                low = max(1, low)
+                        else:
+                            high = gene_info.get("high")
+                            low = gene_info.get("low", 1)
+                        space_item = {"low": low, "high": high}
                         if "step" in gene_info:
                             space_item["step"] = gene_info["step"]
 

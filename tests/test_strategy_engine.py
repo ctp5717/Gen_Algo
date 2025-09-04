@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -157,6 +158,40 @@ def test_combination_logic_variants(monkeypatch):
         data, rules_vote_explicit
     )
     pd.testing.assert_series_equal(result_vote_explicit, expected_vote_explicit)
+
+
+def test_vote_default_threshold_even(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020", periods=2))
+
+    def make_ind(vals):
+        return lambda ohlc, period=None: pd.Series(vals, index=ohlc.index)
+
+    a = make_ind([1, 0])
+    b = make_ind([0, 1])
+    c = make_ind([1, 1])
+    d = make_ind([0, 0])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", b)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "c", c)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "d", d)
+
+    cond_template = {
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+    conds = []
+    for name in ["a", "b", "c", "d"]:
+        cond = {"indicator": name, **cond_template}
+        conds.append(cond)
+    rules = {"entry_rules": {"combination_logic": "VOTE", "conditions": conds}}
+    result = strategy_engine.process_strategy_rules(data, rules)
+    expected = (
+        (a(data) > 0.5).astype(int)
+        + (b(data) > 0.5).astype(int)
+        + (c(data) > 0.5).astype(int)
+        + (d(data) > 0.5).astype(int)
+    ) >= 2
+    pd.testing.assert_series_equal(result, expected)
 
 
 def test_combination_logic_invalid(monkeypatch):
@@ -814,14 +849,24 @@ def test_parameter_type_validation():
         )
 
 
-def test_macd_missing_histogram(monkeypatch):
+@pytest.mark.parametrize(
+    "macd_output",
+    [
+        pd.DataFrame({"MACDh_1": [-1, 1], "MACD": [-1, -1]}),
+        pd.DataFrame({"MACD": [-1, 1], "MACDs": [-1, -1]}),
+        pd.DataFrame({"MACDs": [-1, 1], "Other": [-1, -1]}),
+        pd.Series([-1, 1], name="MACDh_1"),
+    ],
+    ids=["hist", "line", "first", "series"],
+)
+def test_macd_component_selection(monkeypatch, macd_output):
     data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
 
-    def macd_bad(df, fast, slow, signal):
-        return pd.DataFrame({"MACD": [0, 0]})
+    def macd_func(df, fast, slow, signal):
+        return macd_output
 
-    monkeypatch.setattr(indicator_library, "calculate_macd", macd_bad)
-    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_bad)
+    monkeypatch.setattr(indicator_library, "calculate_macd", macd_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_func)
 
     rules = {
         "entry_rules": {
@@ -835,20 +880,21 @@ def test_macd_missing_histogram(monkeypatch):
         }
     }
 
-    with pytest.raises(KeyError, match="MACDh"):
-        strategy_engine.process_strategy_rules(data, rules)
+    res = strategy_engine.process_strategy_rules(data, rules)
+    expected = pd.Series([False, True], index=data.index)
+    pd.testing.assert_series_equal(res.astype(bool), expected, check_names=False)
 
 
-def test_macd_histogram_variants_and_column_hint(monkeypatch):
+def test_macd_empty_dataframe(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
 
-    def macd_alt(df, fast, slow, signal):
-        return pd.DataFrame({"MACD_Hist": [-1, 1], "MACD": [-1, 1], "Other": [0, 0]})
+    def macd_empty(df, fast, slow, signal):
+        return pd.DataFrame()
 
-    monkeypatch.setattr(indicator_library, "calculate_macd", macd_alt)
-    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_alt)
+    monkeypatch.setattr(indicator_library, "calculate_macd", macd_empty)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_empty)
 
-    rules_default = {
+    rules = {
         "entry_rules": {
             "conditions": [
                 {
@@ -859,12 +905,19 @@ def test_macd_histogram_variants_and_column_hint(monkeypatch):
             ]
         }
     }
-    res_default = strategy_engine.process_strategy_rules(data, rules_default)
-    pd.testing.assert_series_equal(
-        res_default.astype(bool),
-        pd.Series([False, True], index=data.index),
-        check_names=False,
-    )
+
+    with pytest.raises(KeyError, match="available"):
+        strategy_engine.process_strategy_rules(data, rules)
+
+
+def test_macd_column_hint(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
+
+    def macd_alt(df, fast, slow, signal):
+        return pd.DataFrame({"MACD_Hist": [-1, 1], "MACD": [-1, 1]})
+
+    monkeypatch.setattr(indicator_library, "calculate_macd", macd_alt)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_alt)
 
     rules_column = {
         "entry_rules": {
@@ -882,11 +935,8 @@ def test_macd_histogram_variants_and_column_hint(monkeypatch):
         }
     }
     res_column = strategy_engine.process_strategy_rules(data, rules_column)
-    pd.testing.assert_series_equal(
-        res_column.astype(bool),
-        pd.Series([False, True], index=data.index),
-        check_names=False,
-    )
+    expected = pd.Series([False, True], index=data.index)
+    pd.testing.assert_series_equal(res_column.astype(bool), expected, check_names=False)
 
     rules_missing = {
         "entry_rules": {
@@ -905,3 +955,31 @@ def test_macd_histogram_variants_and_column_hint(monkeypatch):
     }
     with pytest.raises(KeyError, match="NOPE"):
         strategy_engine.process_strategy_rules(data, rules_missing)
+
+
+def test_signal_counts_name_and_nan_policy(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3]})
+
+    def fake_indicator(df, **p):
+        return pd.Series([1, np.nan, 2])
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "foo", fake_indicator)
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "foo",
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+    res, counts = strategy_engine.process_strategy_rules(
+        data, rules, collect_counts=True
+    )
+    assert counts == {"foo:indicator_is_above_value": 2}
+    rules["entry_rules"]["treat_nan_as_false"] = False
+    res, counts = strategy_engine.process_strategy_rules(
+        data, rules, collect_counts=True
+    )
+    assert counts == {"foo:indicator_is_above_value": 2}
