@@ -258,6 +258,8 @@ MULTI_ASSET = {
     "per_asset_min_trades": 10,
     # Minimal number of assets that must be included
     "min_included_assets": 4,
+    # Annualisation base for trade floor scaling
+    "trading_days_per_year": 252,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 36,
     # Verbose logging of per-asset evaluation errors (can be noisy)

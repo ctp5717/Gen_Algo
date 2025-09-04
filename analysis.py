@@ -8,6 +8,7 @@ Analysis & Reporting Module
 import hashlib
 import json
 import os
+import re
 import subprocess
 import traceback
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ import fitness
 import strategy_engine as engine
 import trade_floor
 from deps import ensure_real_vectorbt
+from run_metadata import merge_run_metadata
 
 
 def _get_commit_hash() -> str:
@@ -110,8 +112,51 @@ def _write_run_metadata(
     }
     if extra:
         metadata.update(extra)
-    with open("run_metadata.json", "w") as fh:
-        json.dump(metadata, fh, indent=2)
+    merge_run_metadata("run_metadata.json", metadata)
+
+
+def _canonical_rule_slugs(rules: dict):
+    conds = rules.get("entry_rules", {}).get("conditions", [])
+    slugs = []
+    mapping = {}
+    used = set()
+    for i, rule in enumerate(conds):
+        name = engine.canonical_rule_label(rule)
+        base = re.sub(r"[^0-9a-z]+", "_", name.lower()).strip("_")
+        slug = base
+        while slug in used:
+            slug = f"{base}__{i}"
+        used.add(slug)
+        slugs.append(slug)
+        mapping[slug] = name
+    return slugs, mapping
+
+
+def _build_per_asset_counts(per_asset_signal_counts, rules):
+    slugs, mapping = _canonical_rule_slugs(rules)
+    entry = rules.get("entry_rules", {})
+    combo = entry.get("combination_logic")
+    vt = entry.get("vote_threshold")
+    tnaf = entry.get("treat_nan_as_false", True)
+    rows = []
+    for asset in sorted(per_asset_signal_counts):
+        counts = per_asset_signal_counts[asset]
+        row = {
+            "asset": asset,
+            "combination_logic": combo,
+            "vote_threshold": vt,
+            "treat_nan_as_false": tnaf,
+        }
+        for slug in slugs:
+            row[f"count_{slug}"] = counts.get(mapping[slug], 0)
+        rows.append(row)
+    columns = [
+        "asset",
+        "combination_logic",
+        "vote_threshold",
+        "treat_nan_as_false",
+    ] + [f"count_{s}" for s in slugs]
+    return pd.DataFrame(rows, columns=columns)
 
 
 def run_champion_analysis(
@@ -244,9 +289,22 @@ def _run_multi_asset_analysis(
     settings = dict(config.MULTI_ASSET)
     start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
     end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+    per_asset_base = settings.get("per_asset_min_trades")
+    if per_asset_base:
+        floor_pa, info_pa = trade_floor.scale_floor(
+            per_asset_base, start, end, settings.get("trading_days_per_year", 252)
+        )
+        settings["per_asset_min_trades"] = floor_pa
+        settings["per_asset_floor_info"] = info_pa
+        print(
+            f"Per-asset floor: base={per_asset_base} → scaled={floor_pa} "
+            f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+        )
     rate = settings.get("min_total_trades_per_year")
     if rate:
-        floor, info = trade_floor.scale_floor(rate, start, end)
+        floor, info = trade_floor.scale_floor(
+            rate, start, end, settings.get("trading_days_per_year", 252)
+        )
         settings["min_total_trades"] = floor
         print(f"Scaled min_total_trades (validation): {floor} | info={info}")
     end_str = end.strftime("%Y-%m-%d")
@@ -334,6 +392,7 @@ def _run_multi_asset_analysis(
                 "reason_trace": d.get("reason_trace", ""),
             }
         )
+    counts_df = _build_per_asset_counts(per_asset_signal_counts, rules)
     if rows:
         df = pd.DataFrame(rows).sort_values(
             by=["score"],
@@ -341,9 +400,14 @@ def _run_multi_asset_analysis(
             ascending=False,
         )
         fname = f"multi_asset_stats_{config.TIMEFRAME}_{end_str}.csv"
-        if charts_cfg.get("save_csv", True):
+        save_csv = charts_cfg.get("save_csv", True)
+        if save_csv:
             df.to_csv(fname, index=False)
             print(f"Saved per-asset stats: {fname}")
+        counts_fname = f"per_asset_counts_{config.TIMEFRAME}_{end_str}.csv"
+        if save_csv:
+            counts_df.to_csv(counts_fname, index=False)
+            print(f"Saved per-asset counts: {counts_fname}")
         summary = {
             "F": F,
             "mu": mu,
@@ -372,6 +436,10 @@ def _run_multi_asset_analysis(
         with open(jf, "w") as fh:
             json.dump(summary, fh, indent=2)
         print(f"Saved run summary: {jf}")
+        written = [jf]
+        if save_csv:
+            written.extend([fname, counts_fname])
+        artifacts.extend(written)
     _plot_multi_asset_overview(
         per_asset_scores,
         per_asset_trades,
@@ -391,8 +459,6 @@ def _run_multi_asset_analysis(
         settings.get("min_total_trades"),
     )
 
-    if rows:
-        artifacts.extend([fname, jf])
     extra = {
         "combination_logic": combo,
         "vote_threshold": vt,
