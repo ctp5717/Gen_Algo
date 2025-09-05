@@ -65,6 +65,25 @@ def test_process_strategy_rules_simple(monkeypatch):
     assert signal.all()
 
 
+def test_generate_signal_from_value_validates_value_param():
+    series = pd.Series([1, 2, 3])
+
+    with pytest.raises(ValueError, match="'value' must be provided"):
+        strategy_engine._generate_signal_from_value(
+            series, {"type": "indicator_is_above_value"}
+        )
+
+    with pytest.raises(ValueError, match="'value' must be provided"):
+        strategy_engine._generate_signal_from_value(
+            series, {"type": "indicator_is_above_value", "value": None}
+        )
+
+    with pytest.raises(TypeError, match="int or float"):
+        strategy_engine._generate_signal_from_value(
+            series, {"type": "indicator_is_above_value", "value": "bad"}
+        )
+
+
 def test_combination_logic_variants(monkeypatch):
     data = pd.DataFrame(
         {

@@ -111,8 +111,14 @@ def _generate_signal_from_value(
     """
     Generates a boolean signal based on a condition between an indicator and a static value.
     """
-    condition_type = condition.get("type")
     value = condition.get("value")
+    if value is None:
+        raise ValueError("'value' must be provided for value comparison conditions")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise TypeError(
+            "'value' must be an int or float for value comparison conditions"
+        )
+    condition_type = condition.get("type")
 
     if condition_type == "indicator_is_above_value":
         return indicator_series > value
