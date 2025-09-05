@@ -84,6 +84,34 @@ def test_generate_signal_from_value_validates_value_param():
         )
 
 
+def test_generate_signal_dispatch_and_unknown(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020", periods=2))
+    indicator = pd.Series([0, 0], index=data.index)
+
+    called: dict[str, bool] = {}
+
+    def fake(price, band):  # noqa: ANN001
+        called["run"] = True
+        return pd.Series([True, False], index=price.index)
+
+    monkeypatch.setitem(
+        strategy_engine.CONDITION_FUNCTIONS, "price_is_above_upper_band", fake
+    )
+
+    res = strategy_engine._generate_signal(
+        data, indicator, {"type": "price_is_above_upper_band"}
+    )
+
+    assert called.get("run") is True
+    pd.testing.assert_series_equal(
+        res.astype(bool), pd.Series([True, False], index=data.index)
+    )
+
+    with pytest.warns(UserWarning, match="Unknown condition type 'unknown'"):
+        unknown = strategy_engine._generate_signal(data, indicator, {"type": "unknown"})
+    assert not unknown.any()
+
+
 def test_combination_logic_variants(monkeypatch):
     data = pd.DataFrame(
         {
