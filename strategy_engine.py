@@ -210,7 +210,13 @@ def process_strategy_rules(
     """
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
-    combination_logic = entry_rules.get("combination_logic", "AND").upper()
+    combination_logic = entry_rules.get("combination_logic", "AND")
+    if isinstance(combination_logic, dict):
+        combination_logic = combination_logic.get(
+            "low",
+            combination_logic.get("high", combination_logic.get("options", [None])[0]),
+        )
+    combination_logic = str(combination_logic).upper()
     if combination_logic not in {"AND", "OR", "VOTE"}:
         raise ValueError(
             f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
