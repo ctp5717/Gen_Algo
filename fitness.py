@@ -5,6 +5,9 @@ Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
 import copy
+import logging
+import traceback
+import warnings
 from collections import Counter
 
 import numpy as np
@@ -13,6 +16,10 @@ import vectorbt as vbt
 
 import config
 import strategy_engine as engine
+import trade_floor
+
+logger = logging.getLogger(__name__)
+MACD_REPAIR_COUNT = 0
 
 
 def weighted_mean_std(values, weights):
@@ -70,11 +77,48 @@ def print_floor_failures(counter: Counter):
         print(f"Hard-floor failures: {dict(counter)}")
 
 
+def _normalize_macd_params(params: dict) -> dict:
+    """Repair MACD params so they satisfy fast < slow and 1 <= signal < slow."""
+
+    fast, slow, signal = (
+        params.get("fast"),
+        params.get("slow"),
+        params.get("signal"),
+    )
+    if fast is None or slow is None or signal is None:
+        raise ValueError("MACD params must be non-null: fast, slow, signal")
+    original = (fast, slow, signal)
+    if slow <= fast:
+        slow = fast + 1
+    if signal < 1:
+        signal = 1
+    if signal >= slow:
+        signal = slow - 1
+    fast, slow, signal = int(fast), int(slow), int(signal)
+    params.update({"fast": fast, "slow": slow, "signal": signal})
+    repaired = (fast, slow, signal)
+    if repaired != original:
+        logger.debug("Repaired MACD params %s -> %s", original, repaired)
+        global MACD_REPAIR_COUNT
+        MACD_REPAIR_COUNT += 1
+    return params
+
+
 def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
-    """
-    Injects the gene values from a GA solution into a copy of the strategy rules.
-    """
-    injected_rules = copy.deepcopy(base_rules)
+    """Inject gene values into a copy of strategy rules, resolving defaults."""
+
+    def _resolve_defaults(obj):
+        if isinstance(obj, dict):
+            if "gene" in obj:
+                if "options" in obj:
+                    return obj.get("options", [None])[0]
+                return obj.get("low", obj.get("high"))
+            return {k: _resolve_defaults(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_resolve_defaults(v) for v in obj]
+        return obj
+
+    injected_rules = _resolve_defaults(copy.deepcopy(base_rules))
     for i, gene_value in enumerate(solution):
         gene_info = gene_map.get(i)
         if not gene_info:
@@ -95,6 +139,19 @@ def _inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -
 
         current_level[param_key] = gene_value
 
+    def _apply_macd_repair(obj):
+        if isinstance(obj, dict):
+            if obj.get("indicator") == "macd":
+                params = obj.get("params", {})
+                if {"fast", "slow", "signal"} <= params.keys():
+                    _normalize_macd_params(params)
+            for val in obj.values():
+                _apply_macd_repair(val)
+        elif isinstance(obj, list):
+            for item in obj:
+                _apply_macd_repair(item)
+
+    _apply_macd_repair(injected_rules)
     return injected_rules
 
 
@@ -202,6 +259,9 @@ class MultiAssetFitnessEvaluator:
         self.settings = copy.deepcopy(defaults)
         if settings:
             self.settings.update(settings)
+        # Clamp min_included_assets to available data after alignment
+        mia = self.settings.get("min_included_assets", 1)
+        self.settings["min_included_assets"] = min(mia, len(group_data))
         self.last_details = {}
         self.floor_failures = Counter()
 
@@ -219,6 +279,20 @@ class MultiAssetFitnessEvaluator:
             self.settings.get("min_total_trades", 0) >= 0
         ), "min_total_trades must be >= 0"
 
+        # Warn if the configured floors are unreachable
+        min_group = self.settings.get("min_total_trades", 0)
+        need = self.settings.get("min_included_assets", 0) * self.settings.get(
+            "per_asset_min_trades", 0
+        )
+        if min_group and need > min_group:
+            if self.settings.get("trade_floor_policy") == "soft_penalty":
+                self.settings["min_total_trades"] = need
+            else:
+                warnings.warn(
+                    "min_total_trades < min_included_assets * per_asset_min_trades; run may be infeasible.",
+                    stacklevel=2,
+                )
+
     # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
@@ -235,9 +309,12 @@ class MultiAssetFitnessEvaluator:
                 "trades": 0,
                 "total_return": None,
                 "equity_curve": pd.Series(dtype=float),
+                "signal_counts": {},
             }
 
-        entries = engine.process_strategy_rules(ohlc, rules)
+        entries, signal_counts = engine.process_strategy_rules(
+            ohlc, rules, collect_counts=True
+        )
 
         # Record the actual executed trades using vectorbt.
         exit_rules = rules.get("exit_rules", {})
@@ -284,6 +361,7 @@ class MultiAssetFitnessEvaluator:
             "trades": trades,
             "total_return": stats.get("Total Return [%]"),
             "equity_curve": portfolio.value(),
+            "signal_counts": signal_counts,
         }
 
     # ------------------------------------------------------------------
@@ -297,21 +375,15 @@ class MultiAssetFitnessEvaluator:
             total_trades = 0
             assets_traded = 0
             asset_weights_cfg = self.settings.get("asset_weights") or {}
+            verbose = bool(self.settings.get("verbose_asset_errors"))
 
             for ticker in sorted(self.group_data):
                 ohlc = self.group_data[ticker]
                 eval_reason = None
+                reason_detail = None
+                reason_trace = None
                 if ohlc is None or ohlc.empty:
                     eval_reason = "insufficient_coverage"
-                try:
-                    stats = self._evaluate_single_asset(ohlc, rules)
-                except Exception as e:
-                    # If a single asset fails to evaluate we shouldn't abort
-                    # the entire multi-asset evaluation.  Treat it as having
-                    # zero trades and log the issue for debugging purposes.
-                    if self.settings.get("verbose_asset_errors"):
-                        print(f"Error evaluating asset {ticker}: {e}")
-                    eval_reason = "evaluation_error"
                     stats = {
                         "sortino": None,
                         "profit_factor": None,
@@ -319,12 +391,32 @@ class MultiAssetFitnessEvaluator:
                         "trades": 0,
                         "total_return": None,
                         "equity_curve": pd.Series(dtype=float),
+                        "signal_counts": {},
                     }
+                else:
+                    try:
+                        stats = self._evaluate_single_asset(ohlc, rules)
+                    except Exception as e:
+                        if verbose:
+                            print(f"Error evaluating asset {ticker}: {e}")
+                            tb = traceback.format_exception(
+                                e.__class__, e, e.__traceback__
+                            )
+                            reason_trace = (tb[0].strip(), tb[-1].strip())
+                        eval_reason = "evaluation_error"
+                        reason_detail = repr(e)
+                        stats = {
+                            "sortino": None,
+                            "profit_factor": None,
+                            "max_drawdown": None,
+                            "trades": 0,
+                            "total_return": None,
+                            "equity_curve": pd.Series(dtype=float),
+                            "signal_counts": {},
+                        }
 
                 trades = stats.get("trades", 0)
                 total_trades += trades
-                if trades > 0:
-                    assets_traded += 1
 
                 weight = asset_weights_cfg.get(ticker, 1.0)
                 pf_raw = stats.get("profit_factor")
@@ -339,20 +431,36 @@ class MultiAssetFitnessEvaluator:
                         val = self.settings.get("zero_trade_penalty", -1.0)
                         per_asset_metrics.append(val)
                         included_assets.append(ticker)
-                        per_asset_details[ticker] = {
+                        if trades > 0:
+                            assets_traded += 1
+                        details = {
                             **stats,
                             "score": val,
                             "included": True,
                             "asset_weight": weight,
                             "profit_factor_capped": pf_capped,
                         }
+                        if reason_detail:
+                            details["reason_detail"] = reason_detail
+                        if reason_trace:
+                            details["reason_trace"] = " | ".join(
+                                str(x) for x in reason_trace
+                            )
+                        per_asset_details[ticker] = details
                     else:
                         reason = eval_reason or (
                             "ignored_zero_trades"
                             if trades == 0
                             else "below_per_asset_min_trades"
                         )
-                        per_asset_details[ticker] = {
+                        info = self.settings.get("per_asset_floor_info")
+                        if info:
+                            reason += (
+                                "; Per-asset floor: base="
+                                f"{info['base_floor']} → scaled={info['ceil']} "
+                                f"(window={info['window_days']}d, base={info['trading_days_per_year']}d)"
+                            )
+                        details = {
                             **stats,
                             "score": None,
                             "included": False,
@@ -360,6 +468,13 @@ class MultiAssetFitnessEvaluator:
                             "profit_factor_capped": pf_capped,
                             "reason": reason,
                         }
+                        if reason_detail:
+                            details["reason_detail"] = reason_detail
+                        if reason_trace:
+                            details["reason_trace"] = " | ".join(
+                                str(x) for x in reason_trace
+                            )
+                        per_asset_details[ticker] = details
                         continue
                 else:
                     metric_type = self.settings.get("metric", "composite")
@@ -394,13 +509,22 @@ class MultiAssetFitnessEvaluator:
 
                     per_asset_metrics.append(val)
                     included_assets.append(ticker)
-                    per_asset_details[ticker] = {
+                    if trades > 0:
+                        assets_traded += 1
+                    details = {
                         **stats,
                         "score": val,
                         "included": True,
                         "asset_weight": weight,
                         "profit_factor_capped": pf_capped,
                     }
+                    if reason_detail:
+                        details["reason_detail"] = reason_detail
+                    if reason_trace:
+                        details["reason_trace"] = " | ".join(
+                            str(x) for x in reason_trace
+                        )
+                    per_asset_details[ticker] = details
 
             if not per_asset_metrics:
                 poor_score = self.settings.get("poor_score", -999.0)
@@ -593,7 +717,33 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
         mapping of ticker -> DataFrame.  Otherwise it is a single DataFrame.
     """
 
-    settings = getattr(config, "MULTI_ASSET", {})
+    settings = copy.deepcopy(getattr(config, "MULTI_ASSET", {}))
     if settings.get("enabled"):
+        start = pd.to_datetime(config.TRAINING_PERIOD["start"])
+        end = pd.to_datetime(config.TRAINING_PERIOD["end"])
+
+        per_asset_base = settings.get("per_asset_min_trades")
+        if per_asset_base:
+            floor_pa, info_pa = trade_floor.scale_floor(
+                per_asset_base,
+                start,
+                end,
+                settings.get("trading_days_per_year", 252),
+            )
+            settings["per_asset_min_trades"] = floor_pa
+            settings["per_asset_floor_info"] = info_pa
+            print(
+                "Per-asset floor: base="
+                f"{per_asset_base} → scaled={floor_pa} "
+                f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+            )
+
+        rate = settings.get("min_total_trades_per_year")
+        if rate:
+            floor, info = trade_floor.scale_floor(
+                rate, start, end, settings.get("trading_days_per_year", 252)
+            )
+            settings["min_total_trades"] = floor
+            settings["group_floor_info"] = info
         return MultiAssetFitnessEvaluator(ohlc_data, base_rules, gene_map, settings)
     return FitnessEvaluator(ohlc_data, base_rules, gene_map)

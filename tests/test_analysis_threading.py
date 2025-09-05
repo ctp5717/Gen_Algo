@@ -9,6 +9,10 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy deps
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
+try:  # use real vectorbt if available
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover - fallback to stub
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import analysis  # noqa: E402
 
@@ -90,6 +94,8 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
         "plt",
         types.SimpleNamespace(
             ion=lambda: ion_called.setdefault("ion", True),
+            savefig=lambda *a, **k: None,
+            close=lambda *a, **k: None,
         ),
     )
 

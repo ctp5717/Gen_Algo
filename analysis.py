@@ -8,6 +8,7 @@ Analysis & Reporting Module
 import hashlib
 import json
 import os
+import re
 import subprocess
 import traceback
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ import fitness
 import strategy_engine as engine
 import trade_floor
 from deps import ensure_real_vectorbt
+from run_metadata import merge_run_metadata
 
 
 def _get_commit_hash() -> str:
@@ -85,9 +87,15 @@ def _get_cache_hashes() -> dict:
     return hashes
 
 
-def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
+def _write_run_metadata(
+    start_time: datetime, artifacts: list[str], extra: dict | None = None
+) -> None:
     """Persist run metadata for reproducibility."""
     end_time = datetime.now(timezone.utc)
+
+    # Only include artifact paths that actually exist
+    existing_artifacts = [str(a) for a in artifacts if Path(a).exists()]
+
     metadata = {
         "artifact_version": "1.0.0",
         "start_time": start_time.isoformat(),
@@ -104,30 +112,87 @@ def _write_run_metadata(start_time: datetime, artifacts: list[str]) -> None:
                 "path": str(Path(vbt.__file__).resolve()),
             },
         },
-        "artifacts": artifacts,
+        "artifacts": existing_artifacts,
     }
-    with open("run_metadata.json", "w") as fh:
-        json.dump(metadata, fh, indent=2)
+    if extra:
+        metadata.update(extra)
+    merge_run_metadata("run_metadata.json", metadata)
 
 
-def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
+def _canonical_rule_slugs(rules: dict):
+    conds = rules.get("entry_rules", {}).get("conditions", [])
+    slugs = []
+    mapping = {}
+    used = set()
+    for i, rule in enumerate(conds):
+        name = engine.canonical_rule_label(rule)
+        base = re.sub(r"[^0-9a-z]+", "_", name.lower()).strip("_")
+        slug = base
+        while slug in used:
+            slug = f"{base}__{i}"
+        used.add(slug)
+        slugs.append(slug)
+        mapping[slug] = name
+    return slugs, mapping
+
+
+def _build_per_asset_counts(per_asset_signal_counts, rules):
+    slugs, mapping = _canonical_rule_slugs(rules)
+    entry = rules.get("entry_rules", {})
+    combo = entry.get("combination_logic")
+    vt = entry.get("vote_threshold")
+    tnaf = entry.get("treat_nan_as_false", True)
+    rows = []
+    for asset in sorted(per_asset_signal_counts):
+        counts = per_asset_signal_counts[asset]
+        row = {
+            "asset": asset,
+            "combination_logic": combo,
+            "vote_threshold": vt,
+            "treat_nan_as_false": tnaf,
+        }
+        for slug in slugs:
+            row[f"count_{slug}"] = counts.get(mapping[slug], 0)
+        rows.append(row)
+    columns = [
+        "asset",
+        "combination_logic",
+        "vote_threshold",
+        "treat_nan_as_false",
+    ] + [f"count_{s}" for s in slugs]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def run_champion_analysis(
+    best_solution: list,
+    gene_map: dict,
+    validation_data,
+    artifacts: list[str] | None = None,
+):
     """Run analysis on the champion solution using preloaded data."""
     ensure_real_vectorbt(Path(__file__).resolve().parent)
     start_time = datetime.now(timezone.utc)
+    artifacts = [] if artifacts is None else list(artifacts)
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
-        _run_multi_asset_analysis(best_solution, gene_map, validation_data)
+        _run_multi_asset_analysis(best_solution, gene_map, validation_data, artifacts)
         return
 
     print("\n\n--- Champion Strategy Analysis on Unseen Data ---")
     if validation_data is None or validation_data.empty:
-        _write_run_metadata(start_time, [])
+        _write_run_metadata(start_time, artifacts)
         return
 
     try:
         rules = fitness._inject_genes_into_rules(
             config.STRATEGY_RULES, gene_map, best_solution
         )
-        entries = engine.process_strategy_rules(validation_data, rules)
+        outputs = engine.process_strategy_rules(
+            validation_data, rules, collect_counts=True
+        )
+        if isinstance(outputs, tuple):
+            entries, signal_counts = outputs
+        else:  # pragma: no cover - backward compatibility
+            entries, signal_counts = outputs, {}
 
         if entries.sum() < 1:
             print("\nChampion strategy produced no trades in the validation period.")
@@ -171,7 +236,7 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
     except Exception as e:
         print(f"An error occurred during analysis backtest: {e}")
         traceback.print_exc()
-        _write_run_metadata(start_time, [])
+        _write_run_metadata(start_time, artifacts)
         return
 
     print("\n--- Validation Period Performance Stats ---")
@@ -199,24 +264,51 @@ def run_champion_analysis(best_solution: list, gene_map: dict, validation_data):
         title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
     )
     fig.show()
-    _write_run_metadata(start_time, [])
+    fig_path = "champion_equity.png"
+    plt.savefig(fig_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    artifacts.append(fig_path)
+    combo = rules.get("entry_rules", {}).get("combination_logic")
+    vt = rules.get("entry_rules", {}).get("vote_threshold")
+    extra = {
+        "combination_logic": combo,
+        "vote_threshold": vt,
+        "per_asset_signal_counts": {config.TICKER: signal_counts},
+    }
+    _write_run_metadata(start_time, artifacts, extra)
 
 
-def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: dict):
+def _run_multi_asset_analysis(
+    best_solution: list, gene_map: dict, group_data: dict, artifacts: list[str]
+):
     """Generate overview charts for multi-asset validation."""
     start_time = datetime.now(timezone.utc)
+    artifacts = list(artifacts)
     print("\n\n--- Multi-Asset Champion Analysis ---")
     if not group_data:
         print("No validation data available for asset group.")
-        _write_run_metadata(start_time, [])
+        _write_run_metadata(start_time, artifacts)
         return
 
     settings = dict(config.MULTI_ASSET)
     start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
     end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
+    per_asset_base = settings.get("per_asset_min_trades")
+    if per_asset_base:
+        floor_pa, info_pa = trade_floor.scale_floor(
+            per_asset_base, start, end, settings.get("trading_days_per_year", 252)
+        )
+        settings["per_asset_min_trades"] = floor_pa
+        settings["per_asset_floor_info"] = info_pa
+        print(
+            f"Per-asset floor: base={per_asset_base} → scaled={floor_pa} "
+            f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+        )
     rate = settings.get("min_total_trades_per_year")
     if rate:
-        floor, info = trade_floor.scale_floor(rate, start, end)
+        floor, info = trade_floor.scale_floor(
+            rate, start, end, settings.get("trading_days_per_year", 252)
+        )
         settings["min_total_trades"] = floor
         print(f"Scaled min_total_trades (validation): {floor} | info={info}")
     end_str = end.strftime("%Y-%m-%d")
@@ -225,6 +317,11 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
     )
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
+    rules = fitness._inject_genes_into_rules(
+        config.STRATEGY_RULES, gene_map, best_solution
+    )
+    combo = rules.get("entry_rules", {}).get("combination_logic")
+    vt = rules.get("entry_rules", {}).get("vote_threshold")
     fitness.print_floor_failures(getattr(evaluator, "floor_failures", {}))
 
     tickers = sorted(
@@ -278,9 +375,11 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
     w_map = details.get("asset_weights", {})
     if w_map:
         assert abs(sum(w_map.values()) - 1.0) < 1e-9
+    per_asset_signal_counts = {}
     for t in sorted(details["per_asset"]):
         d = details["per_asset"][t]
         included = d.get("included", False)
+        per_asset_signal_counts[t] = d.get("signal_counts", {})
         rows.append(
             {
                 "ticker": t,
@@ -293,16 +392,26 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
                 "max_drawdown": d.get("max_drawdown"),
                 "per_asset_min_trades": settings.get("per_asset_min_trades", 1),
                 "reason": d.get("reason", ""),
+                "reason_detail": d.get("reason_detail", ""),
+                "reason_trace": d.get("reason_trace", ""),
             }
         )
+    counts_df = _build_per_asset_counts(per_asset_signal_counts, rules)
     if rows:
         df = pd.DataFrame(rows).sort_values(
-            by=["score"], key=lambda s: s.fillna(-np.inf), ascending=False
+            by=["score"],
+            key=lambda s: pd.to_numeric(s, errors="coerce").fillna(-np.inf),
+            ascending=False,
         )
         fname = f"multi_asset_stats_{config.TIMEFRAME}_{end_str}.csv"
-        if charts_cfg.get("save_csv", True):
+        save_csv = charts_cfg.get("save_csv", True)
+        if save_csv:
             df.to_csv(fname, index=False)
             print(f"Saved per-asset stats: {fname}")
+        counts_fname = f"per_asset_counts_{config.TIMEFRAME}_{end_str}.csv"
+        if save_csv:
+            counts_df.to_csv(counts_fname, index=False)
+            print(f"Saved per-asset counts: {counts_fname}")
         summary = {
             "F": F,
             "mu": mu,
@@ -322,12 +431,19 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
             "seed": config.SEED,
             "ga_seed": os.environ.get("GA_SEED"),
             "commit_hash": _get_commit_hash(),
+            "combination_logic": combo,
+            "vote_threshold": vt,
+            "per_asset_signal_counts": per_asset_signal_counts,
         }
         jf = f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
         summary["run_metadata_file"] = "run_metadata.json"
         with open(jf, "w") as fh:
             json.dump(summary, fh, indent=2)
         print(f"Saved run summary: {jf}")
+        written = [jf]
+        if save_csv:
+            written.extend([fname, counts_fname])
+        artifacts.extend(written)
     _plot_multi_asset_overview(
         per_asset_scores,
         per_asset_trades,
@@ -347,8 +463,12 @@ def _run_multi_asset_analysis(best_solution: list, gene_map: dict, group_data: d
         settings.get("min_total_trades"),
     )
 
-    artifacts = [fname, jf] if rows else []
-    _write_run_metadata(start_time, artifacts)
+    extra = {
+        "combination_logic": combo,
+        "vote_threshold": vt,
+        "per_asset_signal_counts": per_asset_signal_counts,
+    }
+    _write_run_metadata(start_time, artifacts, extra)
 
 
 def _plot_multi_asset_overview(
