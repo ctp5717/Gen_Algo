@@ -234,10 +234,14 @@ MULTI_ASSET = {
     # Optional coarse tuning grid for lambda. If provided the tuner can try
     # multiple values and pick the best one.
     "lambda_grid": [0.1, 0.2, 0.3, 0.4, 0.5],
-    # Number of top lambda candidates to re-score after the initial sweep
-    "lambda_top_k": 3,
-    # Seeds used when re-scoring lambda candidates without mutation
-    "lambda_rescore_seeds": [SEED, SEED + 1, SEED + 2],
+    # Number of top candidates considered when applying the elbow heuristic
+    "lambda_shortlist_size": 3,
+    # Percentile threshold for the optional dispersion screen
+    "lambda_sigma_pctl": 0.75,
+    # Seeds used for the lambda sweep to smooth variance
+    "lambda_seeds": [SEED, SEED + 1, SEED + 2],
+    # Optional minimum average coverage fraction for lambda candidates
+    "lambda_coverage_min": None,
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
     # Profit factor cap to avoid outliers
