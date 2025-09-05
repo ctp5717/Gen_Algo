@@ -255,6 +255,46 @@ def test_combination_logic_case_insensitive(monkeypatch):
     )
 
 
+def test_combination_logic_gene_dict(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+
+    a = pd.Series([1, 0], index=data.index)
+    b = pd.Series([0, 1], index=data.index)
+
+    def ind_a(ohlc, period=None):
+        return a
+
+    def ind_b(ohlc, period=None):
+        return b
+
+    monkeypatch.setattr(indicator_library, "calculate_ema", ind_a)
+    monkeypatch.setattr(indicator_library, "calculate_rsi", ind_b)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "rsi", ind_b)
+
+    cond_a = {
+        "indicator": "ema",
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+    cond_b = {
+        "indicator": "rsi",
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": {"name": "cl", "options": ["AND", "OR"]},
+            "conditions": [cond_a, cond_b],
+        }
+    }
+
+    result = strategy_engine.process_strategy_rules(data, rules)
+    expected = (a > 0.5) & (b > 0.5)
+    pd.testing.assert_series_equal(result, expected)
+
+
 def test_single_condition_vote(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020", periods=2))
 
