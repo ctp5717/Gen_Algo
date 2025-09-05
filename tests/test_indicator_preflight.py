@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
+import fitness  # noqa: E402
 import main  # noqa: E402
 import strategy_engine  # noqa: E402
 
@@ -56,14 +57,56 @@ def test_indicator_preflight_combination_logic_gene_dict(monkeypatch):
             "conditions": [],
         }
     }
+
+    a = pd.Series([True, False, True], index=data.index)
+    b = pd.Series([False, True, True], index=data.index)
+
+    captured = {"logics": []}
+
+    def fake_process(ohlc, rule_set):  # noqa: ANN001
+        logic = rule_set["entry_rules"].get("combination_logic", "AND")
+        captured["logics"].append(logic)
+        return a | b if logic == "OR" else a & b
+
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
     monkeypatch.setattr(
         main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
     )
-    monkeypatch.setattr(
-        strategy_engine, "process_strategy_rules", lambda *a, **k: pd.Series([1, 0, 1])
-    )
+    monkeypatch.setattr(strategy_engine, "process_strategy_rules", fake_process)
+
     main.indicator_preflight(data, rules)
+    # preflight should not mutate the original gene dict
+    assert isinstance(rules["entry_rules"]["combination_logic"], dict)
+
+    gene_map = {0: {"path": ["entry_rules", "combination_logic"]}}
+    evaluator = fitness.FitnessEvaluator(data, rules, gene_map)
+
+    trade_counts = []
+
+    class DummyPF:
+        def __init__(self, trades):
+            self._trades = types.SimpleNamespace(count=lambda: trades)
+
+        def stats(self):
+            return {
+                "Sortino Ratio": 1.0,
+                "Profit Factor": 1.0,
+                "Max Drawdown [%]": 0.0,
+            }
+
+    def fake_from_signals(**kwargs):  # noqa: ANN003
+        trades = int(kwargs["entries"].sum())
+        trade_counts.append(trades)
+        return DummyPF(trades)
+
+    monkeypatch.setattr(
+        fitness.vbt.Portfolio, "from_signals", fake_from_signals, raising=False
+    )
+
+    evaluator(None, ["OR"], 0)
+
+    assert captured["logics"] == ["AND", "OR"]
+    assert trade_counts == [3]
 
 
 def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
