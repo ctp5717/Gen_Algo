@@ -446,7 +446,10 @@ def _validate_combination_logic(rules: dict) -> None:
     n = len(conditions) or 1
     logic = entry.get("combination_logic", "AND")
     if isinstance(logic, dict):
-        return
+        if "options" in logic:
+            # Gene-driven dict; allow GA to explore provided options
+            return
+        raise ConfigurationError("combination_logic must be AND, OR, or VOTE")
     logic_u = str(logic).upper()
     if logic_u not in {"AND", "OR", "VOTE"}:
         raise ConfigurationError(
