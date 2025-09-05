@@ -2,7 +2,7 @@ import json
 import math
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -160,7 +160,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
         lam_grid = config.MULTI_ASSET.get("lambda_grid")
         if lam_grid:
             print("\n-- Lambda Dispersion Grid --")
-            sweep_start = datetime.utcnow().isoformat()
+            sweep_start = datetime.now(timezone.utc).isoformat()
             sweep_rows = []
             seeds = (
                 config.MULTI_ASSET.get("lambda_seeds")
@@ -247,7 +247,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     f"σ_val={row['sigma_val_mean']:.4f} | elbow={row['elbow_dist']:.4f}"
                 )
 
-            sweep_end = datetime.utcnow().isoformat()
+            sweep_end = datetime.now(timezone.utc).isoformat()
             try:
                 git_sha = (
                     subprocess.check_output(
