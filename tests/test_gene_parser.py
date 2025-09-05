@@ -120,6 +120,38 @@ def test_vote_threshold_gene_absent_when_not_vote():
     assert all(info["name"] != "vt" for info in gene_map.values())
 
 
+def test_vote_threshold_gene_only_for_vote_or_option_logic():
+    vote_rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 3, "step": 1},
+            "conditions": [],
+        }
+    }
+    _, gm_vote, _ = parse_genes_from_config(vote_rules)
+    assert any(info["name"] == "vt" for info in gm_vote.values())
+
+    option_rules = {
+        "entry_rules": {
+            "combination_logic": {"gene": "logic", "options": ["AND", "OR"]},
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 3, "step": 1},
+            "conditions": [],
+        }
+    }
+    _, gm_opt, _ = parse_genes_from_config(option_rules)
+    assert any(info["name"] == "vt" for info in gm_opt.values())
+
+    and_rules = {
+        "entry_rules": {
+            "combination_logic": "AND",
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 3, "step": 1},
+            "conditions": [],
+        }
+    }
+    _, gm_and, _ = parse_genes_from_config(and_rules)
+    assert all(info["name"] != "vt" for info in gm_and.values())
+
+
 def test_vote_threshold_gene_bounds_update():
     rules = {
         "entry_rules": {
