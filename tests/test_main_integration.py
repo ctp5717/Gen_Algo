@@ -76,7 +76,27 @@ def test_main_runs(monkeypatch):
             ylabel=lambda *a, **k: None,
             title=lambda *a, **k: None,
             show=lambda *a, **k: None,
+            savefig=lambda *a, **k: None,
+            close=lambda *a, **k: None,
+            subplots=lambda *a, **k: (
+                types.SimpleNamespace(),
+                types.SimpleNamespace(
+                    plot=lambda *a, **k: None,
+                    get_legend_handles_labels=lambda: ([], []),
+                    legend=lambda *a, **k: None,
+                    set_title=lambda *a, **k: None,
+                    set_xlabel=lambda *a, **k: None,
+                    set_ylabel=lambda *a, **k: None,
+                ),
+            ),
         ),
+    )
+
+    monkeypatch.setattr(
+        main.config,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
     )
 
     class DummyEvaluator:
@@ -109,7 +129,19 @@ def test_main_runs(monkeypatch):
     monkeypatch.setattr(main.config, "SELECTED_ASSET_NAME", "Test", raising=False)
     monkeypatch.setattr(main.config, "TICKER", "TEST", raising=False)
     monkeypatch.setattr(main.config, "TIMEFRAME", "1d", raising=False)
-
+    monkeypatch.setattr(main.config, "AUTO_TUNE_ENABLED", False, raising=False)
+    monkeypatch.setattr(
+        main.config,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main.config,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
+    )
     # Execute main and ensure no exception is raised
     main.main()
 
@@ -171,7 +203,27 @@ def test_main_uses_tuner(monkeypatch):
             ylabel=lambda *a, **k: None,
             title=lambda *a, **k: None,
             show=lambda *a, **k: None,
+            savefig=lambda *a, **k: None,
+            close=lambda *a, **k: None,
+            subplots=lambda *a, **k: (
+                types.SimpleNamespace(),
+                types.SimpleNamespace(
+                    plot=lambda *a, **k: None,
+                    get_legend_handles_labels=lambda: ([], []),
+                    legend=lambda *a, **k: None,
+                    set_title=lambda *a, **k: None,
+                    set_xlabel=lambda *a, **k: None,
+                    set_ylabel=lambda *a, **k: None,
+                ),
+            ),
         ),
+    )
+
+    monkeypatch.setattr(
+        main.config,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
     )
 
     class DummyEvaluator:
@@ -321,6 +373,28 @@ def test_fitness_plot_non_blocking(monkeypatch):
 
         def show(self, *a, **k):
             pass
+
+        def savefig(self, *a, **k):
+            pass
+
+        def close(self, *a, **k):
+            pass
+
+        def subplots(self, *a, **k):
+            def _plot(*a, **k):
+                events["plot_called"] = True
+
+            return (
+                types.SimpleNamespace(),
+                types.SimpleNamespace(
+                    plot=_plot,
+                    get_legend_handles_labels=lambda: ([], []),
+                    legend=lambda *a, **k: None,
+                    set_title=lambda *a, **k: None,
+                    set_xlabel=lambda *a, **k: None,
+                    set_ylabel=lambda *a, **k: None,
+                ),
+            )
 
     monkeypatch.setattr(main, "plt", FakePlt())
 
