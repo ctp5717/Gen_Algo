@@ -964,28 +964,44 @@ def test_signal_counts_name_and_nan_policy(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2, 3]})
 
     def fake_indicator(df, **p):
-        return pd.Series([1, np.nan, 2])
+        return pd.Series([1, 2, 3], index=df.index)
+
+    base_signal = pd.Series([True, pd.NA, True], index=data.index, dtype="boolean")
+
+    def fake_generate(series, condition):
+        return base_signal.copy()
 
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "foo", fake_indicator)
+    monkeypatch.setattr(strategy_engine, "_generate_signal_from_value", fake_generate)
+
     rules = {
         "entry_rules": {
+            "treat_nan_as_false": True,
             "conditions": [
                 {
                     "indicator": "foo",
                     "condition": {"type": "indicator_is_above_value", "value": 0},
                 }
-            ]
+            ],
         }
     }
-    res, counts = strategy_engine.process_strategy_rules(
+
+    res_true, counts_true = strategy_engine.process_strategy_rules(
         data, rules, collect_counts=True
     )
-    assert counts == {"foo:indicator_is_above_value": 2}
+    assert not res_true.isna().any()
+    pd.testing.assert_series_equal(
+        res_true.astype(bool), pd.Series([True, False, True], index=data.index)
+    )
+    assert counts_true == {"foo:indicator_is_above_value": 2}
+
     rules["entry_rules"]["treat_nan_as_false"] = False
-    res, counts = strategy_engine.process_strategy_rules(
+    res_false, counts_false = strategy_engine.process_strategy_rules(
         data, rules, collect_counts=True
     )
-    assert counts == {"foo:indicator_is_above_value": 2}
+    expected_false = pd.Series([True, pd.NA, True], index=data.index, dtype="boolean")
+    pd.testing.assert_series_equal(res_false, expected_false)
+    assert counts_false == {"foo:indicator_is_above_value": 2}
 
 
 def test_vote_threshold_normalization(monkeypatch):
