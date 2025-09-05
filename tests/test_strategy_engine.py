@@ -269,7 +269,8 @@ def test_single_condition_vote(monkeypatch):
     }
 
     rules_default = {"entry_rules": {"combination_logic": "VOTE", "conditions": [cond]}}
-    res_default = strategy_engine.process_strategy_rules(data, rules_default)
+    with pytest.warns(RuntimeWarning, match="Normalized vote_threshold to 1"):
+        res_default = strategy_engine.process_strategy_rules(data, rules_default)
     pd.testing.assert_series_equal(
         res_default.astype(bool), pd.Series([True, True], index=data.index)
     )

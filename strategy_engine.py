@@ -394,12 +394,6 @@ def process_strategy_rules(
         return (empty, {}) if collect_counts else empty
 
     if len(signals) == 1:
-        if combination_logic == "VOTE":
-            threshold = vote_threshold if vote_threshold is not None else 1
-            if threshold < 1 or threshold > 1:
-                raise ValueError(
-                    "vote_threshold must be between 1 and the number of active conditions"
-                )
         single = signals[0]
         result = (
             single.fillna(False) if treat_nan_as_false else single.astype("boolean")
