@@ -30,3 +30,19 @@ def test_interleaved_writes_keep_artifacts(tmp_path):
     data = json.loads(path.read_text())
     assert data["artifacts"] == ["a", "b"]
     assert data["settings"] == {"x": 2}
+
+
+def test_duplicate_artifacts_deduped(tmp_path):
+    path = tmp_path / "run_metadata.json"
+    merge_run_metadata(path, {"artifacts": ["a", "b"]})
+    merge_run_metadata(path, {"artifacts": ["b", "c"]})
+    data = json.loads(path.read_text())
+    assert data["artifacts"] == ["a", "b", "c"]
+
+
+def test_shallow_merge_duplicate_keys(tmp_path):
+    path = tmp_path / "run_metadata.json"
+    merge_run_metadata(path, {"artifacts": [], "settings": {"a": 1, "b": 2}})
+    merge_run_metadata(path, {"artifacts": [], "settings": {"b": 3, "c": 4}})
+    data = json.loads(path.read_text())
+    assert data["settings"] == {"a": 1, "b": 3, "c": 4}
