@@ -69,7 +69,19 @@ This is the core processor that translates your ideas from the config file into 
     * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from the config.
     * **Dynamic Indicator Calls:** It uses the `INDICATOR_MAPPING` dictionary to dynamically call the correct calculation functions from the `indicator_library.py` based on the active rules.
     * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
-    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type. For MACD the histogram (`MACDh_*` or `MACD_Hist*`) is auto-detected and used by default, falling back to the line or first column when absent; you can override this behaviour with `condition["column"]`.
+    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger Bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. For MACD the histogram (`MACDh_*` or `MACD_Hist*`) is auto-detected and used by default, falling back to the line or first column when absent.
+
+    Example:
+
+    ```python
+    {
+        "indicator": "bbands",
+        "params": {"period": 20, "std_dev": 2},
+        "condition": {"type": "price_is_above_indicator", "band": "upper", "column": "BBL"},
+    }
+    # Uses BBL because `column` overrides `band`
+    ```
+
     * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (case-insensitive, defaults to `"AND"`). NaNs are treated as `False` by default but can be propagated by setting `treat_nan_as_false=False`. For `"VOTE"`, a majority threshold is used when `vote_threshold` is `None`.
     * **Output:** It returns a final, single pandas Series of `True`/`False` entry signals to the backtester.
 
