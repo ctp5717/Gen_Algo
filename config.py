@@ -5,6 +5,7 @@ Configuration File for the GA Trading Framework
 (This version includes automated rolling date ranges that adapt to the selected timeframe)
 """
 
+import math
 import os
 
 # Import necessary libraries for date calculation
@@ -208,6 +209,7 @@ HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
     {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3},
     {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4},
+    {"sol_per_pop": 250, "num_parents_mating": 60, "mutation_num_genes": 4},
 ]
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
@@ -228,7 +230,7 @@ MULTI_ASSET = {
     # Optional per-ticker weights; if None, all assets are weighted equally
     "asset_weights": None,
     # Penalty multiplier for dispersion across assets
-    "lambda_dispersion": 0.25,
+    "lambda_dispersion": 0.20,
     # Optional coarse tuning grid for lambda. If provided the tuner can try
     # multiple values and pick the best one.
     "lambda_grid": [0.1, 0.2, 0.3, 0.4, 0.5],
@@ -244,20 +246,22 @@ MULTI_ASSET = {
     "nan_fallback": 0.0,
     # Group trade floor configuration
     "min_total_trades": 0,
-    "trade_floor_policy": "hard_floor",  # hard_floor | soft_penalty
-    "soft_penalty_strength": 1.0,
+    "trade_floor_policy": "soft_penalty",  # hard_floor | soft_penalty
+    "soft_penalty_strength": 0.75,
     "soft_penalty_mode": "multiplicative",  # multiplicative | additive
     # How to handle assets with zero trades
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
-    "coverage_penalty": 0.3,
+    "coverage_penalty": 0.25,
     # Minimal trades to consider an asset as traded
-    "per_asset_min_trades": 1,
+    "per_asset_min_trades": 10,
     # Minimal number of assets that must be included
-    "min_included_assets": 1,
+    "min_included_assets": 4,
+    # Annualisation base for trade floor scaling
+    "trading_days_per_year": 252,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 24,
+    "min_total_trades_per_year": 36,
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs
@@ -296,7 +300,19 @@ CHAMPION_SELECTION_SETTINGS = {
 # Use the `is_active` flag to control which ones are used in a given run.
 STRATEGY_RULES = {
     "entry_rules": {
-        "combination_logic": "AND",
+        # Optional keys:
+        #   combination_logic (str): "AND" | "OR" | "VOTE" (default "AND")
+        #   vote_threshold (int | None): min signals for "VOTE"; ``None`` uses
+        #       ``ceil(N/2)`` and values outside ``1..N`` raise ``ValueError``
+        #   treat_nan_as_false (bool): replace NaNs before combining (default True)
+        "combination_logic": "VOTE",
+        "vote_threshold": {
+            "gene": "vote_threshold",
+            "low": 2,
+            "high": 3,
+            "step": 1,
+        },
+        "treat_nan_as_false": True,
         "conditions": [
             {
                 "is_active": True,  # This rule is ON
@@ -305,7 +321,7 @@ STRATEGY_RULES = {
                 "params": {
                     "period": {
                         "gene": "ema_period",
-                        "low": 20,
+                        "low": 30,
                         "high": max_lookback_period,
                         "step": 5,
                     }
@@ -317,20 +333,20 @@ STRATEGY_RULES = {
                 "rule_name": "RSI_Momentum_Filter",
                 "indicator": "rsi",
                 "params": {
-                    "period": {"gene": "rsi_period", "low": 3, "high": 35, "step": 1}
+                    "period": {"gene": "rsi_period", "low": 5, "high": 35, "step": 1}
                 },
                 "condition": {
                     "type": "indicator_is_above_value",
                     "value": {
                         "gene": "rsi_threshold",
-                        "low": 30,
-                        "high": 84,
-                        "step": 2,
+                        "low": 45,
+                        "high": 70,
+                        "step": 1,
                     },
                 },
             },
             {
-                "is_active": False,
+                "is_active": True,
                 "rule_name": "MACD_Momentum_Cross",
                 "indicator": "macd",
                 "params": {
@@ -338,7 +354,7 @@ STRATEGY_RULES = {
                     "slow": {"gene": "macd_slow", "low": 15, "high": 35, "step": 1},
                     "signal": {"gene": "macd_signal", "low": 4, "high": 16, "step": 1},
                 },
-                "condition": {"type": "indicator_crosses_above_value", "value": 0},
+                "condition": {"type": "indicator_is_above_value", "value": 0},
             },
             {
                 "is_active": False,
@@ -359,8 +375,8 @@ STRATEGY_RULES = {
                     },
                 },
                 "condition": {
-                    "type": "price_crosses_above_upper_band",
-                    "column": "BBU_20_2.0",  # Specify which band to check against
+                    "type": "price_crosses_above_indicator",
+                    "band": "upper",
                 },
             },
         ],
@@ -379,10 +395,15 @@ STRATEGY_RULES = {
             },
         },
         "trailing_stop": {
-            "is_active": False,  # Turn on trailing stop
+            "is_active": True,
             "type": "percentage",
             "params": {  # Correctly nested
-                "value": {"gene": "tsl_pct", "low": 0.01, "high": 0.10, "step": 0.005}
+                "value": {
+                    "gene": "tsl_pct",
+                    "low": 0.02,
+                    "high": 0.06,
+                    "step": 0.005,
+                }
             },
         },
         "take_profit": {
@@ -399,3 +420,50 @@ STRATEGY_RULES = {
         },
     },
 }
+
+# Clamp vote_threshold gene so the upper bound never exceeds the number of active
+# conditions. This prevents GA runs from sampling impossible thresholds if rules
+# are toggled off later.
+_active = len(
+    [
+        c
+        for c in STRATEGY_RULES["entry_rules"].get("conditions", [])
+        if c.get("is_active", True)
+    ]
+)
+_vt = STRATEGY_RULES["entry_rules"].get("vote_threshold")
+if isinstance(_vt, dict) and "high" in _vt:
+    _vt["high"] = max(1, min(_vt["high"], _active))
+
+
+class ConfigurationError(ValueError):
+    """Raised when configuration options are invalid."""
+
+
+def _validate_combination_logic(rules: dict) -> None:
+    entry = rules.get("entry_rules", {})
+    conditions = [c for c in entry.get("conditions", []) if c.get("is_active", True)]
+    n = len(conditions) or 1
+    logic = entry.get("combination_logic", "AND")
+    if isinstance(logic, dict):
+        if "options" in logic:
+            # Gene-driven dict; allow GA to explore provided options
+            return
+        raise ConfigurationError("combination_logic must be AND, OR, or VOTE")
+    logic_u = str(logic).upper()
+    if logic_u not in {"AND", "OR", "VOTE"}:
+        raise ConfigurationError(
+            f"combination_logic must be AND, OR, or VOTE (got {logic})"
+        )
+    entry["combination_logic"] = logic_u
+    if logic_u == "VOTE":
+        vt = entry.get("vote_threshold")
+        if isinstance(vt, dict):
+            return
+        if vt is None:
+            entry["vote_threshold"] = math.ceil(n / 2)
+        elif vt < 1 or vt > n:
+            raise ConfigurationError(f"vote_threshold {vt} must be between 1 and {n}")
+
+
+_validate_combination_logic(STRATEGY_RULES)
