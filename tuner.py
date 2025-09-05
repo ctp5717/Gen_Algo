@@ -1,4 +1,8 @@
+import json
+import math
 import os
+import subprocess
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -7,6 +11,7 @@ import vectorbt as vbt
 
 import config
 import fitness
+import lambda_selector
 import strategy_engine as engine
 import trade_floor
 
@@ -121,6 +126,30 @@ def _evaluate_on_validation(solution, gene_map, val_data):
     return -np.inf if np.isnan(score) else score
 
 
+def _extract_metrics(evaluator, solution):
+    """Return (mu, sigma, F, coverage) for the given solution."""
+
+    score = evaluator(None, solution, 0)
+    details = getattr(evaluator, "last_details", {}) or {}
+    mu = float(details.get("mu", 0.0))
+    sigma = float(details.get("sigma", 0.0))
+    assets_included = details.get("assets_included")
+    total_assets = len(getattr(evaluator, "group_data", []))
+    coverage = 0.0
+    if assets_included is not None and total_assets:
+        coverage = assets_included / total_assets
+    if not math.isfinite(mu):
+        mu = 0.0
+    if not math.isfinite(sigma):
+        sigma = 0.0
+    score = float(score)
+    if not math.isfinite(score):
+        score = 0.0
+    if not math.isfinite(coverage):
+        coverage = 0.0
+    return mu, sigma, score, coverage
+
+
 def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_data):
     """Run short GA optimisations using preloaded data."""
     print("\n--- Express Hyperparameter Tuning ---")
@@ -131,43 +160,22 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
         lam_grid = config.MULTI_ASSET.get("lambda_grid")
         if lam_grid:
             print("\n-- Lambda Dispersion Grid --")
-            sweep_results = []
+            sweep_start = datetime.utcnow().isoformat()
+            sweep_rows = []
+            seeds = (
+                config.MULTI_ASSET.get("lambda_seeds")
+                or config.MULTI_ASSET.get("lambda_rescore_seeds")
+                or [config.SEED, config.SEED + 1, config.SEED + 2]
+            )
+            shortlist_size = config.MULTI_ASSET.get("lambda_shortlist_size", 3)
+            sigma_pctl = config.MULTI_ASSET.get(
+                "lambda_sigma_pctl",
+                config.MULTI_ASSET.get("lambda_sigma_pct", 0.75),
+            )
+            coverage_min = config.MULTI_ASSET.get("lambda_coverage_min")
+
             for lam in lam_grid:
-                settings = dict(config.MULTI_ASSET)
-                settings["lambda_dispersion"] = lam
-                settings["trade_floor_policy"] = "soft_penalty"
-                settings["soft_penalty_mode"] = "multiplicative"
-                evaluator = fitness.MultiAssetFitnessEvaluator(
-                    train_data, config.STRATEGY_RULES, gene_map, settings
-                )
-                probe = pygad.GA(
-                    num_generations=1,
-                    num_parents_mating=2,
-                    sol_per_pop=4,
-                    num_genes=len(gene_space),
-                    gene_space=gene_space,
-                    gene_type=list(gene_types),
-                    mutation_num_genes=1,
-                    fitness_func=evaluator.__call__,
-                    random_seed=config.SEED,
-                )
-                probe.run()
-                _, score, _ = probe.best_solution()
-                sweep_results.append((lam, score))
-                print(f"λ={lam}: {score}")
-
-            top_k = config.MULTI_ASSET.get("lambda_top_k", 1)
-            seeds = config.MULTI_ASSET.get("lambda_rescore_seeds", [config.SEED])
-            top_candidates = sorted(sweep_results, key=lambda x: x[1], reverse=True)[
-                :top_k
-            ]
-
-            best_lam = None
-            best_median = -np.inf
-            for lam, _ in top_candidates:
-                seed_scores = []
                 for seed in seeds:
-                    np.random.seed(seed)
                     settings = dict(config.MULTI_ASSET)
                     settings["lambda_dispersion"] = lam
                     settings["trade_floor_policy"] = "soft_penalty"
@@ -175,11 +183,6 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     evaluator = fitness.MultiAssetFitnessEvaluator(
                         train_data, config.STRATEGY_RULES, gene_map, settings
                     )
-                    mutation_kwargs = {"mutation_num_genes": 0}
-                    if mutation_kwargs["mutation_num_genes"] == 0:
-                        mutation_kwargs["mutation_type"] = None
-                        mutation_kwargs["mutation_probability"] = 0.0
-
                     probe = pygad.GA(
                         num_generations=1,
                         num_parents_mating=2,
@@ -187,22 +190,95 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                         num_genes=len(gene_space),
                         gene_space=gene_space,
                         gene_type=list(gene_types),
+                        mutation_num_genes=1,
                         fitness_func=evaluator.__call__,
                         random_seed=seed,
-                        **mutation_kwargs,
                     )
                     probe.run()
-                    _, score, _ = probe.best_solution()
-                    seed_scores.append(score)
-                median_score = float(np.median(seed_scores)) if seed_scores else -np.inf
-                print(f"λ={lam} median score: {median_score}")
-                if median_score > best_median:
-                    best_median = median_score
-                    best_lam = lam
+                    best_solution, _, _ = probe.best_solution()
+                    mu_tr, sigma_tr, F_tr, _ = _extract_metrics(
+                        evaluator, best_solution
+                    )
 
-            if best_lam is not None:
-                config.MULTI_ASSET["lambda_dispersion"] = best_lam
-                print(f"Selected λ={best_lam}")
+                    val_settings = dict(settings)
+                    val_settings["lambda_dispersion"] = 0.0
+                    val_evaluator = fitness.MultiAssetFitnessEvaluator(
+                        val_data, config.STRATEGY_RULES, gene_map, val_settings
+                    )
+                    mu_val, sigma_val, _, coverage = _extract_metrics(
+                        val_evaluator, best_solution
+                    )
+                    sweep_rows.append(
+                        lambda_selector.LambdaSweepRow(
+                            lambda_value=lam,
+                            mu_val=mu_val,
+                            sigma_val=sigma_val,
+                            mu_tr=mu_tr,
+                            sigma_tr=sigma_tr,
+                            F_tr=F_tr,
+                            coverage=coverage,
+                            fold=0,
+                            seed=seed,
+                        )
+                    )
+                    gap = mu_tr - mu_val
+                    print(
+                        f"λ={lam} seed={seed} | μ_val={mu_val:.4f} | "
+                        f"σ_val={sigma_val:.4f} | gap={gap:.4f} | "
+                        f"coverage={coverage:.4f}"
+                    )
+
+            (
+                selected_lam,
+                sweep_table,
+                shortlist_df,
+            ) = lambda_selector.select_lambda_with_elbow(
+                sweep_rows,
+                shortlist_size=shortlist_size,
+                sigma_pct_threshold=sigma_pctl,
+                coverage_min=coverage_min,
+            )
+            config.MULTI_ASSET["lambda_dispersion"] = selected_lam
+            print(f"Selected λ={selected_lam}")
+
+            for _, row in shortlist_df.iterrows():
+                print(
+                    f"shortlist λ={row['lambda']} | μ_val={row['mu_val_mean']:.4f} | "
+                    f"σ_val={row['sigma_val_mean']:.4f} | elbow={row['elbow_dist']:.4f}"
+                )
+
+            sweep_end = datetime.utcnow().isoformat()
+            try:
+                git_sha = (
+                    subprocess.check_output(
+                        [
+                            "git",
+                            "rev-parse",
+                            "HEAD",
+                        ]
+                    )
+                    .decode()
+                    .strip()
+                )
+            except Exception:
+                git_sha = "unknown"
+
+            artifact = {
+                "selected_lambda": selected_lam,
+                "grid": list(lam_grid),
+                "folds": 1,
+                "seeds": list(seeds),
+                "shortlist_size": shortlist_size,
+                "sigma_pctl": sigma_pctl,
+                "coverage_min": coverage_min,
+                "started_at": sweep_start,
+                "ended_at": sweep_end,
+                "git_sha": git_sha,
+                "rows": sweep_table.to_dict(orient="records"),
+                "shortlist": shortlist_df.to_dict(orient="records"),
+            }
+            with open("lambda_sweep.json", "w", encoding="utf-8") as f:
+                json.dump(artifact, f, indent=2)
 
     fitness_evaluator = fitness.get_fitness_evaluator(
         train_data, config.STRATEGY_RULES, gene_map
