@@ -2,6 +2,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 # Ensure repository root is on the import path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -108,10 +110,11 @@ def test_vote_threshold_gene_present():
     assert any(info["name"] == "vote_threshold" for info in gene_map.values())
 
 
-def test_vote_threshold_gene_absent_when_not_vote():
+@pytest.mark.parametrize("logic", ["AND", "OR"])
+def test_vote_threshold_gene_absent_when_not_vote(logic):
     sample_rules = {
         "entry_rules": {
-            "combination_logic": "AND",
+            "combination_logic": logic,
             "vote_threshold": {"gene": "vt", "low": 1, "high": 3, "step": 1},
             "conditions": [],
         }
@@ -172,3 +175,31 @@ def test_vote_threshold_gene_bounds_update():
     space2, gene_map2, _ = parse_genes_from_config(rules)
     idx2 = next(i for i, info in gene_map2.items() if info["name"] == "vt")
     assert space2[idx2]["high"] == 1
+
+
+def test_vote_threshold_high_clamped_and_other_genes_unaffected():
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 10, "step": 1},
+            "conditions": [
+                {
+                    "is_active": True,
+                    "params": {"foo": {"gene": "foo", "low": 2, "high": 4, "step": 1}},
+                    "condition": {},
+                },
+                {
+                    "is_active": False,
+                    "params": {"bar": {"gene": "bar", "low": 5, "high": 6, "step": 1}},
+                    "condition": {},
+                },
+            ],
+        }
+    }
+    space, gene_map, _ = parse_genes_from_config(rules)
+    vt_idx = next(i for i, info in gene_map.items() if info["name"] == "vt")
+    assert space[vt_idx]["high"] == 1
+    foo_idx = next(i for i, info in gene_map.items() if info["name"] == "foo")
+    assert space[foo_idx] == {"low": 2, "high": 4, "step": 1}
+    assert all(info["name"] != "bar" for info in gene_map.values())
+    assert len(space) == 2
