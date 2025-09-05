@@ -1,0 +1,122 @@
+import sys
+import types
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+# Ensure repository root on path
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+# Stub optional heavy deps
+sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
+sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+
+import indicator_library  # noqa: E402,F401
+import strategy_engine  # noqa: E402
+
+
+def _make_cond(name, series):
+    def ind(ohlc, period=None):
+        return pd.Series(series, index=ohlc.index)
+
+    return ind, {
+        "indicator": name,
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+
+
+@pytest.mark.parametrize("comb_logic", ["vote", "Vote"])
+def test_vote_threshold_none_and_casing(monkeypatch, comb_logic):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+    ind_a, cond_a = _make_cond("a", [1, 0])
+    ind_b, cond_b = _make_cond("b", [0, 1])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", ind_b)
+
+    captured = {}
+    orig = strategy_engine._combine_signals
+
+    def spy(signals, combination_logic, vote_threshold, treat_nan_as_false):
+        captured["combination_logic"] = combination_logic
+        captured["vote_threshold"] = vote_threshold
+        return orig(signals, combination_logic, vote_threshold, treat_nan_as_false)
+
+    monkeypatch.setattr(strategy_engine, "_combine_signals", spy)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": comb_logic,
+            "conditions": [cond_a, cond_b],
+        }
+    }
+
+    res = strategy_engine.process_strategy_rules(data, rules)
+
+    # Expect majority threshold (ceil(2/2) == 1) and sanitized logic
+    assert captured["combination_logic"] == "VOTE"
+    assert captured["vote_threshold"] == 1
+    pd.testing.assert_series_equal(
+        res.astype(bool), pd.Series([True, True], index=data.index)
+    )
+
+
+def test_vote_threshold_clamped_to_one(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+    ind_a, cond = _make_cond("a", [1, 1])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+
+    def fail(*args, **kwargs):  # _combine_signals should not be called for single cond
+        raise AssertionError("_combine_signals should not be invoked")
+
+    monkeypatch.setattr(strategy_engine, "_combine_signals", fail)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": 5,
+            "conditions": [cond],
+        }
+    }
+
+    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+        res = strategy_engine.process_strategy_rules(data, rules)
+    pd.testing.assert_series_equal(
+        res.astype(bool), pd.Series([True, True], index=data.index)
+    )
+
+
+def test_vote_threshold_exceeds_active(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+    ind_a, cond_a = _make_cond("a", [1, 0])
+    ind_b, cond_b = _make_cond("b", [1, 1])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", ind_b)
+
+    captured = {}
+    orig = strategy_engine._combine_signals
+
+    def spy(signals, combination_logic, vote_threshold, treat_nan_as_false):
+        captured["combination_logic"] = combination_logic
+        captured["vote_threshold"] = vote_threshold
+        return orig(signals, combination_logic, vote_threshold, treat_nan_as_false)
+
+    monkeypatch.setattr(strategy_engine, "_combine_signals", spy)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": "vote",
+            "vote_threshold": 5,
+            "conditions": [cond_a, cond_b],
+        }
+    }
+
+    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+        res = strategy_engine.process_strategy_rules(data, rules)
+
+    assert captured["combination_logic"] == "VOTE"
+    assert captured["vote_threshold"] == 2
+    expected = pd.Series([True, False], index=data.index, dtype=bool)
+    pd.testing.assert_series_equal(res.astype(bool), expected)
