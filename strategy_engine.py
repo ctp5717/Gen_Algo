@@ -20,6 +20,7 @@ Design Philosophy:
   `indicator_library.py` and `config.py`.
 """
 
+import logging
 import math
 import warnings
 from functools import reduce
@@ -27,6 +28,8 @@ from functools import reduce
 import pandas as pd
 
 import indicator_library as ind_lib  # Import our toolbox of indicators
+
+logger = logging.getLogger(__name__)
 
 # A mapping dictionary to dynamically call indicator functions.
 # This makes the engine scalable. To add a new indicator, you just add an entry here
@@ -208,21 +211,31 @@ def process_strategy_rules(
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
     combination_logic = entry_rules.get("combination_logic", "AND").upper()
+    if combination_logic not in {"AND", "OR", "VOTE"}:
+        raise ValueError(
+            f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
+        )
+
     vote_threshold = entry_rules.get("vote_threshold")
     if isinstance(vote_threshold, dict):
         vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
     treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
     active_conds = [c for c in conditions if c.get("is_active", True)]
-    if combination_logic == "VOTE":
-        n = len(active_conds)
+    n = len(active_conds)
+    requested_k = vote_threshold
+
+    if n == 1:
+        if combination_logic != "AND" or vote_threshold not in (None, 1):
+            warnings.warn(
+                "Single active condition; normalized combination_logic to 'AND' and vote_threshold to 1",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        combination_logic = "AND"
+        vote_threshold = 1
+    elif combination_logic == "VOTE":
         if vote_threshold is None:
-            vote_threshold = 1 if n == 1 else math.ceil(n / 2)
-            if n == 1:
-                warnings.warn(
-                    "Normalized vote_threshold to 1 for VOTE combination",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
+            vote_threshold = math.ceil(n / 2)
         elif vote_threshold < 1:
             vote_threshold = 1
             warnings.warn(
@@ -232,21 +245,25 @@ def process_strategy_rules(
             )
         if vote_threshold > n:
             warnings.warn(
-                "vote_threshold > active conditions; clamping to n",
+                "vote_threshold exceeds active conditions; clamped to n",
                 RuntimeWarning,
                 stacklevel=2,
             )
             vote_threshold = n
+        logger.debug(
+            {
+                "logic": "VOTE",
+                "M": n,
+                "requested_k": requested_k,
+                "final_k": vote_threshold,
+                "treat_nan_as_false": treat_nan_as_false,
+            }
+        )
 
     if vote_threshold is not None and not isinstance(vote_threshold, int):
         raise TypeError("vote_threshold must be an integer or None")
     if not isinstance(treat_nan_as_false, bool):
         raise TypeError("treat_nan_as_false must be a boolean")
-
-    if combination_logic not in {"AND", "OR", "VOTE"}:
-        raise ValueError(
-            f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
-        )
 
     signals = []
     counts = {} if collect_counts else None
