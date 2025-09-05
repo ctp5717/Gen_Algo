@@ -265,6 +265,11 @@ def process_strategy_rules(
     if not isinstance(treat_nan_as_false, bool):
         raise TypeError("treat_nan_as_false must be a boolean")
 
+    if vote_threshold is not None:
+        assert (
+            1 <= vote_threshold <= n
+        ), "vote_threshold must be between 1 and the number of active conditions"
+
     signals = []
     counts = {} if collect_counts else None
 

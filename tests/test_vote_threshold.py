@@ -137,3 +137,22 @@ def test_vote_threshold_exceeds_active(monkeypatch, caplog):
     assert captured["vote_threshold"] == 2
     expected = pd.Series([True, False], index=data.index, dtype=bool)
     pd.testing.assert_series_equal(res.astype(bool), expected)
+
+
+def test_invalid_threshold_raises(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+    ind_a, cond_a = _make_cond("a", [1, 0])
+    ind_b, cond_b = _make_cond("b", [0, 1])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", ind_b)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": "AND",
+            "vote_threshold": 0,
+            "conditions": [cond_a, cond_b],
+        }
+    }
+
+    with pytest.raises(AssertionError):
+        strategy_engine.process_strategy_rules(data, rules)
