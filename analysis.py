@@ -92,6 +92,10 @@ def _write_run_metadata(
 ) -> None:
     """Persist run metadata for reproducibility."""
     end_time = datetime.now(timezone.utc)
+
+    # Only include artifact paths that actually exist
+    existing_artifacts = [str(a) for a in artifacts if Path(a).exists()]
+
     metadata = {
         "artifact_version": "1.0.0",
         "start_time": start_time.isoformat(),
@@ -108,7 +112,7 @@ def _write_run_metadata(
                 "path": str(Path(vbt.__file__).resolve()),
             },
         },
-        "artifacts": artifacts,
+        "artifacts": existing_artifacts,
     }
     if extra:
         metadata.update(extra)

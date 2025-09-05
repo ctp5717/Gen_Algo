@@ -75,6 +75,9 @@ def _write_run_metadata(
 ) -> None:
     """Persist run metadata to ``run_metadata.json``."""
     end = datetime.now(timezone.utc)
+
+    existing_artifacts = [str(a) for a in artifacts if Path(a).exists()]
+
     metadata = {
         "artifact_version": "1.0.0",
         "start_time": start.isoformat(),
@@ -92,7 +95,7 @@ def _write_run_metadata(
             },
             "pygad": pygad.__version__,
         },
-        "artifacts": artifacts,
+        "artifacts": existing_artifacts,
     }
     merge_run_metadata("run_metadata.json", metadata)
 
