@@ -24,6 +24,7 @@ import logging
 import math
 import warnings
 from functools import reduce
+from typing import Callable
 
 import pandas as pd
 
@@ -40,6 +41,36 @@ INDICATOR_MAPPING = {
     "rsi": ind_lib.calculate_rsi,
     "macd": ind_lib.calculate_macd,
     "bbands": ind_lib.calculate_bbands,
+}
+
+
+# Mapping of condition strings to comparison or vectorbt crossover functions
+# for price/indicator relationships, including Bollinger Band variants.
+BASE_CONDITION_FUNCTIONS: dict[str, Callable[[pd.Series, pd.Series], pd.Series]] = {
+    "price_is_above_indicator": lambda price, ind: price > ind,
+    "price_is_below_indicator": lambda price, ind: price < ind,
+    "price_crosses_above_indicator": lambda price, ind: price.vbt.crossed_above(ind),
+    "price_crosses_below_indicator": lambda price, ind: price.vbt.crossed_below(ind),
+}
+
+BOLLINGER_CONDITION_FUNCTIONS: dict[
+    str, Callable[[pd.Series, pd.Series], pd.Series]
+] = {
+    "price_crosses_above_upper_band": lambda price, band: price.vbt.crossed_above(band),
+    "price_crosses_below_lower_band": lambda price, band: price.vbt.crossed_below(band),
+    "price_crosses_below_upper_band": lambda price, band: price.vbt.crossed_below(band),
+    "price_crosses_above_lower_band": lambda price, band: price.vbt.crossed_above(band),
+    "price_is_above_upper_band": lambda price, band: price > band,
+    "price_is_below_lower_band": lambda price, band: price < band,
+    "price_is_below_upper_band": lambda price, band: price < band,
+    "price_is_above_lower_band": lambda price, band: price > band,
+    "price_is_above_middle_band": lambda price, band: price > band,
+    "price_is_below_middle_band": lambda price, band: price < band,
+}
+
+CONDITION_FUNCTIONS: dict[str, Callable[[pd.Series, pd.Series], pd.Series]] = {
+    **BASE_CONDITION_FUNCTIONS,
+    **BOLLINGER_CONDITION_FUNCTIONS,
 }
 
 
@@ -66,43 +97,11 @@ def _generate_signal(
     """
     condition_type = condition.get("type")
     close_price = ohlc_data["Close"]
-
-    if condition_type == "price_is_above_indicator":
-        return close_price > indicator_series
-    elif condition_type == "price_is_below_indicator":
-        return close_price < indicator_series
-    elif condition_type == "price_crosses_above_indicator":
-        return close_price.vbt.crossed_above(indicator_series)
-    elif condition_type == "price_crosses_below_indicator":
-        return close_price.vbt.crossed_below(indicator_series)
-
-    # --- NEW: Added logic for Bollinger Band breakout conditions ---
-    elif condition_type == "price_crosses_above_upper_band":
-        # In this case, 'indicator_series' will be the upper band
-        return close_price.vbt.crossed_above(indicator_series)
-    elif condition_type == "price_crosses_below_lower_band":
-        # In this case, 'indicator_series' will be the lower band
-        return close_price.vbt.crossed_below(indicator_series)
-    elif condition_type == "price_crosses_below_upper_band":
-        return close_price.vbt.crossed_below(indicator_series)
-    elif condition_type == "price_crosses_above_lower_band":
-        return close_price.vbt.crossed_above(indicator_series)
-    elif condition_type == "price_is_above_upper_band":
-        return close_price > indicator_series
-    elif condition_type == "price_is_below_lower_band":
-        return close_price < indicator_series
-    elif condition_type == "price_is_below_upper_band":
-        return close_price < indicator_series
-    elif condition_type == "price_is_above_lower_band":
-        return close_price > indicator_series
-    elif condition_type == "price_is_above_middle_band":
-        return close_price > indicator_series
-    elif condition_type == "price_is_below_middle_band":
-        return close_price < indicator_series
-
-    else:
-        warnings.warn(f"Unknown condition type '{condition_type}'.", stacklevel=2)
-        return pd.Series(False, index=ohlc_data.index)
+    func = CONDITION_FUNCTIONS.get(condition_type)
+    if func is not None:
+        return func(close_price, indicator_series)
+    warnings.warn(f"Unknown condition type '{condition_type}'.", stacklevel=2)
+    return pd.Series(False, index=ohlc_data.index)
 
 
 def _generate_signal_from_value(
