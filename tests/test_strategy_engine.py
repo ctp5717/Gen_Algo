@@ -269,7 +269,9 @@ def test_single_condition_vote(monkeypatch):
     }
 
     rules_default = {"entry_rules": {"combination_logic": "VOTE", "conditions": [cond]}}
-    with pytest.warns(RuntimeWarning, match="Normalized vote_threshold to 1"):
+    with pytest.warns(
+        RuntimeWarning, match="Single active condition; normalized combination_logic"
+    ):
         res_default = strategy_engine.process_strategy_rules(data, rules_default)
     pd.testing.assert_series_equal(
         res_default.astype(bool), pd.Series([True, True], index=data.index)
@@ -294,7 +296,9 @@ def test_single_condition_vote(monkeypatch):
             "conditions": [cond],
         }
     }
-    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+    with pytest.warns(
+        RuntimeWarning, match="Single active condition; normalized combination_logic"
+    ):
         res_bad = strategy_engine.process_strategy_rules(data, rules_bad)
     pd.testing.assert_series_equal(
         res_bad.astype(bool), pd.Series([True, True], index=data.index)
@@ -1023,7 +1027,9 @@ def test_vote_threshold_normalization(monkeypatch):
             ],
         }
     }
-    with pytest.warns(RuntimeWarning, match="Normalized vote_threshold to 1"):
+    with pytest.warns(
+        RuntimeWarning, match="Single active condition; normalized combination_logic"
+    ):
         strategy_engine.process_strategy_rules(data, rules)
 
 
@@ -1053,7 +1059,7 @@ def test_vote_threshold_clamped(monkeypatch):
             ],
         }
     }
-    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+    with pytest.warns(RuntimeWarning, match="vote_threshold exceeds active conditions"):
         res = strategy_engine.process_strategy_rules(data, rules)
     assert res.all()
 

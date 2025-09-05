@@ -1,3 +1,5 @@
+import ast
+import logging
 import sys
 import types
 from pathlib import Path
@@ -81,14 +83,16 @@ def test_vote_threshold_clamped_to_one(monkeypatch):
         }
     }
 
-    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
+    with pytest.warns(
+        RuntimeWarning, match="Single active condition; normalized combination_logic"
+    ):
         res = strategy_engine.process_strategy_rules(data, rules)
     pd.testing.assert_series_equal(
         res.astype(bool), pd.Series([True, True], index=data.index)
     )
 
 
-def test_vote_threshold_exceeds_active(monkeypatch):
+def test_vote_threshold_exceeds_active(monkeypatch, caplog):
     data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
     ind_a, cond_a = _make_cond("a", [1, 0])
     ind_b, cond_b = _make_cond("b", [1, 1])
@@ -113,8 +117,21 @@ def test_vote_threshold_exceeds_active(monkeypatch):
         }
     }
 
-    with pytest.warns(RuntimeWarning, match="vote_threshold > active conditions"):
-        res = strategy_engine.process_strategy_rules(data, rules)
+    with caplog.at_level(logging.DEBUG):
+        with pytest.warns(
+            RuntimeWarning, match="vote_threshold exceeds active conditions"
+        ):
+            res = strategy_engine.process_strategy_rules(data, rules)
+
+    record = next(r for r in caplog.records if r.levelno == logging.DEBUG)
+    payload = ast.literal_eval(record.getMessage())
+    assert payload == {
+        "logic": "VOTE",
+        "M": 2,
+        "requested_k": 5,
+        "final_k": 2,
+        "treat_nan_as_false": True,
+    }
 
     assert captured["combination_logic"] == "VOTE"
     assert captured["vote_threshold"] == 2
