@@ -21,7 +21,10 @@ import config
 import data_loader
 import strategy_engine
 from deps import ensure_real_vectorbt
-from gene_parser import parse_genes_from_config  # now defined in its own module
+from gene_parser import (  # now defined in its own module
+    parse_genes_from_config,
+    resolve_gene_value,
+)
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
@@ -76,7 +79,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         entry["combination_logic"] = "AND"
     vt = entry.get("vote_threshold")
     if isinstance(vt, dict):
-        entry["vote_threshold"] = vt.get("low", vt.get("high"))
+        entry["vote_threshold"] = resolve_gene_value(vt)
 
     indicator_columns = {}
     for cond in entry.get("conditions", []):
@@ -87,10 +90,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         params_pf = {}
         for p, val in cond.get("params", {}).items():
             if isinstance(val, dict) and "gene" in val:
-                if "options" in val:
-                    params_pf[p] = val.get("options", [None])[0]
-                else:
-                    params_pf[p] = val.get("low", val.get("high"))
+                params_pf[p] = resolve_gene_value(val)
             else:
                 params_pf[p] = val
         cond["params"] = params_pf

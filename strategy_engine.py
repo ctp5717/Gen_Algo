@@ -29,6 +29,7 @@ from typing import Callable
 import pandas as pd
 
 import indicator_library as ind_lib  # Import our toolbox of indicators
+from gene_parser import resolve_gene_value
 
 logger = logging.getLogger(__name__)
 
@@ -216,20 +217,13 @@ def process_strategy_rules(
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
     combination_logic = entry_rules.get("combination_logic", "AND")
-    if isinstance(combination_logic, dict):
-        combination_logic = combination_logic.get(
-            "low",
-            combination_logic.get("high", combination_logic.get("options", [None])[0]),
-        )
-    combination_logic = str(combination_logic).upper()
+    combination_logic = str(resolve_gene_value(combination_logic)).upper()
     if combination_logic not in {"AND", "OR", "VOTE"}:
         raise ValueError(
             f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
         )
 
-    vote_threshold = entry_rules.get("vote_threshold")
-    if isinstance(vote_threshold, dict):
-        vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
+    vote_threshold = resolve_gene_value(entry_rules.get("vote_threshold"))
     treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
     active_conds = [c for c in conditions if c.get("is_active", True)]
     n = len(active_conds)

@@ -7,6 +7,33 @@ This module contains helper functions for working with strategy rules.
 from typing import Any, Dict, List, Tuple
 
 
+def resolve_gene_value(value: Any) -> Any:
+    """Return a deterministic default for a gene configuration value.
+
+    Parameters
+    ----------
+    value : Any
+        Either a primitive or a mapping containing gene metadata such as
+        ``low``/``high`` bounds or a set of ``options``.
+
+    Returns
+    -------
+    Any
+        The resolved default value. If ``value`` is a mapping with an
+        ``options`` list, the first option is returned. Otherwise ``low`` takes
+        precedence over ``high`` when present. Non-mapping inputs are returned
+        unchanged.
+    """
+
+    if isinstance(value, dict):
+        if "options" in value:
+            options = value.get("options", [])
+            return options[0] if options else None
+        if "low" in value or "high" in value:
+            return value.get("low", value.get("high"))
+    return value
+
+
 def parse_genes_from_config(
     rules: Dict[str, Any],
 ) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]], List[type]]:
