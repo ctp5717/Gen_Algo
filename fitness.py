@@ -192,7 +192,6 @@ class FitnessEvaluator:
             )
 
             time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-            time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
             portfolio = vbt.Portfolio.from_signals(
                 close=self.ohlc_data["Close"],
@@ -339,7 +338,6 @@ class MultiAssetFitnessEvaluator:
         )
 
         time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_exit = time_exit.reindex(entries.index, fill_value=False)
 
         portfolio = vbt.Portfolio.from_signals(
             close=ohlc["Close"],
