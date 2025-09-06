@@ -254,7 +254,8 @@ MULTI_ASSET = {
     "lambda_duplicate_tol": 1e-6,
     # Statistic used for aggregating metrics per λ ("mean" or "median")
     "lambda_rank_stat": "mean",
-    # Optional minimum average coverage fraction for lambda candidates
+    # Optional minimum average coverage fraction for lambda candidates.
+    # Set to ``None`` to disable; ``0.8`` is a good starting point.
     "lambda_coverage_min": None,
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return

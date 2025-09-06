@@ -166,6 +166,55 @@ def test_select_lambda_respects_coverage_min():
     assert lam == 0.1
 
 
+def test_select_lambda_coverage_min_from_config(monkeypatch):
+    monkeypatch.setitem(ls.config.MULTI_ASSET, "lambda_coverage_min", 0.3)
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.5,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.75,
+            coverage=0.5,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=2.0,
+            sigma_val=0.5,
+            mu_tr=2.0,
+            sigma_tr=0.5,
+            F_tr=1.6,
+            coverage=0.1,
+        ),
+    ]
+    lam, _, _ = ls.select_lambda_with_elbow(rows)
+    assert lam == 0.1
+
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.5,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.75,
+            coverage=0.1,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=2.0,
+            sigma_val=0.5,
+            mu_tr=2.0,
+            sigma_tr=0.5,
+            F_tr=1.6,
+            coverage=0.2,
+        ),
+    ]
+    lam, _, _ = ls.select_lambda_with_elbow(rows)
+    assert lam == 0.2
+
+
 def test_select_lambda_warns_on_degenerate(caplog):
     rows = [
         ls.LambdaSweepRow(
