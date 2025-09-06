@@ -248,6 +248,8 @@ MULTI_ASSET = {
     "lambda_probe_population_round2": 12,
     "lambda_probe_round2_on_duplicate": True,
     "lambda_probe_round2_for_shortlist": False,
+    "lambda_probe_seeds_round2_extra": [],
+    "lambda_finalist_max_passes": 3,
     # Tolerance for detecting duplicate shortlist entries
     "lambda_duplicate_tol": 1e-6,
     # Statistic used for aggregating metrics per λ

@@ -206,6 +206,10 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             reprobe_shortlist = config.MULTI_ASSET.get(
                 "lambda_probe_round2_for_shortlist", False
             )
+            round2_extra = config.MULTI_ASSET.get("lambda_probe_seeds_round2_extra", [])
+            finalist_max_passes = config.MULTI_ASSET.get(
+                "lambda_finalist_max_passes", 3
+            )
             pop_size = config.MULTI_ASSET.get("lambda_probe_population", 12)
             pop_size_r2 = config.MULTI_ASSET.get(
                 "lambda_probe_population_round2", pop_size
@@ -213,6 +217,10 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             dup_tol = config.MULTI_ASSET.get("lambda_duplicate_tol", 1e-6)
             ndigits = max(0, int(abs(np.log10(max(dup_tol, 1e-12)))))
             rank_stat = config.MULTI_ASSET.get("lambda_rank_stat", "mean")
+
+            probe_cache: dict[
+                tuple[float, int, int, int], lambda_selector.LambdaSweepRow
+            ] = {}
 
             def _probe_lambda(lam, seed, generations, population, round_id):
                 settings = dict(config.MULTI_ASSET)
@@ -285,6 +293,10 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     )
                 sweep_rows.append(row)
                 sweep_rows_all.append(dataclasses.replace(row))
+                probe_cache[(lam, seed, generations, population)] = dataclasses.replace(
+                    row
+                )
+                return row
 
             round_id = 1
             print(f"λ-grid round1: gens={gens_r1}, pop={pop_size}")
@@ -359,31 +371,56 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 )
             if degenerate or reprobe_shortlist:
                 finalist_lams = shortlist_df["lambda"].unique()
-                sweep_rows = [
-                    r for r in sweep_rows if r.lambda_value not in finalist_lams
-                ]
-                current_gen = gens_r2
-                pop = pop_size_r2
-                round_id += 1
-                print(
-                    f"λ-grid finalist reprobe: λ in {list(map(float, finalist_lams))}, "
-                    f"gens={current_gen}, pop={pop}"
-                )
-                for lam in finalist_lams:
-                    for seed in seeds:
-                        _probe_lambda(lam, seed, current_gen, pop, round_id)
-                (
-                    selected_lam,
-                    sweep_table,
-                    shortlist_df,
-                ) = lambda_selector.select_lambda_with_elbow(
-                    sweep_rows,
-                    shortlist_size=shortlist_size,
-                    sigma_pct_threshold=sigma_pctl,
-                    coverage_min=coverage_min,
-                    duplicate_tol=dup_tol,
-                    rank_stat=rank_stat,
-                )
+                seed_pool = list(seeds) + list(round2_extra)
+                target_level = 2
+                passes = 0
+                shortlist_set = set(finalist_lams)
+                while passes < finalist_max_passes:
+                    current_gen = gens_r2 if target_level == 2 else max_gens
+                    pop = pop_size_r2
+                    round_id += 1
+                    print(
+                        "λ-grid finalist reprobe (fairness): "
+                        f"λ in {list(map(float, finalist_lams))}, "
+                        f"gens={current_gen}, pop={pop}, level={target_level}"
+                    )
+                    sweep_rows = [
+                        r for r in sweep_rows if r.lambda_value not in finalist_lams
+                    ]
+                    for lam in finalist_lams:
+                        for seed in seed_pool:
+                            key = (lam, seed, current_gen, pop)
+                            cached = probe_cache.get(key)
+                            if cached is not None:
+                                sweep_rows.append(
+                                    dataclasses.replace(cached, round=round_id)
+                                )
+                            else:
+                                _probe_lambda(lam, seed, current_gen, pop, round_id)
+                    passes += 1
+                    (
+                        selected_lam,
+                        sweep_table,
+                        shortlist_df,
+                    ) = lambda_selector.select_lambda_with_elbow(
+                        sweep_rows,
+                        shortlist_size=shortlist_size,
+                        sigma_pct_threshold=sigma_pctl,
+                        coverage_min=coverage_min,
+                        duplicate_tol=dup_tol,
+                        rank_stat=rank_stat,
+                    )
+                    finalist_lams = shortlist_df["lambda"].unique()
+                    new_set = set(finalist_lams)
+                    shortlist_changed = new_set != shortlist_set
+                    shortlist_set = new_set
+                    degenerate = (shortlist_df["elbow_dist"].abs() < 1e-9).all()
+                    if shortlist_changed:
+                        continue
+                    if degenerate and target_level < 3:
+                        target_level = 3
+                        continue
+                    break
 
             config.MULTI_ASSET["lambda_dispersion"] = selected_lam
             print(f"Selected λ={selected_lam}")
