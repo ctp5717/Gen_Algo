@@ -451,6 +451,23 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             rows_final_df = pd.DataFrame([r.to_dict() for r in sweep_rows])
             rows_all_df.to_csv("lambda_sweep.csv", index=False)
 
+            nan_rows = rows_all_df[
+                rows_all_df[["mu_val", "sigma_val"]].isna().any(axis=1)
+            ]
+            nan_summary = []
+            if not nan_rows.empty:
+                for lam, grp in nan_rows.groupby("lambda"):
+                    seeds = (
+                        grp["seed"].dropna().astype(int).sort_values().unique().tolist()
+                    )
+                    nan_summary.append(
+                        {
+                            "lambda": float(lam),
+                            "seeds_with_nan": seeds,
+                            "total_nan_rows": int(len(grp)),
+                        }
+                    )
+
             idx_A = shortlist_df["sigma_val_mean"].idxmin()
             idx_B = shortlist_df["mu_val_mean"].idxmax()
             A_sig = shortlist_df.loc[idx_A, "sigma_val_mean"]
@@ -502,6 +519,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 "rows_final": rows_final_df.to_dict(orient="records"),
                 "rows_agg": sweep_table.to_dict(orient="records"),
                 "shortlist": shortlist_df.to_dict(orient="records"),
+                "nan_summary": nan_summary,
                 "elbow_AB": {
                     "A": {
                         "lambda": float(shortlist_df.loc[idx_A, "lambda"]),

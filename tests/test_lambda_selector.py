@@ -165,6 +165,35 @@ def test_select_lambda_warns_on_degenerate(caplog):
     assert lam == 0.3
 
 
+def test_select_lambda_logs_and_drops_nan(caplog):
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.5,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.75,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=float("nan"),
+            sigma_val=float("nan"),
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.75,
+            coverage=1.0,
+            seed=42,
+        ),
+    ]
+    with caplog.at_level(logging.WARNING, logger=ls.logger.name):
+        lam, table, _ = ls.select_lambda_with_elbow(rows)
+    assert "NaN metrics for λ=0.2; dropped 1 rows" in caplog.text
+    assert 0.2 not in set(table["lambda"])
+    assert lam == 0.1
+
+
 def test_shortlist_dedup_triggers_tiebreak(caplog):
     rows = [
         ls.LambdaSweepRow(
