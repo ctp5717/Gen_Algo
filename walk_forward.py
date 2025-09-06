@@ -61,7 +61,7 @@ def _get_cache_hashes(start_date: str, end_date: str) -> dict:
     hashes = {}
     for t in tickers:
         norm = data_loader._normalize_ticker(t)
-        fname = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}.csv"
+        fname = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}.parquet"
         fpath = Path(data_loader.CACHE_DIR) / fname
         hashes[fname] = _file_sha256(fpath)
     return hashes

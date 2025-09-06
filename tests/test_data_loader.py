@@ -28,7 +28,7 @@ def test_get_data_uses_cache(monkeypatch):
 
     # Force cache path to exist and return our dataframe
     monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
-    monkeypatch.setattr(data_loader.pd, "read_csv", lambda *a, **k: df)
+    monkeypatch.setattr(data_loader.pd, "read_parquet", lambda *a, **k: df)
     monkeypatch.setattr(data_loader, "_get_binance_data", lambda *a, **k: None)
     monkeypatch.setattr(data_loader.yf, "download", lambda *a, **k: None)
     monkeypatch.setattr(data_loader.config, "DATA_SOURCE", "yfinance")
