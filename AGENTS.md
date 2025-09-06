@@ -53,7 +53,7 @@
   - Multi-asset: `MULTI_ASSET` (lambda dispersion, trade-floor, zero-trade policy, coverage penalty, etc.).
 
 - `data_loader.py` – **Cache + fetch**:
-  - Cache dir: `data_cache/`; csv with flattened columns and restored `DatetimeIndex`.
+  - Cache dir: `data_cache/`; parquet with flattened columns and restored `DatetimeIndex`.
   - `_normalize_ticker()` converts e.g. `BTC-USD` → `BTCUSDT` for Binance.
   - `get_data(ticker, start, end, interval)` returns `(DataFrame, "cache"|"API")`.
 
@@ -349,7 +349,7 @@ CI expectations:
 ## Do not
 - Hardcode secrets.
 - Remove `.shift()` on time-based exits.
-- Change cache file format.
+- Change cache file format without explicit specification.
 - Bypass seed determinism or replace `config.to_pandas_freq()` with ad-hoc strings.
 
 ---
