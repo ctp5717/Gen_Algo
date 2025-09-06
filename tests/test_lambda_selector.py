@@ -43,6 +43,41 @@ def test_select_lambda_recovers_best_mu():
     assert set(table["lambda"]) == {0.1, 0.2, 0.3}
 
 
+def test_duplicate_tol_zero_no_error():
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.5,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.75,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=1.5,
+            sigma_val=0.6,
+            mu_tr=1.5,
+            sigma_tr=0.6,
+            F_tr=1.14,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.3,
+            mu_val=1.2,
+            sigma_val=0.7,
+            mu_tr=1.2,
+            sigma_tr=0.7,
+            F_tr=0.99,
+            coverage=1.0,
+        ),
+    ]
+    lam, table, _ = ls.select_lambda_with_elbow(rows, duplicate_tol=0)
+    assert lam == 0.2
+    assert set(table["lambda"]) == {0.1, 0.2, 0.3}
+
+
 def test_select_lambda_prefers_lower_sigma_on_tie(caplog):
     rows = [
         ls.LambdaSweepRow(

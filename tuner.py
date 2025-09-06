@@ -215,7 +215,8 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 "lambda_probe_population_round2", pop_size
             )
             dup_tol = config.MULTI_ASSET.get("lambda_duplicate_tol", 1e-6)
-            ndigits = max(0, int(abs(np.log10(max(dup_tol, 1e-12)))))
+            dup_tol = max(dup_tol, 1e-12)  # clamp to avoid log10(0)
+            ndigits = max(0, int(abs(np.log10(dup_tol))))
             rank_stat = config.MULTI_ASSET.get("lambda_rank_stat", "mean")
 
             probe_cache: dict[

@@ -52,7 +52,7 @@ class LambdaSweepRow:
 
 
 def _dedupe_shortlist(df: pd.DataFrame, tol: float) -> pd.DataFrame:
-    tol = max(tol, 1e-12)
+    tol = max(tol, 1e-12)  # clamp to avoid log10(0)
     ndigits = max(0, int(abs(np.log10(tol))))
     mask = df[["mu_val_mean", "sigma_val_mean"]].round(ndigits).duplicated(keep="first")
     return df.loc[~mask]
