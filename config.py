@@ -240,6 +240,18 @@ MULTI_ASSET = {
     "lambda_sigma_pctl": 0.75,
     # Seeds used for the lambda sweep to smooth variance
     "lambda_seeds": [SEED, SEED + 1, SEED + 2],
+    # Lambda probe configuration for coarse tuning
+    "lambda_probe_generations_round1": 3,
+    "lambda_probe_generations_round2": 5,
+    "lambda_probe_generations_max": 8,
+    "lambda_probe_population": 12,
+    "lambda_probe_population_round2": 12,
+    "lambda_probe_round2_on_duplicate": True,
+    "lambda_probe_round2_for_shortlist": False,
+    # Tolerance for detecting duplicate shortlist entries
+    "lambda_duplicate_tol": 1e-6,
+    # Statistic used for aggregating metrics per λ
+    "lambda_rank_stat": "mean",
     # Optional minimum average coverage fraction for lambda candidates
     "lambda_coverage_min": None,
     # Which per-asset metric to aggregate; typically "composite"
