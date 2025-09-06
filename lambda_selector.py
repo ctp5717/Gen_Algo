@@ -52,7 +52,8 @@ class LambdaSweepRow:
 
 
 def _dedupe_shortlist(df: pd.DataFrame, tol: float) -> pd.DataFrame:
-    ndigits = max(0, int(abs(np.log10(max(tol, 1e-12)))))
+    tol = max(tol, 1e-12)
+    ndigits = max(0, int(abs(np.log10(tol))))
     mask = df[["mu_val_mean", "sigma_val_mean"]].round(ndigits).duplicated(keep="first")
     return df.loc[~mask]
 
@@ -180,8 +181,9 @@ def select_lambda_with_elbow(
 
     before = len(shortlist)
     shortlist = _dedupe_shortlist(shortlist, duplicate_tol)
-    if len(shortlist) < before:
-        logger.info("Shortlist de-duplicated: %s→%s", before, len(shortlist))
+    after = len(shortlist)
+    if after < before:
+        logger.info("Shortlist de-duplicated: %s→%s", before, after)
 
     mu_span_abs = float(shortlist["mu_val_mean"].max() - shortlist["mu_val_mean"].min())
     mu_span_rel = float(mu_span_abs / max(shortlist["mu_val_mean"].abs().max(), 1e-12))
@@ -194,12 +196,11 @@ def select_lambda_with_elbow(
             - soft_sigma_tau * shortlist["sigma_val_mean"]
         )
 
-    if len(shortlist) == 1:
-        chosen = shortlist.iloc[0]
-        shortlist = shortlist.assign(elbow_dist=0.0)
-        return float(chosen["lambda"]), summary, shortlist
-    if len(shortlist) == 2:
-        logger.info("Shortlist size 2; skipping elbow and applying tie-breakers.")
+    if len(shortlist) < 3:
+        logger.info(
+            "Shortlist size %d; skipping elbow and applying tie-breakers.",
+            len(shortlist),
+        )
         mu_col = "mu_adj" if use_soft_sigma else "mu_val_mean"
         tie_order = [
             (mu_col, False, "mu_adj" if use_soft_sigma else "mu"),
@@ -208,12 +209,13 @@ def select_lambda_with_elbow(
             ("coverage_mean", False, "coverage"),
             ("lambda", True, "lambda"),
         ]
-        vals = shortlist[[col for col, _, _ in tie_order]].to_numpy()
-        for i, (_col, _asc, name) in enumerate(tie_order):
-            col_vals = vals[:, i]
-            if not np.allclose(col_vals[0], col_vals[1]):
-                logger.info("Tie-breaker on %s", name)
-                break
+        if len(shortlist) > 1:
+            vals = shortlist[[col for col, _, _ in tie_order]].to_numpy()
+            for i, (_col, _asc, name) in enumerate(tie_order):
+                col_vals = vals[:, i]
+                if not np.allclose(col_vals, col_vals[0]):
+                    logger.info("Tie-breaker on %s", name)
+                    break
         shortlist = shortlist.assign(elbow_dist=0.0)
         shortlist = shortlist.sort_values(
             by=[col for col, _, _ in tie_order],
