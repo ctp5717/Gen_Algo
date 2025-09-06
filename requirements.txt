@@ -4,7 +4,7 @@ pandas
 numpy
 yfinance
 python-binance
-pandas-ta
+pandas-ta @ git+https://github.com/twopirllc/pandas-ta@main
 setuptools
 python-dateutil
 matplotlib
