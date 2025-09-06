@@ -369,11 +369,13 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 logger.warning(
                     "λ-grid: shortlist elbow is degenerate; tie-breakers may dominate."
                 )
+
+            passes = 0
+            target_level = 1
             if degenerate or reprobe_shortlist:
                 finalist_lams = shortlist_df["lambda"].unique()
                 seed_pool = list(seeds) + list(round2_extra)
                 target_level = 2
-                passes = 0
                 shortlist_set = set(finalist_lams)
                 while passes < finalist_max_passes:
                     current_gen = gens_r2 if target_level == 2 else max_gens
@@ -520,6 +522,8 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 "rows_agg": sweep_table.to_dict(orient="records"),
                 "shortlist": shortlist_df.to_dict(orient="records"),
                 "nan_summary": nan_summary,
+                "fairness_passes": passes,
+                "target_level_final": target_level,
                 "elbow_AB": {
                     "A": {
                         "lambda": float(shortlist_df.loc[idx_A, "lambda"]),

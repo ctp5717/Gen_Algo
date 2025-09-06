@@ -83,9 +83,13 @@ def test_lambda_sweep_artifacts(tmp_path, monkeypatch):
         "rows_agg",
         "shortlist",
         "nan_summary",
+        "fairness_passes",
+        "target_level_final",
         "elbow_AB",
         "chosen",
         "probe",
     } <= data.keys()
     assert data["rows_all"][0]["solution_hash"]
     assert data["nan_summary"] == []
+    assert data["fairness_passes"] >= 0
+    assert data["target_level_final"] in {1, 2, 3}
