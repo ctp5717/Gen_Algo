@@ -17,6 +17,7 @@ from dateutil.relativedelta import relativedelta
 import config
 import data_loader
 import trade_floor
+import tuner
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config
 from run_metadata import merge_run_metadata
@@ -284,6 +285,12 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         gene_space, gene_map, gene_types = parse_genes_from_config(
             config.STRATEGY_RULES
         )
+        if multi and config.MULTI_ASSET.get("lambda_fold_reprobe_enabled"):
+            lam = tuner.select_lambda_for_fold(
+                train_data, gene_space, gene_map, gene_types
+            )
+            config.MULTI_ASSET["lambda_dispersion"] = lam
+            print(f"Selected λ for fold {idx}: {lam}")
         if multi:
             settings_train = dict(config.MULTI_ASSET)
             per_asset_base = settings_train.get("per_asset_min_trades")

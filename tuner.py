@@ -173,6 +173,109 @@ def _extract_metrics(evaluator, solution):
     return mu, sigma, score, coverage
 
 
+def select_lambda_for_fold(train_data, gene_space, gene_map, gene_types):
+    """Select the dispersion penalty for a single walk-forward fold.
+
+    Runs a lightweight round-1 probe over the candidate ``lambda`` grid using
+    the fold's training data. Each candidate is evaluated with a short genetic
+    algorithm and the results are fed through
+    :func:`lambda_selector.select_lambda_with_elbow` once. The training metrics
+    are reused for the validation fields expected by the selector to keep the
+    helper self-contained.
+
+    Parameters
+    ----------
+    train_data : DataFrame | Dict[str, DataFrame]
+        Training data for the current fold (single or multi asset).
+    gene_space, gene_map, gene_types :
+        Outputs from :func:`gene_parser.parse_genes_from_config`.
+
+    Returns
+    -------
+    float
+        The selected lambda value. If no grid is configured the existing
+        ``config.MULTI_ASSET['lambda_dispersion']`` is returned.
+    """
+
+    settings = dict(getattr(config, "MULTI_ASSET", {}))
+    lam_grid = settings.get("lambda_grid")
+    if not lam_grid:
+        return settings.get("lambda_dispersion", 0.0)
+
+    gens = settings.get("lambda_probe_generations_round1", 3)
+    pop = settings.get("lambda_probe_population", 12)
+    seeds = (
+        settings.get("lambda_seeds")
+        or settings.get("lambda_rescore_seeds")
+        or [config.SEED, config.SEED + 1, config.SEED + 2]
+    )
+    shortlist_size = settings.get("lambda_shortlist_size", 3)
+    sigma_pctl = settings.get(
+        "lambda_sigma_pctl", settings.get("lambda_sigma_pct", 0.75)
+    )
+    coverage_min = settings.get("lambda_coverage_min")
+    dup_tol = settings.get("lambda_duplicate_tol", 1e-6)
+    rank_stat = settings.get("lambda_rank_stat", "mean")
+
+    rows: list[lambda_selector.LambdaSweepRow] = []
+
+    for lam in lam_grid:
+        for seed in seeds:
+            try:
+                lam_settings = dict(settings)
+                lam_settings["lambda_dispersion"] = lam
+                evaluator = fitness.MultiAssetFitnessEvaluator(
+                    train_data, config.STRATEGY_RULES, gene_map, lam_settings
+                )
+                probe = pygad.GA(
+                    num_generations=gens,
+                    num_parents_mating=2,
+                    sol_per_pop=pop,
+                    num_genes=len(gene_space),
+                    gene_space=gene_space,
+                    gene_type=list(gene_types),
+                    mutation_num_genes=1,
+                    fitness_func=evaluator.__call__,
+                    random_seed=seed,
+                )
+                probe.run()
+                best_solution, _, _ = probe.best_solution()
+                mu, sigma, F, coverage = _extract_metrics(evaluator, best_solution)
+                row = lambda_selector.LambdaSweepRow(
+                    lambda_value=lam,
+                    mu_val=mu,
+                    sigma_val=sigma,
+                    mu_tr=mu,
+                    sigma_tr=sigma,
+                    F_tr=F,
+                    coverage=coverage,
+                    seed=seed,
+                )
+            except Exception:  # pragma: no cover - safety net
+                row = lambda_selector.LambdaSweepRow(
+                    lambda_value=lam,
+                    mu_val=np.nan,
+                    sigma_val=np.nan,
+                    mu_tr=np.nan,
+                    sigma_tr=np.nan,
+                    F_tr=np.nan,
+                    coverage=np.nan,
+                    seed=seed,
+                    note="probe_error",
+                )
+            rows.append(row)
+
+    selected, _, _ = lambda_selector.select_lambda_with_elbow(
+        rows,
+        shortlist_size=shortlist_size,
+        sigma_pct_threshold=sigma_pctl,
+        coverage_min=coverage_min,
+        duplicate_tol=dup_tol,
+        rank_stat=rank_stat,
+    )
+    return selected
+
+
 def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_data):
     """Run short GA optimisations using preloaded data."""
     print("\n--- Express Hyperparameter Tuning ---")
