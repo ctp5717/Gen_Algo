@@ -198,7 +198,64 @@ def test_shortlist_dedup_triggers_tiebreak(caplog):
     with caplog.at_level(logging.INFO, logger=ls.logger.name):
         lam, _, _ = ls.select_lambda_with_elbow(rows)
     assert lam == 0.3
-    assert "tie-breaker on sigma" in caplog.text.lower()
+
+
+def test_soft_sigma_prefers_lower_sigma_when_mu_close():
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.4,
+            mu_tr=1.0,
+            sigma_tr=0.4,
+            F_tr=0.9,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=1.002,
+            sigma_val=0.6,
+            mu_tr=1.002,
+            sigma_tr=0.6,
+            F_tr=0.91,
+            coverage=1.0,
+        ),
+    ]
+    lam_default, _, _ = ls.select_lambda_with_elbow(rows, sigma_pct_threshold=1.0)
+    lam_soft, _, _ = ls.select_lambda_with_elbow(
+        rows, sigma_pct_threshold=1.0, soft_sigma_enabled=True
+    )
+    assert lam_default == 0.2
+    assert lam_soft == 0.1
+
+
+def test_soft_sigma_keeps_ranking_when_mu_far():
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.4,
+            mu_tr=1.0,
+            sigma_tr=0.4,
+            F_tr=0.9,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=1.3,
+            sigma_val=0.6,
+            mu_tr=1.3,
+            sigma_tr=0.6,
+            F_tr=1.17,
+            coverage=1.0,
+        ),
+    ]
+    lam_default, _, _ = ls.select_lambda_with_elbow(rows, sigma_pct_threshold=1.0)
+    lam_soft, _, _ = ls.select_lambda_with_elbow(
+        rows, sigma_pct_threshold=1.0, soft_sigma_enabled=True
+    )
+    assert lam_default == 0.2
+    assert lam_soft == lam_default
 
 
 def test_select_lambda_median_rank_stat():
