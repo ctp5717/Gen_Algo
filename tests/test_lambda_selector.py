@@ -198,8 +198,8 @@ def test_shortlist_dedup_triggers_tiebreak(caplog):
     rows = [
         ls.LambdaSweepRow(
             0.1,
-            mu_val=1.0,
-            sigma_val=0.5,
+            mu_val=1.0 + 3e-7,
+            sigma_val=0.5 + 3e-7,
             mu_tr=1.0,
             sigma_tr=0.5,
             F_tr=0.95,
@@ -207,8 +207,8 @@ def test_shortlist_dedup_triggers_tiebreak(caplog):
         ),
         ls.LambdaSweepRow(
             0.2,
-            mu_val=1.0 + 5e-7,
-            sigma_val=0.5 + 5e-7,
+            mu_val=1.0 + 3e-7,
+            sigma_val=0.5 + 3e-7,
             mu_tr=1.0,
             sigma_tr=0.5,
             F_tr=0.95,
@@ -216,7 +216,7 @@ def test_shortlist_dedup_triggers_tiebreak(caplog):
         ),
         ls.LambdaSweepRow(
             0.3,
-            mu_val=1.0,
+            mu_val=1.0 + 3e-7,
             sigma_val=0.4,
             mu_tr=1.0,
             sigma_tr=0.4,
@@ -225,8 +225,47 @@ def test_shortlist_dedup_triggers_tiebreak(caplog):
         ),
     ]
     with caplog.at_level(logging.INFO, logger=ls.logger.name):
-        lam, _, _ = ls.select_lambda_with_elbow(rows)
+        lam, _, _ = ls.select_lambda_with_elbow(rows, sigma_pct_threshold=1.0)
     assert lam == 0.3
+    assert "Shortlist de-duplicated: 3→2" in caplog.text
+    assert "Shortlist size 2;" in caplog.text
+
+
+def test_shortlist_dedup_to_single_row(caplog):
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0 + 3e-7,
+            sigma_val=0.5 + 3e-7,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.95,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=1.0 + 2e-7,
+            sigma_val=0.5 + 2e-7,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.95,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.3,
+            mu_val=1.0 + 1e-7,
+            sigma_val=0.5 + 1e-7,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.95,
+            coverage=1.0,
+        ),
+    ]
+    with caplog.at_level(logging.INFO, logger=ls.logger.name):
+        lam, _, _ = ls.select_lambda_with_elbow(rows, sigma_pct_threshold=1.0)
+    assert lam == 0.1
+    assert "Shortlist de-duplicated: 3→1" in caplog.text
+    assert "Shortlist size 1;" in caplog.text
 
 
 def test_soft_sigma_prefers_lower_sigma_when_mu_close():
