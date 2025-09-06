@@ -136,6 +136,20 @@ def select_lambda_with_elbow(
 
     raw_df = pd.DataFrame.from_records(records)
 
+    # Drop rows with NaN metrics and log the affected λ values
+    nan_mask = raw_df[["mu_val", "sigma_val"]].isna().any(axis=1)
+    if nan_mask.any():
+        nan_groups = raw_df[nan_mask].groupby("lambda")
+        for lam, grp in nan_groups:
+            count = len(grp)
+            logger.warning("NaN metrics for λ=%s; dropped %d rows", lam, count)
+            total = (raw_df["lambda"] == lam).sum()
+            if count == total:
+                logger.warning("All rows NaN for λ=%s; excluded from selection", lam)
+        raw_df = raw_df[~nan_mask]
+        if raw_df.empty:
+            raise ValueError("No lambda sweep results after dropping NaNs")
+
     grouped = raw_df.groupby("lambda")
     aggfunc = "median" if rank_stat == "median" else "mean"
     summary = grouped.agg(
