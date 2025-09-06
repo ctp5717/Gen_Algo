@@ -9,6 +9,8 @@ from typing import Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
+import config
+
 
 @dataclass
 class LambdaSweepRow:
@@ -134,6 +136,9 @@ def select_lambda_with_elbow(
 
     if not records:
         raise ValueError("No lambda sweep results provided")
+
+    if coverage_min is None:
+        coverage_min = getattr(config, "MULTI_ASSET", {}).get("lambda_coverage_min")
 
     raw_df = pd.DataFrame.from_records(records)
 
