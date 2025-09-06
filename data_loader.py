@@ -93,13 +93,13 @@ def _get_binance_data(
             "Taker buy quote asset volume",
             "Ignore",
         ],
+        dtype=float,
     )
 
     # --- Data Cleaning and Formatting ---
     data["Date"] = pd.to_datetime(data["Open time"], unit="ms")
     data.set_index("Date", inplace=True)
     data = data[["Open", "High", "Low", "Close", "Volume"]]
-    data = data.apply(pd.to_numeric, errors="coerce")
 
     if verbose:
         print("Binance data loaded and formatted successfully.")
