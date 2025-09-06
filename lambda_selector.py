@@ -97,8 +97,8 @@ def select_lambda_with_elbow(
         Maximum absolute difference in ``μ`` and ``σ`` when de-duplicating the
         shortlist. Defaults to ``1e-6``.
     rank_stat:
-        Summary statistic used to aggregate metrics per λ. ``"mean"`` (default)
-        or ``"median"``.
+        Summary statistic used to aggregate metrics per λ. Valid options are
+        ``"mean"`` (default) and ``"median"``.
     soft_sigma_enabled:
         When ``True`` the selection logic softens tie-breaking on ``μ`` when the
         shortlisted candidates have nearly equal validation-μ. ``mu_span_abs``

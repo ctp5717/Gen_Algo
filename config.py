@@ -252,7 +252,7 @@ MULTI_ASSET = {
     "lambda_finalist_max_passes": 3,
     # Tolerance for detecting duplicate shortlist entries
     "lambda_duplicate_tol": 1e-6,
-    # Statistic used for aggregating metrics per λ
+    # Statistic used for aggregating metrics per λ ("mean" or "median")
     "lambda_rank_stat": "mean",
     # Optional minimum average coverage fraction for lambda candidates
     "lambda_coverage_min": None,
