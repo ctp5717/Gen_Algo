@@ -1,9 +1,13 @@
+import dataclasses
+import hashlib
 import json
+import logging
 import math
 import os
 import subprocess
 from datetime import datetime, timezone
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pygad
@@ -14,6 +18,8 @@ import fitness
 import lambda_selector
 import strategy_engine as engine
 import trade_floor
+
+logger = logging.getLogger(__name__)
 
 
 def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
@@ -162,6 +168,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             print("\n-- Lambda Dispersion Grid --")
             sweep_start = datetime.now(timezone.utc).isoformat()
             sweep_rows = []
+            sweep_rows_all = []
             seeds = (
                 config.MULTI_ASSET.get("lambda_seeds")
                 or config.MULTI_ASSET.get("lambda_rescore_seeds")
@@ -173,20 +180,36 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 config.MULTI_ASSET.get("lambda_sigma_pct", 0.75),
             )
             coverage_min = config.MULTI_ASSET.get("lambda_coverage_min")
+            gens_r1 = config.MULTI_ASSET.get("lambda_probe_generations_round1", 3)
+            gens_r2 = config.MULTI_ASSET.get("lambda_probe_generations_round2", 5)
+            max_gens = config.MULTI_ASSET.get("lambda_probe_generations_max", gens_r2)
+            reprobe_on_dup = config.MULTI_ASSET.get(
+                "lambda_probe_round2_on_duplicate", True
+            )
+            reprobe_shortlist = config.MULTI_ASSET.get(
+                "lambda_probe_round2_for_shortlist", False
+            )
+            pop_size = config.MULTI_ASSET.get("lambda_probe_population", 12)
+            pop_size_r2 = config.MULTI_ASSET.get(
+                "lambda_probe_population_round2", pop_size
+            )
+            dup_tol = config.MULTI_ASSET.get("lambda_duplicate_tol", 1e-6)
+            ndigits = max(0, int(abs(np.log10(max(dup_tol, 1e-12)))))
+            rank_stat = config.MULTI_ASSET.get("lambda_rank_stat", "mean")
 
-            for lam in lam_grid:
-                for seed in seeds:
-                    settings = dict(config.MULTI_ASSET)
-                    settings["lambda_dispersion"] = lam
-                    settings["trade_floor_policy"] = "soft_penalty"
-                    settings["soft_penalty_mode"] = "multiplicative"
-                    evaluator = fitness.MultiAssetFitnessEvaluator(
-                        train_data, config.STRATEGY_RULES, gene_map, settings
-                    )
+            def _probe_lambda(lam, seed, generations, population, round_id):
+                settings = dict(config.MULTI_ASSET)
+                settings["lambda_dispersion"] = lam
+                settings["trade_floor_policy"] = "soft_penalty"
+                settings["soft_penalty_mode"] = "multiplicative"
+                evaluator = fitness.MultiAssetFitnessEvaluator(
+                    train_data, config.STRATEGY_RULES, gene_map, settings
+                )
+                try:
                     probe = pygad.GA(
-                        num_generations=1,
+                        num_generations=generations,
                         num_parents_mating=2,
-                        sol_per_pop=4,
+                        sol_per_pop=population,
                         num_genes=len(gene_space),
                         gene_space=gene_space,
                         gene_type=list(gene_types),
@@ -208,18 +231,21 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     mu_val, sigma_val, _, coverage = _extract_metrics(
                         val_evaluator, best_solution
                     )
-                    sweep_rows.append(
-                        lambda_selector.LambdaSweepRow(
-                            lambda_value=lam,
-                            mu_val=mu_val,
-                            sigma_val=sigma_val,
-                            mu_tr=mu_tr,
-                            sigma_tr=sigma_tr,
-                            F_tr=F_tr,
-                            coverage=coverage,
-                            fold=0,
-                            seed=seed,
-                        )
+                    sol_hash = hashlib.sha256(
+                        np.round(best_solution, 6).tobytes()
+                    ).hexdigest()
+                    row = lambda_selector.LambdaSweepRow(
+                        lambda_value=lam,
+                        mu_val=mu_val,
+                        sigma_val=sigma_val,
+                        mu_tr=mu_tr,
+                        sigma_tr=sigma_tr,
+                        F_tr=F_tr,
+                        coverage=coverage,
+                        fold=0,
+                        seed=seed,
+                        round=round_id,
+                        solution_hash=sol_hash,
                     )
                     gap = mu_tr - mu_val
                     print(
@@ -227,6 +253,29 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                         f"σ_val={sigma_val:.4f} | gap={gap:.4f} | "
                         f"coverage={coverage:.4f}"
                     )
+                except Exception as e:  # pragma: no cover - safety net
+                    print(f"Probe error for λ={lam} seed={seed}: {e}")
+                    row = lambda_selector.LambdaSweepRow(
+                        lambda_value=lam,
+                        mu_val=np.nan,
+                        sigma_val=np.nan,
+                        mu_tr=np.nan,
+                        sigma_tr=np.nan,
+                        F_tr=np.nan,
+                        coverage=np.nan,
+                        fold=0,
+                        seed=seed,
+                        note="probe_error",
+                        round=round_id,
+                    )
+                sweep_rows.append(row)
+                sweep_rows_all.append(dataclasses.replace(row))
+
+            round_id = 1
+            print(f"λ-grid round1: gens={gens_r1}, pop={pop_size}")
+            for lam in lam_grid:
+                for seed in seeds:
+                    _probe_lambda(lam, seed, gens_r1, pop_size, round_id)
 
             (
                 selected_lam,
@@ -237,7 +286,90 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 shortlist_size=shortlist_size,
                 sigma_pct_threshold=sigma_pctl,
                 coverage_min=coverage_min,
+                duplicate_tol=dup_tol,
+                rank_stat=rank_stat,
             )
+
+            def _dup_mask_close(df):
+                rounded = df[["mu_val_mean", "sigma_val_mean"]].round(ndigits)
+                return rounded.duplicated(keep=False).to_numpy()
+
+            if reprobe_on_dup and _dup_mask_close(shortlist_df).any():
+                dup_values = shortlist_df.loc[
+                    _dup_mask_close(shortlist_df), "lambda"
+                ].unique()
+                current_gen = gens_r2
+                pop = pop_size_r2
+                round_id += 1
+                print(
+                    f"λ-grid reprobe: λ in {list(map(float, dup_values))}, "
+                    f"gens={current_gen}, pop={pop}"
+                )
+                while dup_values.size:
+                    sweep_rows = [
+                        r for r in sweep_rows if r.lambda_value not in dup_values
+                    ]
+                    for lam in dup_values:
+                        for seed in seeds:
+                            _probe_lambda(lam, seed, current_gen, pop, round_id)
+                    (
+                        selected_lam,
+                        sweep_table,
+                        shortlist_df,
+                    ) = lambda_selector.select_lambda_with_elbow(
+                        sweep_rows,
+                        shortlist_size=shortlist_size,
+                        sigma_pct_threshold=sigma_pctl,
+                        coverage_min=coverage_min,
+                        duplicate_tol=dup_tol,
+                        rank_stat=rank_stat,
+                    )
+                    if _dup_mask_close(shortlist_df).any() and current_gen < max_gens:
+                        dup_values = shortlist_df.loc[
+                            _dup_mask_close(shortlist_df), "lambda"
+                        ].unique()
+                        current_gen = max_gens
+                        round_id += 1
+                        print(
+                            f"λ-grid reprobe: λ in {list(map(float, dup_values))}, "
+                            f"gens={current_gen}, pop={pop}"
+                        )
+                    else:
+                        break
+
+            degenerate = (shortlist_df["elbow_dist"].abs() < 1e-9).all()
+            if degenerate:
+                logger.warning(
+                    "λ-grid: shortlist elbow is degenerate; tie-breakers may dominate."
+                )
+            if degenerate or reprobe_shortlist:
+                finalist_lams = shortlist_df["lambda"].unique()
+                sweep_rows = [
+                    r for r in sweep_rows if r.lambda_value not in finalist_lams
+                ]
+                current_gen = gens_r2
+                pop = pop_size_r2
+                round_id += 1
+                print(
+                    f"λ-grid finalist reprobe: λ in {list(map(float, finalist_lams))}, "
+                    f"gens={current_gen}, pop={pop}"
+                )
+                for lam in finalist_lams:
+                    for seed in seeds:
+                        _probe_lambda(lam, seed, current_gen, pop, round_id)
+                (
+                    selected_lam,
+                    sweep_table,
+                    shortlist_df,
+                ) = lambda_selector.select_lambda_with_elbow(
+                    sweep_rows,
+                    shortlist_size=shortlist_size,
+                    sigma_pct_threshold=sigma_pctl,
+                    coverage_min=coverage_min,
+                    duplicate_tol=dup_tol,
+                    rank_stat=rank_stat,
+                )
+
             config.MULTI_ASSET["lambda_dispersion"] = selected_lam
             print(f"Selected λ={selected_lam}")
 
@@ -263,6 +395,46 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             except Exception:
                 git_sha = "unknown"
 
+            rows_all_df = pd.DataFrame([r.to_dict() for r in sweep_rows_all])
+            rows_final_df = pd.DataFrame([r.to_dict() for r in sweep_rows])
+            rows_all_df.to_csv("lambda_sweep.csv", index=False)
+
+            idx_A = shortlist_df["sigma_val_mean"].idxmin()
+            idx_B = shortlist_df["mu_val_mean"].idxmax()
+            A_sig = shortlist_df.loc[idx_A, "sigma_val_mean"]
+            A_mu = shortlist_df.loc[idx_A, "mu_val_mean"]
+            B_sig = shortlist_df.loc[idx_B, "sigma_val_mean"]
+            B_mu = shortlist_df.loc[idx_B, "mu_val_mean"]
+
+            fig, ax = plt.subplots()
+            ax.scatter(
+                sweep_table["sigma_val_mean"],
+                sweep_table["mu_val_mean"],
+            )
+            for _, row in sweep_table.iterrows():
+                ax.annotate(
+                    f"{row['lambda']}",
+                    (row["sigma_val_mean"], row["mu_val_mean"]),
+                )
+            ax.plot([A_sig, B_sig], [A_mu, B_mu], linestyle="--", color="grey")
+            chosen = shortlist_df.iloc[0]
+            ax.scatter(
+                [chosen["sigma_val_mean"]],
+                [chosen["mu_val_mean"]],
+                marker="x",
+                s=80,
+                color="red",
+            )
+            ax.annotate(
+                f"λ*={chosen['lambda']}",
+                (chosen["sigma_val_mean"], chosen["mu_val_mean"]),
+            )
+            ax.set_xlabel("sigma_val_mean")
+            ax.set_ylabel("mu_val_mean")
+            fig.tight_layout()
+            fig.savefig("lambda_frontier.png")
+            plt.close(fig)
+
             artifact = {
                 "selected_lambda": selected_lam,
                 "grid": list(lam_grid),
@@ -274,8 +446,37 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 "started_at": sweep_start,
                 "ended_at": sweep_end,
                 "git_sha": git_sha,
-                "rows": sweep_table.to_dict(orient="records"),
+                "rows_all": rows_all_df.to_dict(orient="records"),
+                "rows_final": rows_final_df.to_dict(orient="records"),
+                "rows_agg": sweep_table.to_dict(orient="records"),
                 "shortlist": shortlist_df.to_dict(orient="records"),
+                "elbow_AB": {
+                    "A": {
+                        "lambda": float(shortlist_df.loc[idx_A, "lambda"]),
+                        "sigma": float(A_sig),
+                        "mu": float(A_mu),
+                    },
+                    "B": {
+                        "lambda": float(shortlist_df.loc[idx_B, "lambda"]),
+                        "sigma": float(B_sig),
+                        "mu": float(B_mu),
+                    },
+                },
+                "chosen": {
+                    "lambda": float(selected_lam),
+                    "elbow_dist": float(chosen["elbow_dist"]),
+                },
+                "probe": {
+                    "gens_round1": gens_r1,
+                    "gens_round2": gens_r2,
+                    "gens_max": max_gens,
+                    "pop_r1": pop_size,
+                    "pop_r2": pop_size_r2,
+                    "duplicate_tol": dup_tol,
+                    "round2_on_duplicate": reprobe_on_dup,
+                    "round2_for_shortlist": reprobe_shortlist,
+                    "rank_stat": rank_stat,
+                },
             }
             with open("lambda_sweep.json", "w", encoding="utf-8") as f:
                 json.dump(artifact, f, indent=2)

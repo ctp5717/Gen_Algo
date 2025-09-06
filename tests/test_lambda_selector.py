@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -42,7 +43,7 @@ def test_select_lambda_recovers_best_mu():
     assert set(table["lambda"]) == {0.1, 0.2, 0.3}
 
 
-def test_select_lambda_prefers_lower_sigma_on_tie():
+def test_select_lambda_prefers_lower_sigma_on_tie(caplog):
     rows = [
         ls.LambdaSweepRow(
             0.1,
@@ -63,8 +64,10 @@ def test_select_lambda_prefers_lower_sigma_on_tie():
             coverage=1.0,
         ),
     ]
-    lam, _, _ = ls.select_lambda_with_elbow(rows)
+    with caplog.at_level(logging.INFO, logger=ls.logger.name):
+        lam, _, _ = ls.select_lambda_with_elbow(rows, sigma_pct_threshold=1.0)
     assert lam == 0.2
+    assert "skipping elbow" in caplog.text.lower()
 
 
 def test_select_lambda_elbow_choice():
@@ -124,3 +127,111 @@ def test_select_lambda_respects_coverage_min():
     ]
     lam, _, _ = ls.select_lambda_with_elbow(rows, coverage_min=0.3)
     assert lam == 0.1
+
+
+def test_select_lambda_warns_on_degenerate(caplog):
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.5,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.75,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=2.0,
+            sigma_val=0.5,
+            mu_tr=2.0,
+            sigma_tr=0.5,
+            F_tr=1.5,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.3,
+            mu_val=3.0,
+            sigma_val=0.5,
+            mu_tr=3.0,
+            sigma_tr=0.5,
+            F_tr=2.25,
+            coverage=1.0,
+        ),
+    ]
+    with caplog.at_level(logging.WARNING, logger=ls.logger.name):
+        lam, _, _ = ls.select_lambda_with_elbow(rows)
+    assert "degenerate" in caplog.text.lower()
+    assert lam == 0.3
+
+
+def test_shortlist_dedup_triggers_tiebreak(caplog):
+    rows = [
+        ls.LambdaSweepRow(
+            0.1,
+            mu_val=1.0,
+            sigma_val=0.5,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.95,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.2,
+            mu_val=1.0 + 5e-7,
+            sigma_val=0.5 + 5e-7,
+            mu_tr=1.0,
+            sigma_tr=0.5,
+            F_tr=0.95,
+            coverage=1.0,
+        ),
+        ls.LambdaSweepRow(
+            0.3,
+            mu_val=1.0,
+            sigma_val=0.4,
+            mu_tr=1.0,
+            sigma_tr=0.4,
+            F_tr=0.92,
+            coverage=1.0,
+        ),
+    ]
+    with caplog.at_level(logging.INFO, logger=ls.logger.name):
+        lam, _, _ = ls.select_lambda_with_elbow(rows)
+    assert lam == 0.3
+    assert "tie-breaker on sigma" in caplog.text.lower()
+
+
+def test_select_lambda_median_rank_stat():
+    rows = []
+    for mu in [0.0, 10.0, 10.0]:
+        rows.append(
+            ls.LambdaSweepRow(
+                0.1,
+                mu_val=mu,
+                sigma_val=0.5,
+                mu_tr=mu,
+                sigma_tr=0.5,
+                F_tr=1.0,
+                coverage=1.0,
+            )
+        )
+    for mu in [7.0, 7.0, 7.0]:
+        rows.append(
+            ls.LambdaSweepRow(
+                0.2,
+                mu_val=mu,
+                sigma_val=0.5,
+                mu_tr=mu,
+                sigma_tr=0.5,
+                F_tr=1.0,
+                coverage=1.0,
+            )
+        )
+    lam_mean, _, _ = ls.select_lambda_with_elbow(
+        rows, shortlist_size=2, rank_stat="mean"
+    )
+    lam_med, _, _ = ls.select_lambda_with_elbow(
+        rows, shortlist_size=2, rank_stat="median"
+    )
+    assert lam_mean == 0.2
+    assert lam_med == 0.1
