@@ -22,6 +22,23 @@ import trade_floor
 logger = logging.getLogger(__name__)
 
 
+def _hash_solution(solution: np.ndarray | list | tuple) -> str:
+    """Return a stable hash for GA solutions with mixed dtypes.
+
+    PyGAD returns the best solution as an ``object`` dtype array when genes
+    have mixed types (e.g. both ``int`` and ``float``). Passing such an array
+    directly to ``np.round`` triggers ``TypeError: loop of ufunc does not
+    support argument 0 of type float which has no callable rint method``.
+
+    Casting to ``float`` before rounding normalises the array and avoids this
+    issue while keeping hash determinism.
+    """
+
+    arr = np.asarray(solution, dtype=float)
+    arr = np.round(arr, 6)
+    return hashlib.sha256(arr.tobytes()).hexdigest()
+
+
 def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
     """Sample MACD parameters while enforcing basic constraints.
 
@@ -231,9 +248,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     mu_val, sigma_val, _, coverage = _extract_metrics(
                         val_evaluator, best_solution
                     )
-                    sol_hash = hashlib.sha256(
-                        np.round(best_solution, 6).tobytes()
-                    ).hexdigest()
+                    sol_hash = _hash_solution(best_solution)
                     row = lambda_selector.LambdaSweepRow(
                         lambda_value=lam,
                         mu_val=mu_val,

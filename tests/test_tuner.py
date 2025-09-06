@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -463,3 +464,9 @@ def test_lambda_grid_reprobes_shortlist_on_degenerate_elbow(monkeypatch):
     assert generations == [2, 2, 5, 5]
     assert pop_calls == [9, 9, 13, 13]
     assert call["n"] == 2
+
+
+def test_hash_solution_handles_object_arrays():
+    arr_obj = np.array([1.234567, 2], dtype=object)
+    arr_float = np.array([1.234567, 2], dtype=float)
+    assert tuner._hash_solution(arr_obj) == tuner._hash_solution(arr_float)
