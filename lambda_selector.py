@@ -68,6 +68,10 @@ def select_lambda_with_elbow(
     coverage_min: float | None = None,
     duplicate_tol: float = 1e-6,
     rank_stat: str = "mean",
+    soft_sigma_enabled: bool = False,
+    soft_sigma_eps_abs: float = 0.02,
+    soft_sigma_eps_rel: float = 0.02,
+    soft_sigma_tau: float = 0.02,
 ) -> Tuple[float, pd.DataFrame, pd.DataFrame]:
     """Select the dispersion penalty using validation-μ and elbow refinement.
 
@@ -94,6 +98,22 @@ def select_lambda_with_elbow(
     rank_stat:
         Summary statistic used to aggregate metrics per λ. ``"mean"`` (default)
         or ``"median"``.
+    soft_sigma_enabled:
+        When ``True`` the selection logic softens tie-breaking on ``μ`` when the
+        shortlisted candidates have nearly equal validation-μ. ``mu_span_abs``
+        and ``mu_span_rel`` capture the absolute and relative spread of
+        validation-μ across the shortlist. If either metric falls below their
+        respective ``soft_sigma_eps_*`` thresholds the adjusted metric
+        ``mu_adj = mu_val_mean - soft_sigma_tau * sigma_val_mean`` is used in the
+        ranking.
+    soft_sigma_eps_abs:
+        Maximum absolute spread in validation-μ for ``soft_sigma_enabled`` to
+        trigger. Defaults to ``0.02``.
+    soft_sigma_eps_rel:
+        Maximum relative spread in validation-μ for ``soft_sigma_enabled`` to
+        trigger. Defaults to ``0.02``.
+    soft_sigma_tau:
+        Weight applied to σ when computing ``mu_adj``. Defaults to ``0.02``.
 
     Returns
     -------
@@ -149,14 +169,26 @@ def select_lambda_with_elbow(
     if len(shortlist) < before:
         logger.info("Shortlist de-duplicated: %s→%s", before, len(shortlist))
 
+    mu_span_abs = float(shortlist["mu_val_mean"].max() - shortlist["mu_val_mean"].min())
+    mu_span_rel = float(mu_span_abs / max(shortlist["mu_val_mean"].abs().max(), 1e-12))
+    use_soft_sigma = soft_sigma_enabled and (
+        mu_span_abs <= soft_sigma_eps_abs or mu_span_rel <= soft_sigma_eps_rel
+    )
+    if use_soft_sigma:
+        shortlist = shortlist.assign(
+            mu_adj=shortlist["mu_val_mean"]
+            - soft_sigma_tau * shortlist["sigma_val_mean"]
+        )
+
     if len(shortlist) == 1:
         chosen = shortlist.iloc[0]
         shortlist = shortlist.assign(elbow_dist=0.0)
         return float(chosen["lambda"]), summary, shortlist
     if len(shortlist) == 2:
         logger.info("Shortlist size 2; skipping elbow and applying tie-breakers.")
+        mu_col = "mu_adj" if use_soft_sigma else "mu_val_mean"
         tie_order = [
-            ("mu_val_mean", False, "mu"),
+            (mu_col, False, "mu_adj" if use_soft_sigma else "mu"),
             ("sigma_val_mean", True, "sigma"),
             ("gap", True, "gap"),
             ("coverage_mean", False, "coverage"),
@@ -216,15 +248,16 @@ def select_lambda_with_elbow(
     if len(shortlist) > 1 and np.all(np.abs(shortlist["elbow_dist"]) <= 1e-9):
         logger.warning("Shortlist is degenerate; falling back to tie-breakers.")
 
+    sort_cols = [
+        "elbow_dist",
+        "mu_adj" if use_soft_sigma else "mu_val_mean",
+        "sigma_val_mean",
+        "gap",
+        "coverage_mean",
+        "lambda",
+    ]
     shortlist = shortlist.sort_values(
-        by=[
-            "elbow_dist",
-            "mu_val_mean",
-            "sigma_val_mean",
-            "gap",
-            "coverage_mean",
-            "lambda",
-        ],
+        by=sort_cols,
         ascending=[False, False, True, True, False, True],
     )
     chosen = shortlist.iloc[0]
