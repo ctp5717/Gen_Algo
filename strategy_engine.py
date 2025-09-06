@@ -26,6 +26,7 @@ import warnings
 from functools import reduce
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
 import indicator_library as ind_lib  # Import our toolbox of indicators
@@ -183,12 +184,17 @@ def _combine_signals(
             raise ValueError(
                 "vote_threshold must be between 1 and the number of active conditions"
             )
+        df = pd.DataFrame([s.astype(float) for s in prepared])
+        arr = df.to_numpy()
         if treat_nan_as_false:
-            signal_sum = pd.concat(prepared, axis=1).astype(int).sum(axis=1)
-            return signal_sum >= threshold
-        signal_df = pd.concat(prepared, axis=1)
-        signal_sum = signal_df.astype("Int64").sum(axis=1, min_count=len(prepared))
-        return signal_sum >= threshold
+            signal_sum = np.sum(arr, axis=0)
+            return pd.Series(signal_sum >= threshold, index=df.columns)
+        nan_mask = np.isnan(arr).any(axis=0)
+        arr = np.nan_to_num(arr)
+        signal_sum = np.sum(arr, axis=0)
+        result = pd.Series(signal_sum >= threshold, index=df.columns, dtype="boolean")
+        result[nan_mask] = pd.NA
+        return result
 
     raise ValueError(
         f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
