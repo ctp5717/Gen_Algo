@@ -428,8 +428,8 @@ def process_strategy_rules(
                 individual_signal.fillna(False)
                 if treat_nan_as_false
                 else individual_signal
-            )
-            counts[name] = int(pd.Series(val, dtype="boolean").sum(skipna=True))
+            ).astype("boolean")
+            counts[name] = int(val.sum())
 
     if not signals:
         empty = pd.Series(False, index=ohlc_data.index)
