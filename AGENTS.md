@@ -254,6 +254,7 @@ Notes:
 - **Multi-asset:** confirm `MULTI_ASSET["enabled"] = true` and tune:
   - `lambda_dispersion`, `min_total_trades_per_year`, `coverage_penalty`,
   - `zero_trade_policy` ("ignore" or "penalize"), `per_asset_min_trades` (per fold, not time-scaled).
+  - `lambda_rank_stat` ("mean" or "median") to summarize λ-sweep metrics.
 - **Coverage threshold:** `COVERAGE_THRESHOLD` (default `0.8`) controls asset retention when aligning data.
 
 **BBands tips:** Select specific bands either by adding a `band` hint

@@ -2,6 +2,8 @@ import logging
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -395,3 +397,43 @@ def test_select_lambda_median_rank_stat():
     )
     assert lam_mean == 0.2
     assert lam_med == 0.1
+
+
+def test_select_lambda_rank_stat_summary_differs():
+    rows = []
+    for mu in [0.0, 10.0, 10.0]:
+        rows.append(
+            ls.LambdaSweepRow(
+                0.1,
+                mu_val=mu,
+                sigma_val=0.5,
+                mu_tr=mu,
+                sigma_tr=0.5,
+                F_tr=1.0,
+                coverage=1.0,
+            )
+        )
+    for mu in [7.0, 7.0, 7.0]:
+        rows.append(
+            ls.LambdaSweepRow(
+                0.2,
+                mu_val=mu,
+                sigma_val=0.5,
+                mu_tr=mu,
+                sigma_tr=0.5,
+                F_tr=1.0,
+                coverage=1.0,
+            )
+        )
+    _, summary_mean, _ = ls.select_lambda_with_elbow(
+        rows, shortlist_size=2, rank_stat="mean"
+    )
+    _, summary_med, _ = ls.select_lambda_with_elbow(
+        rows, shortlist_size=2, rank_stat="median"
+    )
+    mu_mean = float(
+        summary_mean.loc[summary_mean["lambda"] == 0.1, "mu_val_mean"].iloc[0]
+    )
+    mu_med = float(summary_med.loc[summary_med["lambda"] == 0.1, "mu_val_mean"].iloc[0])
+    assert mu_mean == pytest.approx(20 / 3)
+    assert mu_med == 10.0
