@@ -284,6 +284,10 @@ def process_strategy_rules(
     signals = []
     counts = {} if collect_counts else None
 
+    # Cache indicator computations within this call to avoid duplicate work.
+    # Keyed by (indicator_name, tuple(sorted(params.items()))) per requirements.
+    indicator_cache: dict[tuple[str, tuple], pd.Series | pd.DataFrame] = {}
+
     for rule in conditions:
         if not rule.get("is_active", True):
             continue
@@ -300,7 +304,12 @@ def process_strategy_rules(
             )
             continue
 
-        indicator_output = indicator_func(ohlc_data, **params)
+        key = (indicator_name, tuple(sorted(params.items())))
+        if key in indicator_cache:
+            indicator_output = indicator_cache[key]
+        else:
+            indicator_output = indicator_func(ohlc_data, **params)
+            indicator_cache[key] = indicator_output
         condition_type = condition_logic.get("type")
 
         # --- Intelligent Column Selection ---
