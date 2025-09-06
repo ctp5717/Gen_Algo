@@ -2,6 +2,7 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,7 +142,7 @@ def test_evaluate_on_validation_uses_multi_asset(monkeypatch):
     assert res is sentinel
 
 
-def test_lambda_grid_rescoring(monkeypatch):
+def test_lambda_grid_calls_selector(monkeypatch):
     df = pd.DataFrame(
         {
             "Open": [1],
@@ -157,48 +158,59 @@ def test_lambda_grid_rescoring(monkeypatch):
     gene_map = {0: {"name": "x", "path": [], "type": float}}
     gene_types = [float]
 
-    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [0.1, 0.2, 0.3])
-    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_top_k", 2)
-    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_rescore_seeds", [1, 2])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [0.1, 0.2])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_seeds", [1, 2])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_coverage_min", 0.1)
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_on_duplicate", False
+    )
     monkeypatch.setattr(tuner.config, "HYPERPARAMETER_SEARCH_SPACE", [], raising=False)
 
-    scores = {
-        (0.1, 42): 1.0,
-        (0.2, 42): 0.8,
-        (0.3, 42): 0.7,
-        (0.1, 1): 1.0,
-        (0.1, 2): 0.5,
-        (0.2, 1): 2.0,
-        (0.2, 2): 1.5,
-    }
+    calls = []
+    seed_calls = []
+    selector_kwargs = {}
 
-    current_lam = {"value": None}
+    def fake_selector(rows, **kwargs):
+        calls.append(rows)
+        selector_kwargs.update(kwargs)
+        table = pd.DataFrame(
+            {
+                "lambda": [0.1, 0.2],
+                "mu_val_mean": [0, 0],
+                "mu_val_std": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "sigma_val_std": [0, 0],
+                "mu_train_mean": [0, 0],
+                "F_train_mean": [0, 0],
+                "coverage_mean": [0, 0],
+                "gap": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        )
+        return 0.2, table, table
 
     class DummyEval:
         def __init__(self, *a, **k):
-            settings = a[3]
-            current_lam["value"] = settings["lambda_dispersion"]
+            pass
 
         def __call__(self, ga, sol, idx):
             return 0
 
     class DummyGA:
         def __init__(self, *a, **k):
-            seed = k.get("random_seed")
-            lam = current_lam["value"]
-            self.score = scores[(lam, seed)]
+            seed_calls.append(k.get("random_seed"))
 
         def run(self):
             pass
 
         def best_solution(self, **kwargs):
-            return [self.score], self.score, None
+            return [0], 0, None
 
     monkeypatch.setattr(
-        tuner.fitness,
-        "MultiAssetFitnessEvaluator",
-        DummyEval,
+        tuner.lambda_selector, "select_lambda_with_elbow", fake_selector
     )
+    monkeypatch.setattr(tuner.fitness, "MultiAssetFitnessEvaluator", DummyEval)
     monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
     monkeypatch.setattr(
         tuner.fitness,
@@ -209,9 +221,20 @@ def test_lambda_grid_rescoring(monkeypatch):
 
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
     assert tuner.config.MULTI_ASSET["lambda_dispersion"] == 0.2
+    assert calls and len(calls[0]) == 4
+    assert seed_calls == [1, 2, 1, 2]
+    assert (
+        selector_kwargs["shortlist_size"]
+        == tuner.config.MULTI_ASSET["lambda_shortlist_size"]
+    )
+    assert (
+        selector_kwargs["sigma_pct_threshold"]
+        == tuner.config.MULTI_ASSET["lambda_sigma_pctl"]
+    )
+    assert selector_kwargs["coverage_min"] == 0.1
 
 
-def test_lambda_rescore_disables_mutation(monkeypatch):
+def test_lambda_grid_reprobes_near_duplicates_and_max_cap(monkeypatch):
     df = pd.DataFrame(
         {
             "Open": [1],
@@ -227,9 +250,373 @@ def test_lambda_rescore_disables_mutation(monkeypatch):
     gene_map = {0: {"name": "x", "path": [], "type": float}}
     gene_types = [float]
 
-    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [0.1])
-    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_top_k", 1)
-    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_rescore_seeds", [1])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [0.1, 0.2])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_seeds", [1])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round1", 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round2", 5)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_max", 7)
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_on_duplicate", True
+    )
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population", 9)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population_round2", 16)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_shortlist_size", 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_coverage_min", 0.0)
+    monkeypatch.setattr(tuner.config, "HYPERPARAMETER_SEARCH_SPACE", [], raising=False)
+
+    generations = []
+    seed_calls = []
+    pop_calls = []
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            generations.append(k.get("num_generations"))
+            seed_calls.append(k.get("random_seed"))
+            pop_calls.append(k.get("sol_per_pop"))
+
+        def run(self):
+            pass
+
+        def best_solution(self, **kwargs):
+            return [0], 0, None
+
+    class DummyEval:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, ga, sol, idx):
+            return 0
+
+    call = {"n": 0}
+
+    def fake_selector(rows, **kwargs):
+        call["n"] += 1
+        if call["n"] == 1:
+            table = pd.DataFrame(
+                {
+                    "lambda": [0.1, 0.2],
+                    "mu_val_mean": [0.0, 0.0 + 1e-7],
+                    "mu_val_std": [0, 0],
+                    "sigma_val_mean": [0, 0.0 + 1e-7],
+                    "sigma_val_std": [0, 0],
+                    "mu_train_mean": [0, 0],
+                    "F_train_mean": [0, 0],
+                    "coverage_mean": [1, 1],
+                    "gap": [0, 0],
+                    "elbow_dist": [0, 0],
+                }
+            )
+            return 0.1, table, table
+        if call["n"] == 2:
+            table = pd.DataFrame(
+                {
+                    "lambda": [0.1, 0.2],
+                    "mu_val_mean": [0.0, 0.0 + 1e-7],
+                    "mu_val_std": [0, 0],
+                    "sigma_val_mean": [0, 0.0 + 1e-7],
+                    "sigma_val_std": [0, 0],
+                    "mu_train_mean": [0, 0],
+                    "F_train_mean": [0, 0],
+                    "coverage_mean": [1, 1],
+                    "gap": [0, 0],
+                    "elbow_dist": [0, 0],
+                }
+            )
+            return 0.1, table, table
+        table = pd.DataFrame(
+            {
+                "lambda": [0.1, 0.2],
+                "mu_val_mean": [0, 1],
+                "mu_val_std": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "sigma_val_std": [0, 0],
+                "mu_train_mean": [0, 0],
+                "F_train_mean": [0, 0],
+                "coverage_mean": [1, 1],
+                "gap": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        )
+        return 0.2, table, table
+
+    monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
+    monkeypatch.setattr(tuner.fitness, "MultiAssetFitnessEvaluator", DummyEval)
+    monkeypatch.setattr(
+        tuner.fitness,
+        "get_fitness_evaluator",
+        lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0),
+    )
+    monkeypatch.setattr(tuner, "_evaluate_on_validation", lambda sol, gm, val: 0)
+    monkeypatch.setattr(
+        tuner.lambda_selector, "select_lambda_with_elbow", fake_selector
+    )
+
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
+
+    assert generations == [2, 2, 5, 5, 7, 7]
+    assert seed_calls == [1, 1, 1, 1, 1, 1]
+    assert pop_calls == [9, 9, 16, 16, 16, 16]
+    assert call["n"] == 3
+
+
+def test_lambda_grid_reprobes_shortlist_on_degenerate_elbow(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1],
+            "High": [1],
+            "Low": [1],
+            "Close": [1],
+            "Volume": [1],
+        },
+        index=pd.date_range("2020-01-01", periods=1),
+    )
+
+    gene_space = [{"low": 0, "high": 1}]
+    gene_map = {0: {"name": "x", "path": [], "type": float}}
+    gene_types = [float]
+
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [0.1, 0.2])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_seeds", [1])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round1", 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round2", 5)
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_on_duplicate", False
+    )
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population", 9)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population_round2", 13)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_shortlist_size", 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_coverage_min", 0.0)
+    monkeypatch.setattr(tuner.config, "HYPERPARAMETER_SEARCH_SPACE", [], raising=False)
+
+    generations = []
+    pop_calls = []
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            generations.append(k.get("num_generations"))
+            pop_calls.append(k.get("sol_per_pop"))
+
+        def run(self):
+            pass
+
+        def best_solution(self, **kwargs):
+            return [0], 0, None
+
+    class DummyEval:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, ga, sol, idx):
+            return 0
+
+    call = {"n": 0}
+
+    def fake_selector(rows, **kwargs):
+        call["n"] += 1
+        if call["n"] == 1:
+            table = pd.DataFrame(
+                {
+                    "lambda": [0.1, 0.2],
+                    "mu_val_mean": [0, 0.1],
+                    "mu_val_std": [0, 0],
+                    "sigma_val_mean": [0, 0.1],
+                    "sigma_val_std": [0, 0],
+                    "mu_train_mean": [0, 0],
+                    "F_train_mean": [0, 0],
+                    "coverage_mean": [1, 1],
+                    "gap": [0, 0],
+                    "elbow_dist": [0, 0],
+                }
+            )
+            return 0.1, table, table
+        table = pd.DataFrame(
+            {
+                "lambda": [0.1, 0.2],
+                "mu_val_mean": [0, 1],
+                "mu_val_std": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "sigma_val_std": [0, 0],
+                "mu_train_mean": [0, 0],
+                "F_train_mean": [0, 0],
+                "coverage_mean": [1, 1],
+                "gap": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        )
+        return 0.2, table, table
+
+    monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
+    monkeypatch.setattr(tuner.fitness, "MultiAssetFitnessEvaluator", DummyEval)
+    monkeypatch.setattr(
+        tuner.fitness,
+        "get_fitness_evaluator",
+        lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0),
+    )
+    monkeypatch.setattr(tuner, "_evaluate_on_validation", lambda sol, gm, val: 0)
+    monkeypatch.setattr(
+        tuner.lambda_selector, "select_lambda_with_elbow", fake_selector
+    )
+
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
+
+    assert generations == [2, 2, 5, 5]
+    assert pop_calls == [9, 9, 13, 13]
+    assert call["n"] == 2
+
+
+def test_lambda_finalist_reprobe_equalizes(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1],
+            "High": [1],
+            "Low": [1],
+            "Close": [1],
+            "Volume": [1],
+        },
+        index=pd.date_range("2020-01-01", periods=1),
+    )
+
+    gene_space = [{"low": 0, "high": 1}]
+    gene_map = {0: {"name": "x", "path": [], "type": float}}
+    gene_types = [float]
+
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [1.0, 2.0, 3.0])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_seeds", [7])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round1", 1)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round2", 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_max", 3)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population", 1)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population_round2", 1)
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_on_duplicate", False
+    )
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_for_shortlist", True
+    )
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_finalist_max_passes", 3)
+    monkeypatch.setattr(tuner.config, "HYPERPARAMETER_SEARCH_SPACE", [], raising=False)
+
+    last_lam = {"v": None}
+    calls = []
+
+    class DummyEval:
+        def __init__(self, *a, **k):
+            settings = a[3] if len(a) > 3 else k["settings"]
+            last_lam["v"] = settings["lambda_dispersion"]
+
+        def __call__(self, ga, sol, idx):
+            return 0
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            calls.append(
+                (
+                    last_lam["v"],
+                    k.get("num_generations"),
+                    k.get("sol_per_pop"),
+                    k.get("random_seed"),
+                )
+            )
+
+        def run(self):
+            pass
+
+        def best_solution(self, **kwargs):
+            return [0], 0, None
+
+    selector_calls = {"n": 0}
+
+    def fake_selector(rows, **kwargs):
+        selector_calls["n"] += 1
+        if selector_calls["n"] == 1:
+            table = pd.DataFrame(
+                {
+                    "lambda": [1.0, 2.0],
+                    "mu_val_mean": [0, 0],
+                    "sigma_val_mean": [0, 0],
+                    "elbow_dist": [0, 1],
+                }
+            )
+            return 1.0, table, table
+        if selector_calls["n"] == 2:
+            table = pd.DataFrame(
+                {
+                    "lambda": [2.0, 3.0],
+                    "mu_val_mean": [0, 0],
+                    "sigma_val_mean": [0, 0],
+                    "elbow_dist": [1, 0.5],
+                }
+            )
+            return 2.0, table, table
+        table = pd.DataFrame(
+            {
+                "lambda": [2.0, 3.0],
+                "mu_val_mean": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "elbow_dist": [1, 0.5],
+            }
+        )
+        return 2.0, table, table
+
+    monkeypatch.setattr(tuner.fitness, "MultiAssetFitnessEvaluator", DummyEval)
+    monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
+    monkeypatch.setattr(
+        tuner.fitness,
+        "get_fitness_evaluator",
+        lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0),
+    )
+    monkeypatch.setattr(tuner, "_evaluate_on_validation", lambda sol, gm, val: 0)
+    monkeypatch.setattr(
+        tuner.lambda_selector, "select_lambda_with_elbow", fake_selector
+    )
+
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
+
+    calls_by_lam: dict[float, list[tuple[int, int]]] = {}
+    for lam, gens, pop, _seed in calls:
+        calls_by_lam.setdefault(lam, []).append((gens, pop))
+
+    finals = {2.0, 3.0}
+    final_levels = {
+        lam: vals[-1] for lam, vals in calls_by_lam.items() if lam in finals
+    }
+    assert set(final_levels.values()) == {(2, 1)}
+
+
+def test_lambda_finalist_reprobe_respects_max_passes(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1],
+            "High": [1],
+            "Low": [1],
+            "Close": [1],
+            "Volume": [1],
+        },
+        index=pd.date_range("2020-01-01", periods=1),
+    )
+
+    gene_space = [{"low": 0, "high": 1}]
+    gene_map = {0: {"name": "x", "path": [], "type": float}}
+    gene_types = [float]
+
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [1.0, 2.0, 3.0, 4.0])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_seeds", [7])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round1", 1)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_round2", 2)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_generations_max", 3)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population", 1)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_probe_population_round2", 1)
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_on_duplicate", False
+    )
+    monkeypatch.setitem(
+        tuner.config.MULTI_ASSET, "lambda_probe_round2_for_shortlist", True
+    )
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_finalist_max_passes", 2)
     monkeypatch.setattr(tuner.config, "HYPERPARAMETER_SEARCH_SPACE", [], raising=False)
 
     class DummyEval:
@@ -239,12 +626,9 @@ def test_lambda_rescore_disables_mutation(monkeypatch):
         def __call__(self, ga, sol, idx):
             return 0
 
-    calls = []
-
     class DummyGA:
         def __init__(self, *a, **k):
-            if k.get("mutation_num_genes") == 0:
-                calls.append((k.get("mutation_type"), k.get("mutation_probability")))
+            pass
 
         def run(self):
             pass
@@ -252,14 +636,66 @@ def test_lambda_rescore_disables_mutation(monkeypatch):
         def best_solution(self, **kwargs):
             return [0], 0, None
 
+    selector_calls = {"n": 0}
+
+    tables = [
+        pd.DataFrame(
+            {
+                "lambda": [1.0, 2.0],
+                "mu_val_mean": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        ),
+        pd.DataFrame(
+            {
+                "lambda": [2.0, 3.0],
+                "mu_val_mean": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        ),
+        pd.DataFrame(
+            {
+                "lambda": [3.0, 4.0],
+                "mu_val_mean": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        ),
+        pd.DataFrame(
+            {
+                "lambda": [4.0, 5.0],
+                "mu_val_mean": [0, 0],
+                "sigma_val_mean": [0, 0],
+                "elbow_dist": [0, 1],
+            }
+        ),
+    ]
+
+    def fake_selector(rows, **kwargs):
+        selector_calls["n"] += 1
+        table = tables[selector_calls["n"] - 1]
+        return table["lambda"].iloc[0], table, table
+
     monkeypatch.setattr(tuner.fitness, "MultiAssetFitnessEvaluator", DummyEval)
+    monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
     monkeypatch.setattr(
         tuner.fitness,
         "get_fitness_evaluator",
         lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0),
     )
-    monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
     monkeypatch.setattr(tuner, "_evaluate_on_validation", lambda sol, gm, val: 0)
+    monkeypatch.setattr(
+        tuner.lambda_selector, "select_lambda_with_elbow", fake_selector
+    )
 
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
-    assert calls == [(None, 0.0)]
+
+    assert selector_calls["n"] == 3
+
+
+def test_hash_solution_handles_object_arrays():
+    arr_obj = np.array([1.234567, 2], dtype=object)
+    arr_float = np.array([1.234567, 2], dtype=float)
+    assert tuner._hash_solution(arr_obj) == tuner._hash_solution(arr_float)

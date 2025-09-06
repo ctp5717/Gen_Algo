@@ -3,6 +3,7 @@ import types
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from dateutil.relativedelta import relativedelta
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,7 +11,10 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+try:  # prefer real vectorbt when installed
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover - fallback stub
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import walk_forward  # noqa: E402
 
@@ -284,3 +288,241 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert len(pool) == 1 + 1 + settings["num_clones"]
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
+
+
+def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
+    import types
+
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(
+        walk_forward.data_loader,
+        "get_group_data",
+        lambda *a, **k: {"AAA": df},
+    )
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        walk_forward, "parse_genes_from_config", lambda *a, **k: ([], {}, [])
+    )
+
+    class DummyGA:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return [], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    class DummyEvaluator:
+        def __init__(self, *a, **k):
+            self.last_details = {}
+
+        def __call__(self, *a, **k):
+            self.last_details = {
+                "penalties": {"trade_floor": penalty},
+                "min_total_trades": 10,
+                "total_trades": 0,
+                "per_asset": {},
+                "mu": 0.0,
+                "lambda_sigma": 0.0,
+            }
+            return -999.0
+
+    fitness_stub = types.SimpleNamespace(
+        MultiAssetFitnessEvaluator=lambda *a, **k: DummyEvaluator(),
+        _inject_genes_into_rules=lambda *a, **k: {},
+        print_floor_failures=lambda *a, **k: None,
+    )
+    monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
+    monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(walk_forward, "_write_run_metadata", lambda *a, **k: None)
+    monkeypatch.setattr(
+        walk_forward.trade_floor,
+        "scale_floor",
+        lambda rate, s, e, td=252: (
+            0,
+            {
+                "base_floor": rate,
+                "window_days": 0,
+                "trading_days_per_year": td,
+                "years": 0,
+                "raw": 0,
+                "ceil": 0,
+            },
+        ),
+    )
+    if mode:
+        monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "soft_penalty_mode", mode)
+
+    return walk_forward.run_walk_forward_validation()
+
+
+@pytest.mark.parametrize(
+    "penalty, mode, expected",
+    [
+        ("no_assets", None, ["reason=no_assets"]),
+        (
+            {"penalty": -0.25, "reason": "low_trades"},
+            "additive",
+            ["additive", "reason=low_trades"],
+        ),
+        (None, None, []),
+    ],
+)
+def test_walk_forward_trade_floor_penalties(
+    monkeypatch, capsys, penalty, mode, expected
+):
+    summary = _run_walk_forward_with_penalty(monkeypatch, penalty, mode)
+    assert isinstance(summary, dict)
+    out = capsys.readouterr().out
+    for token in expected:
+        assert token in out
+    if not expected:
+        assert "reason=" not in out
+
+
+def test_lambda_fold_reprobe(monkeypatch):
+    """Each fold should select its own λ when enabled."""
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "Open": [1, 1],
+            "High": [1, 1],
+            "Low": [1, 1],
+            "Close": [1, 1],
+            "Volume": [1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+
+    monkeypatch.setattr(
+        walk_forward.data_loader, "get_group_data", lambda *a, **k: {"AAA": df}
+    )
+    monkeypatch.setattr(
+        walk_forward,
+        "_generate_periods",
+        lambda *a, **k: [
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            },
+            {
+                "train_start": df.index[0],
+                "train_end": df.index[1],
+                "test_start": df.index[0],
+                "test_end": df.index[1],
+            },
+        ],
+    )
+
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(
+        walk_forward.config.MULTI_ASSET, "lambda_fold_reprobe_enabled", True
+    )
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "lambda_grid", [0.1, 0.2])
+
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "per_asset_min_trades", 0)
+    monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "min_total_trades_per_year", 0)
+
+    gene_space = [{"low": 0, "high": 1, "step": 1}]
+    gene_map = {0: {"name": "x"}}
+    gene_types = [int]
+    monkeypatch.setattr(
+        walk_forward,
+        "parse_genes_from_config",
+        lambda *a, **k: (gene_space, gene_map, gene_types),
+    )
+
+    lambdas = iter([0.3, 0.4])
+    calls = []
+
+    def fake_select_lambda(train_data, gs, gm, gt):
+        lam = next(lambdas)
+        calls.append(lam)
+        return lam
+
+    monkeypatch.setattr(
+        walk_forward.tuner, "select_lambda_for_fold", fake_select_lambda
+    )
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            return None
+
+        def best_solution(self, **k):
+            return [0], 1.0, None
+
+    monkeypatch.setattr(walk_forward.pygad, "GA", DummyGA)
+
+    captured = []
+
+    class DummyEval:
+        floor_failures = {}
+
+        def __init__(self, data, rules, gmap, settings):
+            captured.append(settings.get("lambda_dispersion"))
+
+        def __call__(self, *a, **k):
+            self.last_details = {
+                "mu": 0.0,
+                "sigma": 0.0,
+                "lambda_sigma": 0.0,
+                "penalties": {},
+                "min_total_trades": 0,
+                "total_trades": 0,
+                "per_asset": {},
+                "assets_included": 0,
+                "assets_ignored": 0,
+            }
+            return 0.0
+
+    fitness_stub = types.SimpleNamespace(
+        MultiAssetFitnessEvaluator=DummyEval,
+        _inject_genes_into_rules=lambda *a, **k: {},
+        print_floor_failures=lambda *a, **k: None,
+    )
+    monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
+
+    monkeypatch.setattr(
+        walk_forward.trade_floor, "scale_floor", lambda *a, **k: (0, {})
+    )
+    monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(walk_forward, "_write_run_metadata", lambda *a, **k: None)
+
+    summary = walk_forward.run_walk_forward_validation()
+
+    assert isinstance(summary, dict)
+    assert calls == [0.3, 0.4]
+    assert captured == [0.3, 0.3, 0.4, 0.4]

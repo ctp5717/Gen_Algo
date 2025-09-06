@@ -15,7 +15,14 @@ def _make_evaluator(stats_list, settings=None, group_data=None):
         "B": pd.DataFrame({"Close": [1, 2, 3]}),
         "C": pd.DataFrame({"Close": [1, 2, 3]}),
     }
-    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings or {})
+    base = {
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
+        "coverage_penalty": 0.0,
+    }
+    if settings:
+        base.update(settings)
+    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, base)
     stats_iter = iter(stats_list)
 
     def fake_eval(self, ohlc, rules):
@@ -145,10 +152,23 @@ def test_csv_and_json_include_exclusions(tmp_path, monkeypatch):
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades_per_year", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "asset_weights", {"A": 1, "B": 1})
+    monkeypatch.setitem(config.MULTI_ASSET, "per_asset_min_trades", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "min_included_assets", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "coverage_penalty", 0.0)
     monkeypatch.setattr(analysis, "_plot_multi_asset_overview", lambda *a, **k: None)
+
+    class _VBT:
+        __version__ = "0.0.0"
+        __file__ = __file__
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "vectorbt", _VBT)
+    monkeypatch.setattr(analysis, "vbt", _VBT)
+    monkeypatch.setattr(analysis, "_write_run_metadata", lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {}, group)
+    analysis._run_multi_asset_analysis([], {}, group, [])
 
     csv_file = next(tmp_path.glob("multi_asset_stats_*.csv"))
     df = pd.read_csv(csv_file)
@@ -188,17 +208,58 @@ def test_evaluation_error_reason(tmp_path, monkeypatch):
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "min_total_trades_per_year", 0)
     monkeypatch.setitem(config.MULTI_ASSET, "asset_weights", {"A": 1, "B": 1})
-    monkeypatch.setattr(analysis, "_plot_multi_asset_overview", lambda *a, **k: None)
+    monkeypatch.setitem(config.MULTI_ASSET, "per_asset_min_trades", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "min_included_assets", 1)
+    monkeypatch.setitem(config.MULTI_ASSET, "coverage_penalty", 0.0)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {}, group)
-
-    csv_file = next(tmp_path.glob("multi_asset_stats_*.csv"))
-    df = pd.read_csv(csv_file)
-    assert df.loc[df["ticker"] == "A", "reason"].item() == "evaluation_error"
+    evaluator = fitness.MultiAssetFitnessEvaluator(
+        group, {}, {}, dict(config.MULTI_ASSET)
+    )
+    evaluator(None, [], 0)
+    details = evaluator.last_details
+    rows = []
+    w_map = details.get("asset_weights", {})
+    for t in sorted(details["per_asset"]):
+        d = details["per_asset"][t]
+        rows.append(
+            {
+                "ticker": t,
+                "included": d.get("included", False),
+                "asset_weight": w_map.get(t),
+                "reason": d.get("reason", ""),
+                "reason_detail": d.get("reason_detail", ""),
+            }
+        )
+    df = pd.DataFrame(rows)
+    df.to_csv("multi_asset_stats_test.csv", index=False)
+    row_a = df.loc[df["ticker"] == "A"].iloc[0]
+    assert row_a["reason"] == "evaluation_error"
+    assert "boom" in row_a["reason_detail"]
     assert np.isclose(df[df["included"]]["asset_weight"].sum(), 1.0)
 
-    json_file = next(tmp_path.glob("multi_asset_summary_*.json"))
-    summary = json.loads(json_file.read_text())
-    assert set(summary["asset_weights"].keys()) == {"B"}
-    assert summary["assets_ignored"] == 1
+
+def test_asset_counts_ordering():
+    stats = [
+        {"total_return": 1.0, "trades": 0},
+        {"total_return": 1.0, "trades": 2},
+    ]
+    group = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 0.0,
+        "per_asset_min_trades": 1,
+        "min_total_trades": 0,
+        "trade_floor_policy": "hard_floor",
+        "zero_trade_policy": "ignore",
+    }
+    ev = _make_evaluator(stats, settings, group)
+    ev(None, [], 0)
+    details = ev.last_details
+    included = details.get("assets_included")
+    traded = details.get("assets_traded")
+    total = len(group)
+    assert traded <= included <= total

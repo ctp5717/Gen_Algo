@@ -8,11 +8,15 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+try:  # prefer real vectorbt
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pygad  # noqa: E402
+import pytest  # noqa: E402
 
 import analysis  # noqa: E402
 import config as cfg  # noqa: E402
@@ -28,7 +32,14 @@ def _make_evaluator(settings=None, stats_list=None):
         "B": pd.DataFrame({"Close": [1, 2, 3]}),
         "C": pd.DataFrame({"Close": [1, 2, 3]}),
     }
-    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings or {})
+    base = {
+        "per_asset_min_trades": 1,
+        "min_included_assets": 1,
+        "coverage_penalty": 0.0,
+    }
+    if settings:
+        base.update(settings)
+    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, base)
 
     if stats_list is not None:
         stats_iter = iter(stats_list)
@@ -62,6 +73,7 @@ def test_aggregation_math():
         "lambda_dispersion": 0.25,
         "trade_floor_policy": "hard_floor",
         "min_total_trades": 0,
+        "per_asset_min_trades": 1,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -80,6 +92,7 @@ def test_trade_floor_policies():
         "metric": "return",
         "trade_floor_policy": "hard_floor",
         "min_total_trades": 20,
+        "per_asset_min_trades": 1,
     }
     ev_hard = _make_evaluator(settings_hard, stats)
     assert ev_hard(None, [], 0) == -999.0
@@ -89,9 +102,39 @@ def test_trade_floor_policies():
         "trade_floor_policy": "soft_penalty",
         "min_total_trades": 30,
         "soft_penalty_strength": 1.0,
+        "per_asset_min_trades": 1,
     }
     ev_soft = _make_evaluator(settings_soft, stats)
     assert np.isclose(ev_soft(None, [], 0), 0.5)
+
+
+def test_unreachable_floor_warns():
+    with pytest.warns(UserWarning, match="min_total_trades <"):
+        _make_evaluator(
+            {
+                "min_total_trades": 5,
+                "per_asset_min_trades": 3,
+                "min_included_assets": 2,
+                "trade_floor_policy": "hard_floor",
+            }
+        )
+
+
+def test_soft_penalty_auto_adjusts():
+    ev = _make_evaluator(
+        {
+            "min_total_trades": 5,
+            "per_asset_min_trades": 3,
+            "min_included_assets": 2,
+            "trade_floor_policy": "soft_penalty",
+        }
+    )
+    assert ev.settings["min_total_trades"] == 6
+
+
+def test_min_assets_clamped():
+    ev = _make_evaluator({"min_included_assets": 10})
+    assert ev.settings["min_included_assets"] == 3
 
 
 def test_min_total_trades_scaling(monkeypatch):
@@ -131,6 +174,16 @@ def test_min_total_trades_scaling(monkeypatch):
     assert captured["settings"]["min_total_trades"] == 3
     assert captured["settings"]["trade_floor_policy"] == "soft_penalty"
     assert captured["settings"]["soft_penalty_mode"] == "multiplicative"
+
+
+def test_training_floor_scaling(monkeypatch):
+    monkeypatch.setitem(cfg.MULTI_ASSET, "enabled", True)
+    monkeypatch.setitem(cfg.MULTI_ASSET, "min_total_trades_per_year", 12)
+    monkeypatch.setattr(
+        cfg, "TRAINING_PERIOD", {"start": "2020-01-01", "end": "2021-01-01"}
+    )
+    ev = fitness.get_fitness_evaluator({"A": pd.DataFrame({"Close": [1]})}, {}, {})
+    assert ev.settings["min_total_trades"] == 18
 
 
 def test_zero_trade_policy_penalize_vs_ignore():
@@ -260,6 +313,7 @@ def test_soft_penalty_additive():
         "soft_penalty_mode": "additive",
         "soft_penalty_strength": 2.0,
         "min_total_trades": 30,
+        "per_asset_min_trades": 1,
     }
     ev = _make_evaluator(settings, stats)
     # Mean = 1.0, total trades = 15 => penalty 2*(1-0.5)=1 => fitness 0
@@ -360,6 +414,7 @@ def test_metric_options():
                 "lambda_dispersion": 0.0,
                 "trade_floor_policy": "hard_floor",
                 "min_total_trades": 0,
+                "per_asset_min_trades": 1,
             },
             stats,
         )
@@ -378,6 +433,7 @@ def test_lambda_with_unequal_weights():
         "trade_floor_policy": "hard_floor",
         "min_total_trades": 0,
         "asset_weights": {"A": 0.6, "B": 0.3, "C": 0.1},
+        "per_asset_min_trades": 1,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -416,6 +472,7 @@ def test_profit_factor_capping():
         "trade_floor_policy": "hard_floor",
         "min_total_trades": 0,
         "lambda_dispersion": 0.0,
+        "per_asset_min_trades": 1,
     }
     ev = _make_evaluator(settings, stats)
     ev(None, [], 0)
@@ -433,6 +490,7 @@ def test_hard_floor_failure_counts():
         "trade_floor_policy": "hard_floor",
         "min_total_trades": 10,
         "lambda_dispersion": 0.0,
+        "per_asset_min_trades": 1,
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
@@ -476,6 +534,10 @@ def test_ga_and_tuner_consistency(monkeypatch):
     monkeypatch.setitem(cfg.MULTI_ASSET, "lambda_dispersion", 0.0)
     monkeypatch.setitem(cfg.MULTI_ASSET, "min_total_trades", 0)
     monkeypatch.setitem(cfg.MULTI_ASSET, "trade_floor_policy", "hard_floor")
+    monkeypatch.setitem(cfg.MULTI_ASSET, "per_asset_min_trades", 0)
+    monkeypatch.setitem(cfg.MULTI_ASSET, "min_total_trades_per_year", 0)
+    monkeypatch.setitem(cfg.MULTI_ASSET, "min_included_assets", 1)
+    monkeypatch.setitem(cfg.MULTI_ASSET, "coverage_penalty", 0.0)
 
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {})
     ga = pygad.GA(
@@ -510,6 +572,7 @@ def test_handles_asset_error_gracefully():
         "min_total_trades": 0,
         "lambda_dispersion": 0.0,
         "coverage_penalty": 0.0,
+        "min_included_assets": 1,
     }
 
     ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
@@ -585,9 +648,18 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
 
     monkeypatch.setattr(fitness, "MultiAssetFitnessEvaluator", DummyEval)
     monkeypatch.setattr(analysis, "_plot_multi_asset_overview", lambda *a, **k: None)
+
+    class _VBT:
+        __version__ = "0.0.0"
+        __file__ = __file__
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "vectorbt", _VBT)
+    monkeypatch.setattr(analysis, "vbt", _VBT)
     monkeypatch.chdir(tmp_path)
 
-    analysis._run_multi_asset_analysis([], {}, group)
+    analysis._run_multi_asset_analysis([], {}, group, [])
     fname = tmp_path / "multi_asset_stats_1d_2024-01-31.csv"
     assert fname.exists()
     df = pd.read_csv(fname)
@@ -602,6 +674,8 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
         "max_drawdown",
         "per_asset_min_trades",
         "reason",
+        "reason_detail",
+        "reason_trace",
     ]
     scores = df["score"].tolist()
     assert scores == sorted(scores, reverse=True)

@@ -69,8 +69,20 @@ This is the core processor that translates your ideas from the config file into 
     * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from the config.
     * **Dynamic Indicator Calls:** It uses the `INDICATOR_MAPPING` dictionary to dynamically call the correct calculation functions from the `indicator_library.py` based on the active rules.
     * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
-    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type.
-    * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (`AND`).
+    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger Bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. For MACD the histogram (`MACDh_*` or `MACD_Hist*`) is auto-detected and used by default, falling back to the line or first column when absent.
+
+    Example:
+
+    ```python
+    {
+        "indicator": "bbands",
+        "params": {"period": 20, "std_dev": 2},
+        "condition": {"type": "price_is_above_indicator", "band": "upper", "column": "BBL"},
+    }
+    # Uses BBL because `column` overrides `band`
+    ```
+
+    * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (case-insensitive, defaults to `"AND"`). NaNs are treated as `False` by default but can be propagated by setting `treat_nan_as_false=False`. For `"VOTE"`, a majority threshold is used when `vote_threshold` is `None`.
     * **Output:** It returns a final, single pandas Series of `True`/`False` entry signals to the backtester.
 
 ---
@@ -164,6 +176,74 @@ This module's purpose is to provide a final, unbiased report on the performance 
       * Go to the `STRATEGY_RULES` dictionary. Use the `'is_active': True/False` flags to choose which indicator conditions to include in your strategy.
       * Adjust the `low` and `high` ranges for any genes you want to optimize.
 
+#### Entry Rule Combination Logic
+
+The `entry_rules` section supports three ways to combine individual indicator conditions:
+
+* `"AND"` – all conditions must be true.
+* `"OR"` – any condition being true triggers a signal.
+* `"VOTE"` – at least *k* conditions must be true.  If `vote_threshold` is
+  `None` or omitted, the engine uses a majority (`ceil(N/2)`).  Values outside
+  `1..N` raise a `ValueError`.
+
+`combination_logic` is case-insensitive and defaults to `"AND"` when omitted.
+With only one active condition, all combination types behave the same.
+`treat_nan_as_false` (default `True`) controls whether missing indicator values
+are replaced with `False` before combining; set it to `False` to propagate
+NaNs and skip trading when any condition is undefined.
+
+Indicators such as moving averages often emit `NaN` values at the start of the
+series (e.g., a 14-period RSI has 13 initial NaNs). With the default
+`treat_nan_as_false=True`, those early `NaN` values become `False` so trading can
+begin as soon as other conditions are satisfied. Setting
+`treat_nan_as_false=False` keeps the `NaN`s, and the combined signal will remain
+`NaN` until all indicators have valid data.
+
+Example configurations:
+
+```python
+"entry_rules": {
+    "combination_logic": "OR",
+    "conditions": [...],
+}
+
+"entry_rules": {
+    "combination_logic": "VOTE",
+    "vote_threshold": None,  # defaults to majority
+    "treat_nan_as_false": True,
+    "conditions": [...],
+}
+```
+```python
+# Propagate NaNs to avoid trading on incomplete data
+"entry_rules": {
+    "treat_nan_as_false": False,
+    "conditions": [...],
+}
+```
+
+Both `combination_logic` and `vote_threshold` may be declared as genes (using
+the `gene` key) so the GA can explore different combination modes and
+thresholds.
+
+To target specific Bollinger Bands, provide a `band` hint or use the `*_band`
+condition types. The `band` hint accepts `"upper"`, `"middle"`/`"mid"`/`"basis"`,
+or `"lower"`:
+
+```python
+{
+    "indicator": "bbands",
+    "params": {"period": 20, "std_dev": 2},
+    "condition": {"type": "price_is_above_indicator", "band": "upper"},
+}
+# equivalent shorthand
+{
+    "indicator": "bbands",
+    "params": {"period": 20, "std_dev": 2},
+    "condition": {"type": "price_is_above_upper_band"},
+}
+```
+
 2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
 
     ```bash
@@ -205,8 +285,8 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
 * **Status:** **In Progress**
 * **Features:**
     * **Portfolio-Level Optimization Engine:** ✅ Complete.
-    * **Advanced Combination Logic:** (Planned)
-        * *This is an upgrade to the `strategy_engine.py` to handle more complex ways of combining indicator signals. Currently, our engine can only combine entry rules with a logical `AND`. This feature will add support for **`OR`** logic (e.g., "enter if EMA is bullish OR RSI is oversold") and **`VOTE`** systems (e.g., "enter if at least 3 out of 5 conditions are true"), dramatically increasing the strategic flexibility of the framework.*
+    * **Advanced Combination Logic:** ✅ Complete.
+        * *`strategy_engine.py` now supports `AND`, `OR`, and `VOTE` (N-of-M) logic for combining indicator conditions, providing more flexible entry signals.*
     * **Strategy Recommendation Engine:** (Planned)
         * *Turns multi-asset backtests and walk-forward validation into a single, production-ready trading strategy recommendation with a confidence score, asset stance, and clear rationale.
     * **Complete Indicator Library:** (Planned)
