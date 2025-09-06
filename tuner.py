@@ -481,13 +481,15 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             ax.scatter(
                 sweep_table["sigma_val_mean"],
                 sweep_table["mu_val_mean"],
+                color="lightgrey",
             )
-            for _, row in sweep_table.iterrows():
-                ax.annotate(
-                    f"{row['lambda']}",
-                    (row["sigma_val_mean"], row["mu_val_mean"]),
-                )
-            ax.plot([A_sig, B_sig], [A_mu, B_mu], linestyle="--", color="grey")
+            ax.scatter(
+                shortlist_df["sigma_val_mean"],
+                shortlist_df["mu_val_mean"],
+                color="tab:blue",
+                marker="o",
+            )
+            ax.plot([A_sig, B_sig], [A_mu, B_mu], linestyle="--", color="black")
             chosen = shortlist_df.iloc[0]
             ax.scatter(
                 [chosen["sigma_val_mean"]],
@@ -496,6 +498,8 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 s=80,
                 color="red",
             )
+            ax.annotate("A", (A_sig, A_mu))
+            ax.annotate("B", (B_sig, B_mu))
             ax.annotate(
                 f"λ*={chosen['lambda']}",
                 (chosen["sigma_val_mean"], chosen["mu_val_mean"]),
@@ -503,7 +507,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             ax.set_xlabel("sigma_val_mean")
             ax.set_ylabel("mu_val_mean")
             fig.tight_layout()
-            fig.savefig("lambda_frontier.png")
+            fig.savefig("lambda_frontier.png", dpi=150)
             plt.close(fig)
 
             artifact = {
