@@ -75,6 +75,7 @@ def test_lambda_sweep_artifacts(tmp_path, monkeypatch):
     assert json_path.exists()
     assert csv_path.exists()
     assert png_path.exists()
+    assert png_path.stat().st_size > 0
 
     data = json.loads(json_path.read_text())
     assert {
