@@ -84,6 +84,40 @@ def test_generate_signal_from_value_validates_value_param():
         )
 
 
+@pytest.mark.parametrize(
+    "ctype,expected",
+    [
+        ("indicator_is_above_value", [False, False, True, False]),
+        ("indicator_is_below_value", [True, False, False, False]),
+        ("indicator_crosses_above_value", [False, True, False, False]),
+        ("indicator_crosses_below_value", [False, False, False, True]),
+    ],
+)
+def test_generate_signal_from_value_conditions(monkeypatch, ctype, expected):
+    class Accessor:
+        def __init__(self, series):
+            self._s = series
+
+        def crossed_above(self, other):
+            prev = self._s.shift(1)
+            return (prev < other) & (self._s >= other)
+
+        def crossed_below(self, other):
+            prev = self._s.shift(1)
+            return (prev > other) & (self._s <= other)
+
+    monkeypatch.setattr(
+        pd.Series, "vbt", property(lambda s: Accessor(s)), raising=False
+    )
+    series = pd.Series([0, 1, 2, 1])
+    res = strategy_engine._generate_signal_from_value(
+        series, {"type": ctype, "value": 1}
+    )
+    pd.testing.assert_series_equal(
+        res.astype(bool), pd.Series(expected, index=series.index)
+    )
+
+
 def test_generate_signal_dispatch_and_unknown(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020", periods=2))
     indicator = pd.Series([0, 0], index=data.index)

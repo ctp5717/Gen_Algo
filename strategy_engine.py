@@ -75,6 +75,13 @@ CONDITION_FUNCTIONS: dict[str, Callable[[pd.Series, pd.Series], pd.Series]] = {
     **BOLLINGER_CONDITION_FUNCTIONS,
 }
 
+VALUE_CONDITION_FUNCTIONS: dict[str, Callable[[pd.Series, float], pd.Series]] = {
+    "indicator_is_above_value": lambda ind, val: ind > val,
+    "indicator_is_below_value": lambda ind, val: ind < val,
+    "indicator_crosses_above_value": lambda ind, val: ind.vbt.crossed_above(val),
+    "indicator_crosses_below_value": lambda ind, val: ind.vbt.crossed_below(val),
+}
+
 
 def canonical_rule_label(rule: dict) -> str:
     """Return a stable label for a rule used in counts and metadata."""
@@ -120,21 +127,14 @@ def _generate_signal_from_value(
             "'value' must be an int or float for value comparison conditions"
         )
     condition_type = condition.get("type")
-
-    if condition_type == "indicator_is_above_value":
-        return indicator_series > value
-    elif condition_type == "indicator_is_below_value":
-        return indicator_series < value
-    elif condition_type == "indicator_crosses_above_value":
-        return indicator_series.vbt.crossed_above(value)
-    elif condition_type == "indicator_crosses_below_value":
-        return indicator_series.vbt.crossed_below(value)
-    else:
+    func = VALUE_CONDITION_FUNCTIONS.get(condition_type)
+    if func is None:
         warnings.warn(
             f"Unknown condition type '{condition_type}' for value comparison.",
             stacklevel=2,
         )
         return pd.Series(False, index=indicator_series.index)
+    return func(indicator_series, value)
 
 
 def _combine_signals(
