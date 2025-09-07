@@ -4,8 +4,10 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -15,8 +17,10 @@ from dateutil.relativedelta import relativedelta
 import config
 import data_loader
 import trade_floor
+import tuner
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config
+from run_metadata import merge_run_metadata
 
 
 def _get_commit_hash() -> str:
@@ -57,7 +61,7 @@ def _get_cache_hashes(start_date: str, end_date: str) -> dict:
     hashes = {}
     for t in tickers:
         norm = data_loader._normalize_ticker(t)
-        fname = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}.csv"
+        fname = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}.parquet"
         fpath = Path(data_loader.CACHE_DIR) / fname
         hashes[fname] = _file_sha256(fpath)
     return hashes
@@ -72,6 +76,9 @@ def _write_run_metadata(
 ) -> None:
     """Persist run metadata to ``run_metadata.json``."""
     end = datetime.now(timezone.utc)
+
+    existing_artifacts = [str(a) for a in artifacts if Path(a).exists()]
+
     metadata = {
         "artifact_version": "1.0.0",
         "start_time": start.isoformat(),
@@ -89,10 +96,9 @@ def _write_run_metadata(
             },
             "pygad": pygad.__version__,
         },
-        "artifacts": artifacts,
+        "artifacts": existing_artifacts,
     }
-    with open("run_metadata.json", "w") as fh:
-        json.dump(metadata, fh, indent=2)
+    merge_run_metadata("run_metadata.json", metadata)
 
 
 def _generate_periods(
@@ -124,6 +130,13 @@ def _generate_periods(
         )
         current_start += relativedelta(months=test_months)
     return periods
+
+
+def _normalize_trade_floor_penalty(pen: Optional[Any]) -> Dict[str, Any]:
+    """Ensure trade floor penalty is a plain dict."""
+    if isinstance(pen, Mapping):
+        return dict(pen)
+    return {"reason": pen} if pen is not None else {}
 
 
 def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
@@ -272,12 +285,35 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         gene_space, gene_map, gene_types = parse_genes_from_config(
             config.STRATEGY_RULES
         )
+        if multi and config.MULTI_ASSET.get("lambda_fold_reprobe_enabled"):
+            lam = tuner.select_lambda_for_fold(
+                train_data, gene_space, gene_map, gene_types
+            )
+            config.MULTI_ASSET["lambda_dispersion"] = lam
+            print(f"Selected λ for fold {idx}: {lam}")
         if multi:
             settings_train = dict(config.MULTI_ASSET)
+            per_asset_base = settings_train.get("per_asset_min_trades")
+            if per_asset_base:
+                floor_pa, info_pa = trade_floor.scale_floor(
+                    per_asset_base,
+                    p["train_start"],
+                    p["train_end"],
+                    settings_train.get("trading_days_per_year", 252),
+                )
+                settings_train["per_asset_min_trades"] = floor_pa
+                settings_train["per_asset_floor_info"] = info_pa
+                print(
+                    f"Per-asset floor: base={per_asset_base} → scaled={floor_pa} "
+                    f"(window={info_pa['window_days']}d, base={info_pa['trading_days_per_year']}d)"
+                )
             rate = settings_train.get("min_total_trades_per_year")
             if rate:
                 floor, info = trade_floor.scale_floor(
-                    rate, p["train_start"], p["train_end"]
+                    rate,
+                    p["train_start"],
+                    p["train_end"],
+                    settings_train.get("trading_days_per_year", 252),
                 )
                 settings_train["min_total_trades"] = floor
                 print(f"Scaled min_total_trades (train): {floor} | info={info}")
@@ -330,20 +366,22 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         if multi and settings_train.get("trade_floor_policy") == "soft_penalty":
             _ = evaluator(None, best_solution, 0)
             train_details = evaluator.last_details
-            pen = train_details.get("penalties", {}).get("trade_floor") or {}
+            pen = _normalize_trade_floor_penalty(
+                train_details.get("penalties", {}).get("trade_floor")
+            )
             mode = settings_train.get("soft_penalty_mode", "multiplicative")
             floor_tr = train_details.get("min_total_trades")
             total_tr = train_details.get("total_trades")
+            reason = pen.get("reason")
             if mode == "additive":
                 delta = pen.get("penalty", 0.0)
-                print(
-                    f"Training soft floor (additive): floor={floor_tr}, total trades={total_tr}, delta={delta:.4f}"
-                )
+                msg = f"Training soft floor (additive): floor={floor_tr}, total trades={total_tr}, delta={delta:.4f}"
             else:
                 mult = pen.get("scale", 1.0)
-                print(
-                    f"Training soft floor (multiplicative): floor={floor_tr}, total trades={total_tr}, multiplier={mult:.4f}"
-                )
+                msg = f"Training soft floor (multiplicative): floor={floor_tr}, total trades={total_tr}, multiplier={mult:.4f}"
+            if reason:
+                msg += f" | reason={reason}"
+            print(msg)
 
         winning_params = {
             gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
@@ -354,10 +392,27 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         )
         if multi:
             settings_val = dict(config.MULTI_ASSET)
+            per_asset_base_val = settings_val.get("per_asset_min_trades")
+            if per_asset_base_val:
+                floor_pa_val, info_pa_val = trade_floor.scale_floor(
+                    per_asset_base_val,
+                    p["test_start"],
+                    p["test_end"],
+                    settings_val.get("trading_days_per_year", 252),
+                )
+                settings_val["per_asset_min_trades"] = floor_pa_val
+                settings_val["per_asset_floor_info"] = info_pa_val
+                print(
+                    f"Per-asset floor: base={per_asset_base_val} → scaled={floor_pa_val} "
+                    f"(window={info_pa_val['window_days']}d, base={info_pa_val['trading_days_per_year']}d)"
+                )
             rate = settings_val.get("min_total_trades_per_year")
             if rate:
                 floor_val, info_val = trade_floor.scale_floor(
-                    rate, p["test_start"], p["test_end"]
+                    rate,
+                    p["test_start"],
+                    p["test_end"],
+                    settings_val.get("trading_days_per_year", 252),
                 )
                 settings_val["min_total_trades"] = floor_val
                 print(
@@ -381,20 +436,22 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
             if policy_val == "soft_penalty":
-                pen = details.get("penalties", {}).get("trade_floor") or {}
+                pen = _normalize_trade_floor_penalty(
+                    details.get("penalties", {}).get("trade_floor")
+                )
                 mode = settings_val.get("soft_penalty_mode", "multiplicative")
                 floor_v = details.get("min_total_trades")
                 total_v = details.get("total_trades")
+                reason = pen.get("reason")
                 if mode == "additive":
                     delta = pen.get("penalty", 0.0)
-                    print(
-                        f"Validation soft floor (additive): floor={floor_v}, total trades={total_v}, delta={delta:.4f}"
-                    )
+                    msg = f"Validation soft floor (additive): floor={floor_v}, total trades={total_v}, delta={delta:.4f}"
                 else:
                     mult = pen.get("scale", 1.0)
-                    print(
-                        f"Validation soft floor (multiplicative): floor={floor_v}, total trades={total_v}, multiplier={mult:.4f}"
-                    )
+                    msg = f"Validation soft floor (multiplicative): floor={floor_v}, total trades={total_v}, multiplier={mult:.4f}"
+                if reason:
+                    msg += f" | reason={reason}"
+                print(msg)
             per_details = details.get("per_asset", {})
             for t, d in per_details.items():
                 per_asset_records.append(

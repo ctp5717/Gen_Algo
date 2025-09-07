@@ -93,13 +93,13 @@ def _get_binance_data(
             "Taker buy quote asset volume",
             "Ignore",
         ],
+        dtype=float,
     )
 
     # --- Data Cleaning and Formatting ---
     data["Date"] = pd.to_datetime(data["Open time"], unit="ms")
     data.set_index("Date", inplace=True)
     data = data[["Open", "High", "Low", "Close", "Volume"]]
-    data = data.apply(pd.to_numeric, errors="coerce")
 
     if verbose:
         print("Binance data loaded and formatted successfully.")
@@ -137,14 +137,14 @@ def get_data(
     ticker = _normalize_ticker(ticker)
 
     # Include the source in the cache filename to prevent conflicts
-    cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.csv"
+    cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.parquet"
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
 
     if os.path.exists(cache_filepath):
         if verbose:
             print(f"Loading '{ticker}' data from local cache: {cache_filename}")
         try:
-            data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
+            data = pd.read_parquet(cache_filepath)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
             if verbose:
@@ -193,7 +193,7 @@ def get_data(
 
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
-        data.to_csv(cache_filepath)
+        data.to_parquet(cache_filepath, index=True)
         if verbose:
             print(f"Saved data to cache: {cache_filename}")
 

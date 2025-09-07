@@ -53,7 +53,7 @@
   - Multi-asset: `MULTI_ASSET` (lambda dispersion, trade-floor, zero-trade policy, coverage penalty, etc.).
 
 - `data_loader.py` – **Cache + fetch**:
-  - Cache dir: `data_cache/`; csv with flattened columns and restored `DatetimeIndex`.
+  - Cache dir: `data_cache/`; parquet with flattened columns and restored `DatetimeIndex`.
   - `_normalize_ticker()` converts e.g. `BTC-USD` → `BTCUSDT` for Binance.
   - `get_data(ticker, start, end, interval)` returns `(DataFrame, "cache"|"API")`.
 
@@ -65,10 +65,16 @@
   - Consumes `STRATEGY_RULES`, calls indicators by name, applies `condition`:
     - Examples: `price_is_above_indicator`, `indicator_is_above_value`,
       `indicator_crosses_above_value`, and symmetric variants.
-  - Combines conditions by `combination_logic` (`AND`/`OR`) to produce a boolean **entry signal**.
+    - Combines conditions by case-insensitive `combination_logic` (`AND`/`OR`/`VOTE`, default `AND`).
+      `VOTE` uses a majority threshold when `vote_threshold` is `None`; values
+      outside `1..N` raise. With a single condition all modes behave identically.
+      NaNs in signals default to `False`; set `treat_nan_as_false=False` in
+      `entry_rules` to propagate them instead.
   - Handles **multi-output indicators** (pick the right column).
 
-- `gene_parser.py` – Finds all **active** gene definitions → returns `gene_space`, `gene_map`, `gene_types`.
+- `gene_parser.py` – Finds all **active** gene definitions, including top-level
+  options like `combination_logic` or `vote_threshold`, and returns
+  `gene_space`, `gene_map`, `gene_types`.
 
 - `fitness.py` – **Fitness evaluators**:
   - Single-asset `FitnessEvaluator` uses **vectorbt** to backtest, exit handling with **`.shift()`** for time-based rules, stats (Sortino, Profit Factor with cap/winsorization, Max DD, total return, trades).
@@ -247,10 +253,19 @@ Notes:
 - **Binance normalization:** `data_loader._normalize_ticker("BTC-USD") -> "BTCUSDT"`.
 - **Multi-asset:** confirm `MULTI_ASSET["enabled"] = true` and tune:
   - `lambda_dispersion`, `min_total_trades_per_year`, `coverage_penalty`,
-  - `zero_trade_policy` ("ignore" or "penalize"), `per_asset_min_trades`.
+  - `zero_trade_policy` ("ignore" or "penalize"), `per_asset_min_trades` (per fold, not time-scaled).
+  - `lambda_rank_stat` ("mean" or "median") to summarize λ-sweep metrics.
+  - `lambda_coverage_min` filters λ candidates with low coverage. Default `None`; try `0.8` for strict screening.
 - **Coverage threshold:** `COVERAGE_THRESHOLD` (default `0.8`) controls asset retention when aligning data.
 
-**BBands tips:** To target upper/lower/middle bands, include `"upper"` / `"lower"` in the condition type names (e.g., `"price_crosses_above_upper_band"`). The engine auto-selects `BBU` / `BBL` / `BBM` columns.
+**BBands tips:** Select specific bands either by adding a `band` hint
+(`"upper"`, `"middle"`/`"mid"`/`"basis"`, `"lower"`) to the condition or by using the
+`*_band` condition types such as `"price_is_above_upper_band"` or
+`"price_crosses_below_lower_band"`. The engine maps these to the `BBU` / `BBM`
+/ `BBL` columns.
+
+**MACD tips:** The engine expects the histogram (`MACDh_*` or `MACD_Hist*`) by
+default; override with `condition.column` to use another component.
 
 ---
 
@@ -284,6 +299,13 @@ python walk_forward.py
 # Coarse hyperparameter sweep (GA & lambda)
 python tuner.py
 ```
+
+The tuning module also supports a deeper GA candidate for exhaustive searches:
+
+```python
+{"sol_per_pop": 250, "num_parents_mating": 60, "mutation_num_genes": 4}
+```
+Add it to `config.HYPERPARAMETER_SEARCH_SPACE` when exploring larger populations.
 
 CI expectations:
 - Linux, Python 3.11, `pytest -q -n auto` with coverage.
@@ -327,7 +349,7 @@ CI expectations:
 ## Do not
 - Hardcode secrets.
 - Remove `.shift()` on time-based exits.
-- Change cache file format.
+- Change cache file format without explicit specification.
 - Bypass seed determinism or replace `config.to_pandas_freq()` with ad-hoc strings.
 
 ---
