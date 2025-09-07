@@ -136,15 +136,20 @@ def get_data(
     source = config.DATA_SOURCE.lower()
     ticker = _normalize_ticker(ticker)
 
-    # Include the source in the cache filename to prevent conflicts
-    cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}.parquet"
-    cache_filepath = os.path.join(CACHE_DIR, cache_filename)
+    # Include the source in the cache filename to prevent conflicts.  We keep
+    # a base filename and support both parquet and CSV extensions so the cache
+    # works even when optional parquet engines (pyarrow/fastparquet) are missing.
+    base_cache_filename = f"{ticker}_{source}_{start_date}_{end_date}_{interval}"
+    parquet_filename = base_cache_filename + ".parquet"
+    csv_filename = base_cache_filename + ".csv"
+    parquet_path = os.path.join(CACHE_DIR, parquet_filename)
+    csv_path = os.path.join(CACHE_DIR, csv_filename)
 
-    if os.path.exists(cache_filepath):
+    if os.path.exists(parquet_path):
         if verbose:
-            print(f"Loading '{ticker}' data from local cache: {cache_filename}")
+            print(f"Loading '{ticker}' data from local cache: {parquet_filename}")
         try:
-            data = pd.read_parquet(cache_filepath)
+            data = pd.read_parquet(parquet_path)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
             if verbose:
@@ -153,8 +158,22 @@ def get_data(
         except Exception as e:
             if verbose:
                 print(
-                    f"Error loading from cache file {cache_filepath}: {e}. Re-downloading."
+                    f"Error loading from cache file {parquet_path}: {e}. Re-downloading."
                 )
+
+    if os.path.exists(csv_path):
+        if verbose:
+            print(f"Loading '{ticker}' data from local cache: {csv_filename}")
+        try:
+            data = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+            if not isinstance(data.index, pd.DatetimeIndex):
+                raise TypeError("Loaded data index is not a DatetimeIndex.")
+            if verbose:
+                print("Cache loaded successfully.")
+            return data, "cache"
+        except Exception as e:
+            if verbose:
+                print(f"Error loading from cache file {csv_path}: {e}. Re-downloading.")
 
     # --- Router Logic ---
     try:
@@ -180,29 +199,37 @@ def get_data(
             raise ValueError(
                 f"Unknown data source '{source}' in config file. Use 'yfinance' or 'binance'."
             )
-
-        if data.empty:
-            if verbose:
-                print(
-                    f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters."
-                )
-            return pd.DataFrame(), "API"
-
-        # Standardize column names
-        data.columns = [col.capitalize() for col in data.columns]
-
-        # Save the newly fetched data to cache
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        data.to_parquet(cache_filepath, index=True)
-        if verbose:
-            print(f"Saved data to cache: {cache_filename}")
-
-        return data, "API"
-
     except Exception as e:
         if verbose:
             print(f"An error occurred while downloading data for {ticker}: {e}")
         return pd.DataFrame(), "API"
+
+    if data.empty:
+        if verbose:
+            print(
+                f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters."
+            )
+        return pd.DataFrame(), "API"
+
+    # Standardize column names
+    data.columns = [col.capitalize() for col in data.columns]
+
+    # Save the newly fetched data to cache. Prefer parquet when a suitable
+    # engine is available but fall back to CSV otherwise so runs continue even
+    # without optional dependencies.
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    try:
+        data.to_parquet(parquet_path, index=True)
+        if verbose:
+            print(f"Saved data to cache: {parquet_filename}")
+    except Exception as e:
+        if verbose:
+            print(f"Could not save cache as parquet: {e}. Saving as CSV instead.")
+        data.to_csv(csv_path, index=True)
+        if verbose:
+            print(f"Saved data to cache: {csv_filename}")
+
+    return data, "API"
 
 
 def get_group_data(

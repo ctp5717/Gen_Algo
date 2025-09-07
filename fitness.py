@@ -12,7 +12,20 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
-import vectorbt as vbt
+
+# vectorbt is an optional dependency used for backtesting. During unit tests we
+# often monkeypatch its functionality, so gracefully fall back to a lightweight
+# stub when it's not installed.
+try:  # pragma: no cover - executed only when vectorbt is present
+    import vectorbt as vbt  # type: ignore
+except Exception:  # pragma: no cover - executed when vectorbt is missing
+    import types
+
+    vbt = types.SimpleNamespace(
+        __version__="0.0.0",
+        __file__="vectorbt_stub",
+        Portfolio=type("Portfolio", (), {}),
+    )
 
 import config
 import strategy_engine as engine

@@ -17,7 +17,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt  # To display plots without blocking
 import numpy as np
 import pandas as pd
-import vectorbt as vbt
+
+# vectorbt is an optional heavy dependency. Tests monkeypatch a lightweight
+# stand-in so we attempt a best-effort import and fall back to a minimal stub
+# when it's not installed.
+try:  # pragma: no cover - executed only when vectorbt is present
+    import vectorbt as vbt  # type: ignore
+except Exception:  # pragma: no cover - executed when vectorbt is missing
+    import types
+
+    vbt = types.SimpleNamespace(__version__="0.0.0", __file__="vectorbt_stub")
 
 import config
 import data_loader

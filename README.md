@@ -157,6 +157,10 @@ This module's purpose is to provide a final, unbiased report on the performance 
     pip install -r requirements.txt
     ```
 
+    Parquet caching uses either **pyarrow** or **fastparquet**. Install one of
+    these optional dependencies for best performance; otherwise the framework
+    automatically falls back to CSV caching.
+
 4.  **Add API Keys:**
 
       * Set the following environment variables before running the framework:
