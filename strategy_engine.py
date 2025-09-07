@@ -23,7 +23,6 @@ Design Philosophy:
 import logging
 import math
 import warnings
-from functools import reduce
 from typing import Callable
 
 import numpy as np
@@ -162,39 +161,64 @@ def _combine_signals(
     if not signals:
         return pd.Series(dtype=bool)
 
-    prepared = (
-        [s.fillna(False) for s in signals]
-        if treat_nan_as_false
-        else [s.astype("boolean") for s in signals]
-    )
-
-    if combination_logic == "AND":
-        return reduce(lambda x, y: x & y, prepared)
-
-    if combination_logic == "OR":
-        return reduce(lambda x, y: x | y, prepared)
-
-    if combination_logic == "VOTE":
-        threshold = (
-            vote_threshold
-            if vote_threshold is not None
-            else math.ceil(len(prepared) / 2)
+    if treat_nan_as_false:
+        arr = np.vstack(
+            [s.fillna(False).to_numpy(dtype=bool, copy=False) for s in signals]
         )
-        if threshold < 1 or threshold > len(prepared):
-            raise ValueError(
-                "vote_threshold must be between 1 and the number of active conditions"
+        index = signals[0].index
+        name = signals[0].name
+        if combination_logic == "AND":
+            return pd.Series(np.all(arr, axis=0), index=index, name=name)
+        if combination_logic == "OR":
+            return pd.Series(np.any(arr, axis=0), index=index, name=name)
+        if combination_logic == "VOTE":
+            threshold = (
+                vote_threshold
+                if vote_threshold is not None
+                else math.ceil(arr.shape[0] / 2)
             )
-        df = pd.DataFrame([s.astype(float) for s in prepared])
-        arr = df.to_numpy()
-        if treat_nan_as_false:
-            signal_sum = np.sum(arr, axis=0)
-            return pd.Series(signal_sum >= threshold, index=df.columns)
-        nan_mask = np.isnan(arr).any(axis=0)
-        arr = np.nan_to_num(arr)
-        signal_sum = np.sum(arr, axis=0)
-        result = pd.Series(signal_sum >= threshold, index=df.columns, dtype="boolean")
-        result[nan_mask] = pd.NA
-        return result
+            if threshold < 1 or threshold > arr.shape[0]:
+                raise ValueError(
+                    "vote_threshold must be between 1 and the number of active conditions"
+                )
+            signal_sum = arr.sum(axis=0)
+            return pd.Series(signal_sum >= threshold, index=index)
+    else:
+        arr = np.vstack([s.to_numpy(dtype=float, copy=False) for s in signals])
+        index = signals[0].index
+        name = signals[0].name
+        if combination_logic == "AND":
+            false_mask = (arr == 0).any(axis=0)
+            nan_mask = np.isnan(arr).any(axis=0)
+            result = np.empty(arr.shape[1], dtype="object")
+            result[false_mask] = False
+            result[~false_mask & ~nan_mask] = True
+            result[~false_mask & nan_mask] = pd.NA
+            return pd.Series(result, index=index, name=name, dtype="boolean")
+        if combination_logic == "OR":
+            true_mask = (arr == 1).any(axis=0)
+            nan_mask = np.isnan(arr).any(axis=0)
+            result = np.empty(arr.shape[1], dtype="object")
+            result[true_mask] = True
+            result[~true_mask & ~nan_mask] = False
+            result[~true_mask & nan_mask] = pd.NA
+            return pd.Series(result, index=index, name=name, dtype="boolean")
+        if combination_logic == "VOTE":
+            threshold = (
+                vote_threshold
+                if vote_threshold is not None
+                else math.ceil(arr.shape[0] / 2)
+            )
+            if threshold < 1 or threshold > arr.shape[0]:
+                raise ValueError(
+                    "vote_threshold must be between 1 and the number of active conditions"
+                )
+            signal_sum = np.nansum(arr, axis=0)
+            result = signal_sum >= threshold
+            nan_mask = np.isnan(arr).any(axis=0)
+            series = pd.Series(result, index=index, dtype="boolean")
+            series[nan_mask] = pd.NA
+            return series
 
     raise ValueError(
         f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
