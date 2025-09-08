@@ -1,3 +1,6 @@
 pre-commit
 flake8
 pytest
+-c constraints/py310.txt ; python_version < "3.11"
+-c constraints/py311.txt ; python_version >= "3.11" and python_version < "3.12"
+-c constraints/py312.txt ; python_version >= "3.12"

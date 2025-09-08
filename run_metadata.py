@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+import numpy as np
+import pandas as pd
+
 
 def merge_run_metadata(path: str | os.PathLike, new_meta: Dict[str, Any]) -> None:
     """Atomically merge ``new_meta`` into the JSON file at ``path``."""
@@ -67,3 +70,34 @@ def merge_run_metadata(path: str | os.PathLike, new_meta: Dict[str, Any]) -> Non
             os.remove(lock_path)
         except FileNotFoundError:
             pass
+
+
+def _write_run_metadata(extra: Dict[str, Any]) -> None:
+    """Record environment metadata to ``run_metadata.json``."""
+    import platform
+    import sys
+
+    versions = {
+        "numpy": np.__version__,
+        "pandas": pd.__version__,
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+    }
+    try:
+        import pandas_ta as ta
+
+        versions["pandas_ta"] = ta.__version__
+    except Exception:
+        pass
+    try:
+        import vectorbt as vbt
+
+        versions["vectorbt"] = getattr(vbt, "__version__", "unknown")
+    except Exception:
+        pass
+
+    metadata = {
+        "library_versions": versions,
+    }
+    metadata.update(extra)
+    merge_run_metadata("run_metadata.json", metadata)

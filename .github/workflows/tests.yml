@@ -13,17 +13,24 @@ concurrency:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            constraints/py310.txt
+            constraints/py311.txt
+            constraints/py312.txt
       - name: Install dependencies
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
@@ -53,6 +60,9 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            constraints/py310.txt
+            constraints/py311.txt
+            constraints/py312.txt
       - name: Install dependencies
         run: |
           pip install -r requirements.txt -r requirements-dev.txt

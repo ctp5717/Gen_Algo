@@ -40,6 +40,7 @@ if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
 try:  # pragma: no cover - handled in tests via stub
+    import pandas_ta  # noqa: F401
     import pandas_ta as ta
 except ModuleNotFoundError:  # Fall back to a lightweight stub
     import types

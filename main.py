@@ -7,7 +7,7 @@ Main Application Orchestrator for the GA Trading Framework
 import copy
 import os
 import pprint
-import time  # <-- NEW: Import the time module
+import time
 import traceback
 import types
 from datetime import datetime, timezone
@@ -19,8 +19,9 @@ import pygad
 
 import config
 import data_loader
+import run_metadata
 import strategy_engine
-from deps import ensure_real_vectorbt
+from deps import ensure_pandas_ta, ensure_real_vectorbt, warn_if_deps_diverge
 from gene_parser import parse_genes_from_config  # now defined in its own module
 
 # --- NEW: Callback function for progress tracking ---
@@ -79,6 +80,8 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         entry["vote_threshold"] = vt.get("low", vt.get("high"))
 
     indicator_columns = {}
+    indicator_errors: dict[str, list[dict]] = {}
+    indicator_resolutions: list[dict[str, str | None]] = []
     for cond in entry.get("conditions", []):
         ind = cond.get("indicator")
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
@@ -96,27 +99,68 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         cond["params"] = params_pf
         try:
             out = func(sample, **params_pf)
-        except Exception:
+        except Exception as e:
+            indicator_errors.setdefault(ind, []).append(
+                {
+                    "params": params_pf,
+                    "error": "".join(
+                        traceback.format_exception_only(type(e), e)
+                    ).strip(),
+                }
+            )
             continue
+        resolved = cond.get("column") or cond.get("band")
         if isinstance(out, pd.DataFrame):
             cols = list(out.columns)
             print(f"{ind}: {cols}")
             indicator_columns[ind] = {"type": "DataFrame", "columns": cols}
+            if resolved is None and cols:
+                resolved = cols[0]
         else:
             print(f"{ind}: (Series)")
             indicator_columns[ind] = {"type": "Series", "columns": []}
+        indicator_resolutions.append({"indicator": ind, "resolved_column": resolved})
     try:
         strategy_engine.process_strategy_rules(sample, rules_pf)
-    except KeyError as e:
-        raise SystemExit(f"Indicator preflight failed: {e}") from e
-    except Exception:
-        pass
-    analysis._write_run_metadata(start, [], {"indicator_columns": indicator_columns})
+    except Exception as e:
+        indicator_errors.setdefault("process_strategy_rules", []).append(
+            {
+                "params": {},
+                "error": "".join(traceback.format_exception_only(type(e), e)).strip(),
+            }
+        )
+    extra = {
+        "indicator_columns": indicator_columns,
+        "indicator_errors": indicator_errors,
+        "indicator_resolutions": indicator_resolutions,
+    }
+    analysis._write_run_metadata(start, [], extra)
+    if indicator_errors:
+        summary = ", ".join(sorted(indicator_errors.keys()))
+        exc = SystemExit(
+            f"Indicator preflight failed for {len(indicator_errors)} indicator(s): {summary}"
+        )
+        exc.code = 2
+        raise exc
 
 
 def main():
     """The main execution function."""
     ensure_real_vectorbt(Path(__file__).resolve().parent)
+
+    ta_ok = False
+    try:
+        ensure_pandas_ta()
+        ta_ok = True
+    except Exception:
+        ta_ok = False
+        raise
+    finally:
+        try:
+            run_metadata._write_run_metadata({"ta_accessor_ok": ta_ok})
+        except Exception:
+            pass
+    warn_if_deps_diverge()
 
     # Delay heavy imports until after vectorbt is validated
     global analysis, fitness, tuner

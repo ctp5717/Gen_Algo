@@ -4,13 +4,17 @@ from pathlib import Path
 
 import pandas as pd
 
+import deps
+import vbt_stub
+
 # Ensure repository root is on the import path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+sys.modules.setdefault("vectorbt", vbt_stub)
+sys.modules.setdefault("yfinance", types.ModuleType("yfinance"))
 
 import main  # noqa: E402
 
@@ -61,6 +65,12 @@ def test_main_runs(monkeypatch):
     # Patch analysis and fitness evaluator
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_pandas_ta", lambda: None)
+    monkeypatch.setattr(deps, "ensure_pandas_ta", lambda: None)
+    monkeypatch.setattr(main.run_metadata, "_write_run_metadata", lambda *a, **k: None)
+    monkeypatch.setattr(
+        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
+    )
 
     monkeypatch.setattr(
         main,
@@ -130,18 +140,6 @@ def test_main_runs(monkeypatch):
     monkeypatch.setattr(main.config, "TICKER", "TEST", raising=False)
     monkeypatch.setattr(main.config, "TIMEFRAME", "1d", raising=False)
     monkeypatch.setattr(main.config, "AUTO_TUNE_ENABLED", False, raising=False)
-    monkeypatch.setattr(
-        main.config,
-        "STRATEGY_RULES",
-        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        main.config,
-        "STRATEGY_RULES",
-        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
-        raising=False,
-    )
     # Execute main and ensure no exception is raised
     main.main()
 
@@ -189,6 +187,12 @@ def test_main_uses_tuner(monkeypatch):
     monkeypatch.setattr(main.pygad, "GA", DummyGA)
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_pandas_ta", lambda: None)
+    monkeypatch.setattr(deps, "ensure_pandas_ta", lambda: None)
+    monkeypatch.setattr(main.run_metadata, "_write_run_metadata", lambda *a, **k: None)
+    monkeypatch.setattr(
+        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
+    )
     monkeypatch.setattr(
         main,
         "plt",
@@ -318,6 +322,12 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main.pygad, "GA", DummyGA)
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(main, "ensure_pandas_ta", lambda: None)
+    monkeypatch.setattr(deps, "ensure_pandas_ta", lambda: None)
+    monkeypatch.setattr(main.run_metadata, "_write_run_metadata", lambda *a, **k: None)
+    monkeypatch.setattr(
+        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
+    )
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
@@ -348,6 +358,12 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main.config, "SELECTED_ASSET_NAME", "Test", raising=False)
     monkeypatch.setattr(main.config, "TICKER", "TEST", raising=False)
     monkeypatch.setattr(main.config, "TIMEFRAME", "1d", raising=False)
+    monkeypatch.setattr(
+        main.config,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
+    )
 
     class FakePlt:
         def ion(self):

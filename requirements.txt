@@ -1,12 +1,14 @@
 pygad
 vectorbt
-pandas
-numpy
+# Core scientific stack pinned via per-Python constraints
+numpy>=1.24,<2.0
+pandas>=2.0,<2.3
+pandas-ta==0.3.14b0
 yfinance
 python-binance
-# pandas-ta currently lacks wheels for Python 3.10+, so only install it on
-# Python 3.9 and below. Tests stub this dependency when absent.
-pandas-ta ; python_version < '3.10'
 setuptools
 python-dateutil
 matplotlib
+-c constraints/py310.txt ; python_version < "3.11"
+-c constraints/py311.txt ; python_version >= "3.11" and python_version < "3.12"
+-c constraints/py312.txt ; python_version >= "3.12"

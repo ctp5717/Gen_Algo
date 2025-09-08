@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 # Stub heavy dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+sys.modules.setdefault("yfinance", types.ModuleType("yfinance"))
 
 import fitness  # noqa: E402
 import main  # noqa: E402
@@ -32,9 +33,12 @@ def test_indicator_preflight_failure(monkeypatch):
     }
 
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
-    monkeypatch.setattr(
-        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
-    )
+    captured = {}
+
+    def fake_write(start, arts, extra=None):
+        captured.update(extra or {})
+
+    monkeypatch.setattr(main.analysis, "_write_run_metadata", fake_write, raising=False)
     monkeypatch.setitem(
         strategy_engine.INDICATOR_MAPPING,
         "ema",
@@ -45,8 +49,12 @@ def test_indicator_preflight_failure(monkeypatch):
         raise KeyError("EMA column missing")
 
     monkeypatch.setattr(strategy_engine, "process_strategy_rules", fake_process)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc:
         main.indicator_preflight(data, rules)
+    assert exc.value.code == 2
+    errs = captured.get("indicator_errors", {})
+    assert "process_strategy_rules" in errs
+    assert errs["process_strategy_rules"][0]["error"].startswith("KeyError")
 
 
 def test_indicator_preflight_combination_logic_gene_dict(monkeypatch):
@@ -155,3 +163,8 @@ def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
     ic = captured["indicator_columns"]
     assert ic["ema"]["type"] == "Series"
     assert ic["bbands"]["type"] == "DataFrame"
+    assert captured.get("indicator_errors") == {}
+    assert captured.get("indicator_resolutions") == [
+        {"indicator": "ema", "resolved_column": None},
+        {"indicator": "bbands", "resolved_column": "u"},
+    ]
