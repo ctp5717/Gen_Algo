@@ -305,6 +305,19 @@ STRATEGY_RULES = {
         #   vote_threshold (int | None): min signals for "VOTE"; ``None`` uses
         #       ``ceil(N/2)`` and values outside ``1..N`` raise ``ValueError``
         #   treat_nan_as_false (bool): replace NaNs before combining (default True)
+        #   strict_column (bool): when False, missing columns/bands fall back
+        #       to the first available column with a warning (default True).
+        #       Individual conditions may override via
+        #       condition['strict_column'].
+        # Multi-output indicators have these default selections when
+        # "column"/"band" is omitted:
+        #   - MACD → histogram
+        #   - BBands/Keltner/Donchian → middle band
+        #   - ADX/DMI → ADX line
+        #   - Stoch → %K
+        #   - Ichimoku → baseline (IKS_*)
+        #   - Pivot Points → P
+        #   - TRIX (with signal) → TRIX line
         "combination_logic": "VOTE",
         "vote_threshold": {
             "gene": "vote_threshold",
