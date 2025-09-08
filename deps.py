@@ -18,13 +18,13 @@ def ensure_real_vectorbt(repo_root: Path | None = None) -> None:
         repo_root = Path(__file__).resolve().parent
 
     try:
-        if vbt_path.is_relative_to(repo_root):
-            raise ImportError(
-                f"Loaded 'vectorbt' from {vbt_path}, which is inside the repository. "
-                "Remove/rename any local stubs."
-            )
+        inside_repo = vbt_path.is_relative_to(repo_root)
     except AttributeError:
-        if str(vbt_path).startswith(str(repo_root)):
+        inside_repo = str(vbt_path).startswith(str(repo_root))
+
+    if inside_repo:
+        allowed = {"site-packages", "dist-packages"}
+        if not any(part in allowed for part in vbt_path.parts):
             raise ImportError(
                 f"Loaded 'vectorbt' from {vbt_path}, which is inside the repository. "
                 "Remove/rename any local stubs."
