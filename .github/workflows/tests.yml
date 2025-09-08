@@ -33,7 +33,7 @@ jobs:
             constraints/py312.txt
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-dev.txt -c constraints/py${{ replace(matrix.python-version, '.', '') }}.txt
       - name: VectorBT smoke
         run: |
           python - <<'PY'
@@ -65,7 +65,7 @@ jobs:
             constraints/py312.txt
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-dev.txt -c constraints/py${{ replace(matrix.python-version, '.', '') }}.txt
           pip install pytest-xdist pytest-cov
       - name: Run tests
         env:
