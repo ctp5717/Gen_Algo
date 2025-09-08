@@ -31,6 +31,7 @@ def test_ensure_real_vectorbt_detects_stub_path(monkeypatch):
         ensure_real_vectorbt(Path(__file__).resolve().parents[1])
     assert "inside the repository" in str(exc.value)
 
+
 def test_ensure_real_vectorbt_accepts_real_package():
     """ensure_real_vectorbt should succeed when the real package is installed."""
     sys.modules.pop("vectorbt", None)
