@@ -39,7 +39,12 @@ import pandas as pd
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
-import pandas_ta as ta
+try:  # pragma: no cover - handled in tests via stub
+    import pandas_ta as ta
+except ModuleNotFoundError:  # Fall back to a lightweight stub
+    import types
+
+    ta = types.ModuleType("pandas_ta")
 
 
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
