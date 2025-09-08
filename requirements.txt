@@ -4,7 +4,7 @@ pandas
 numpy
 yfinance
 python-binance
-pandas-ta==0.3.14b0
+pandas-ta
 setuptools
 python-dateutil
 matplotlib
