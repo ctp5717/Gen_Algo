@@ -1,3 +1,4 @@
-pre-commit
-flake8
-pytest
+# Development dependencies for Python 3.13
+pre-commit>=4.3
+flake8>=7.3
+pytest>=8.4
