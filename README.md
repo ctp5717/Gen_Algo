@@ -71,15 +71,22 @@ This is the core processor that translates your ideas from the config file into 
     * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
     * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger Bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. The default column used when `column` is omitted is listed below:
 
-      | Indicator            | Default column            |
-      | -------------------- | ------------------------- |
-      | MACD                 | Histogram (falls back to line)
-      | Bollinger/Keltner/Donchian | Middle band
-      | ADX/DMI             | ADX line
-      | Stochastic          | %K line (`STOCHk_*`)
-      | Ichimoku            | Baseline (`IKS_*`)
-      | Pivot Points        | `P`
-      | TRIX (with signal)  | TRIX line
+      | Indicator            | Default column            | Override hints |
+      | -------------------- | ------------------------- | --------------- |
+      | MACD                 | Histogram (falls back to line) | `MACD_*`, `MACDs_*` |
+      | Bollinger/Keltner/Donchian | Middle band | `band`: upper/lower |
+      | ADX/DMI             | ADX line | `DMP_*`, `DMN_*` |
+      | Stochastic          | %K line (`STOCHk_*`) | `STOCHd_*` |
+      | Ichimoku            | Baseline (`IKS_*`) | `ITS_*`, `ISA_*`, `ISB_*`, `ICS_*` |
+      | Pivot Points        | `P` | `R1`, `S1`, ... |
+      | TRIX (with signal)  | TRIX line | `TRIXs_*` |
+      | PSAR                | `PSAR_*` (merged) | `PSARl_*`, `PSARs_*` |
+      | Stdev Channel       | `SDM_*` (middle) | `band`: upper/lower |
+
+      **Naming note:** Keltner Channel columns currently omit the multiplier
+      (e.g., ``KCU_20``) while the Standard Deviation Channel includes it
+      (``SDU_20_2.0``). This difference is intentional for now and may be
+      unified in a future release.
 
       When a requested column or band is missing, the engine raises a `KeyError` by default. Setting `strict_column=False` under `entry_rules` falls back to the first available column **and emits a warning**. This fallback may use an unintended column; override per-rule via `condition["strict_column"]` when needed.
 

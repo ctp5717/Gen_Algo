@@ -181,6 +181,110 @@ def test_generate_signal_dispatch_and_unknown(monkeypatch):
     assert not unknown.any()
 
 
+def test_stdev_band_selection(monkeypatch):
+    data = pd.DataFrame(
+        {
+            "Open": [1, 1, 1, 1],
+            "High": [1, 1, 1, 1],
+            "Low": [1, 1, 1, 1],
+            "Close": [5, 5, 5, 5],
+            "Volume": [1, 1, 1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+
+    output = pd.DataFrame(
+        {
+            "SDU_5_2.0": [0, 0, 0, 0],
+            "SDM_5": [10, 10, 10, 10],
+            "SDL_5_2.0": [-5, -5, -5, -5],
+        },
+        index=data.index,
+    )
+
+    def stdev_func(df, period, multiplier):
+        return output
+
+    monkeypatch.setattr(indicator_library, "calculate_stdev_channel", stdev_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "stdev", stdev_func)
+
+    rules_default = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "stdev",
+                    "params": {"period": 5, "multiplier": 2.0},
+                    "condition": {"type": "price_is_above_indicator"},
+                }
+            ]
+        }
+    }
+
+    rules_upper = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "stdev",
+                    "params": {"period": 5, "multiplier": 2.0},
+                    "condition": {
+                        "type": "price_is_above_indicator",
+                        "band": "upper",
+                    },
+                }
+            ]
+        }
+    }
+
+    default_signal = strategy_engine.process_strategy_rules(data, rules_default)
+    upper_signal = strategy_engine.process_strategy_rules(data, rules_upper)
+
+    assert not default_signal.any()
+    assert upper_signal.all()
+
+
+def test_psar_defaults_to_merged(monkeypatch):
+    data = pd.DataFrame(
+        {
+            "Open": [1, 1, 1, 1],
+            "High": [2, 2, 2, 2],
+            "Low": [0, 0, 0, 0],
+            "Close": [2, 2, 2, 2],
+            "Volume": [1, 1, 1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+
+    output = pd.DataFrame(
+        {
+            "PSARl_0.02_0.2": [100, 100, 100, 100],
+            "PSAR_0.02_0.2": [1, 1, 1, 1],
+            "PSARs_0.02_0.2": [-100, -100, -100, -100],
+        },
+        index=data.index,
+    )
+
+    def psar_func(df, acceleration=0.02, maximum=0.2):
+        return output
+
+    monkeypatch.setattr(indicator_library, "calculate_psar", psar_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "psar", psar_func)
+
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "psar",
+                    "params": {"acceleration": 0.02, "maximum": 0.2},
+                    "condition": {"type": "price_is_above_indicator"},
+                }
+            ]
+        }
+    }
+
+    signal = strategy_engine.process_strategy_rules(data, rules)
+    assert signal.all()
+
+
 def test_combination_logic_variants(monkeypatch):
     data = pd.DataFrame(
         {

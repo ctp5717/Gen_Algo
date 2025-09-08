@@ -318,6 +318,12 @@ STRATEGY_RULES = {
         #   - Ichimoku → baseline (IKS_*)
         #   - Pivot Points → P
         #   - TRIX (with signal) → TRIX line
+        #   - PSAR → merged (PSAR_*)
+        #   - Stdev Channel → middle band (SDM_*)
+        # Example:
+        # {"indicator": "stdev",
+        #  "params": {"period": 20, "multiplier": 2.0},
+        #  "condition": {"type": "price_crosses_above_indicator", "band": "upper"}}
         "combination_logic": "VOTE",
         "vote_threshold": {
             "gene": "vote_threshold",
