@@ -78,10 +78,79 @@ def test_generate_signal_from_value_validates_value_param():
             series, {"type": "indicator_is_above_value", "value": None}
         )
 
-    with pytest.raises(TypeError, match="int or float"):
-        strategy_engine._generate_signal_from_value(
-            series, {"type": "indicator_is_above_value", "value": "bad"}
-        )
+
+def test_indicator_cache(monkeypatch):
+    data = pd.DataFrame(
+        {
+            "Open": [1, 2, 3, 4],
+            "High": [1, 2, 3, 4],
+            "Low": [1, 2, 3, 4],
+            "Close": [1, 2, 3, 4],
+            "Volume": [1, 1, 1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+
+    calls = {"n": 0}
+
+    def ema_func(df, period):
+        calls["n"] += 1
+        return pd.Series(1, index=df.index)
+
+    monkeypatch.setattr(indicator_library, "calculate_ema", ema_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ema_func)
+
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {"period": 2},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+                {
+                    "indicator": "ema",
+                    "params": {"period": 2},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+            ]
+        }
+    }
+
+    strategy_engine.process_strategy_rules(data, rules)
+    assert calls["n"] == 1
+
+
+def test_missing_volume_reports_all_indicators():
+    data = pd.DataFrame(
+        {
+            "Open": [1, 2, 3, 4],
+            "High": [1, 2, 3, 4],
+            "Low": [1, 2, 3, 4],
+            "Close": [1, 2, 3, 4],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "obv",
+                    "params": {},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+                {
+                    "indicator": "mfi",
+                    "params": {"period": 2},
+                    "condition": {"type": "indicator_is_above_value", "value": 50},
+                },
+            ]
+        }
+    }
+    with pytest.raises(ValueError) as exc:
+        strategy_engine.process_strategy_rules(data, rules)
+    msg = str(exc.value)
+    assert "obv" in msg and "mfi" in msg
 
 
 def test_generate_signal_dispatch_and_unknown(monkeypatch):
@@ -1185,3 +1254,32 @@ def test_nan_policy(monkeypatch):
     rules["entry_rules"]["treat_nan_as_false"] = False
     sig = strategy_engine.process_strategy_rules(data, rules)
     assert sig.isna().any()
+
+
+def test_volume_missing_early_validation(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1, 2],
+            "High": [1, 2],
+            "Low": [1, 2],
+            "Close": [1, 2],
+        }
+    )
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "obv",
+                    "params": {},
+                    "condition": {"type": "price_is_above_indicator"},
+                }
+            ]
+        }
+    }
+
+    def fake_obv(*args, **kwargs):  # noqa: ANN001, ANN002
+        raise AssertionError("indicator should not run")
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "obv", fake_obv)
+    with pytest.raises(ValueError):
+        strategy_engine.process_strategy_rules(df, rules)

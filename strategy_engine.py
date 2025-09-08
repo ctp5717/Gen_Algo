@@ -20,6 +20,7 @@ Design Philosophy:
   `indicator_library.py` and `config.py`.
 """
 
+import json
 import logging
 import math
 import warnings
@@ -32,16 +33,11 @@ import indicator_library as ind_lib  # Import our toolbox of indicators
 
 logger = logging.getLogger(__name__)
 
-# A mapping dictionary to dynamically call indicator functions.
-# This makes the engine scalable. To add a new indicator, you just add an entry here
-# and a corresponding function in the indicator_library.
-INDICATOR_MAPPING = {
-    "ema": ind_lib.calculate_ema,
-    "atr": ind_lib.calculate_atr,
-    "rsi": ind_lib.calculate_rsi,
-    "macd": ind_lib.calculate_macd,
-    "bbands": ind_lib.calculate_bbands,
-}
+# Auto-registered indicator mapping from ``indicator_library``
+INDICATOR_MAPPING = ind_lib.INDICATOR_REGISTRY
+
+# Indicators that require a ``Volume`` column
+VOLUME_INDICATORS = {"obv", "mfi", "adl", "cmf"}
 
 
 # Mapping of condition strings to comparison or vectorbt crossover functions
@@ -231,7 +227,19 @@ def process_strategy_rules(
     if isinstance(vote_threshold, dict):
         vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
     treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
+    strict_column = entry_rules.get("strict_column", True)
+    if not isinstance(strict_column, bool):
+        raise TypeError("strict_column must be a boolean")
+
     active_conds = [c for c in conditions if c.get("is_active", True)]
+    if (
+        VOLUME_INDICATORS.intersection({c.get("indicator") for c in active_conds})
+        and "Volume" not in ohlc_data.columns
+    ):
+        missing = sorted(
+            VOLUME_INDICATORS.intersection({c.get("indicator") for c in active_conds})
+        )
+        raise ValueError(f"Volume column required for indicators: {missing}")
     n = len(active_conds)
     requested_k = vote_threshold
 
@@ -283,6 +291,7 @@ def process_strategy_rules(
 
     signals = []
     counts = {} if collect_counts else None
+    cache: dict[tuple, pd.Series | pd.DataFrame] = {}
 
     for rule in conditions:
         if not rule.get("is_active", True):
@@ -300,41 +309,78 @@ def process_strategy_rules(
             )
             continue
 
-        indicator_output = indicator_func(ohlc_data, **params)
+        params_key = json.dumps({k: repr(v) for k, v in params.items()}, sort_keys=True)
+        key = (
+            indicator_name,
+            params_key,
+            id(ohlc_data),  # different data -> different cache bucket
+            tuple(ohlc_data.columns),
+        )
+        if key in cache:
+            indicator_output = cache[key]
+        else:
+            indicator_output = indicator_func(ohlc_data, **params)
+            cache[key] = indicator_output
         condition_type = condition_logic.get("type")
 
         # --- Intelligent Column Selection ---
         target_series = indicator_output
         if isinstance(indicator_output, pd.DataFrame):
             col_hint = condition_logic.get("column")
+            rule_strict = condition_logic.get("strict_column", strict_column)
+            if not isinstance(rule_strict, bool):
+                raise TypeError("strict_column must be a boolean")
+
+            def choose_first(
+                df: pd.DataFrame,
+                msg: str,
+                output: pd.DataFrame = indicator_output,
+                strict: bool = rule_strict,
+                fallback: bool = True,
+            ) -> pd.Series:
+                avail = list(output.columns)
+                msg = f"{msg}; available: {avail}"
+                if df.shape[1] == 0:
+                    if strict:
+                        raise KeyError(msg)
+                    warnings.warn(msg + "; using first available column", stacklevel=2)
+                    if output.shape[1] == 0:
+                        raise KeyError(msg)
+                    return output.iloc[:, 0]
+                if not fallback:
+                    return df.iloc[:, 0]
+                if strict:
+                    raise KeyError(msg)
+                warnings.warn(msg + "; using first available column", stacklevel=2)
+                return df.iloc[:, 0]
+
             if col_hint:
                 if col_hint in indicator_output.columns:
                     target_series = indicator_output[col_hint]
                 else:
                     df = indicator_output.filter(regex=col_hint)
-                    if df.shape[1] == 0:
-                        raise KeyError(
-                            f"Requested column '{col_hint}' not found; available: {list(indicator_output.columns)}"
-                        )
-                    target_series = df.iloc[:, 0]
+                    target_series = choose_first(
+                        df,
+                        f"Requested column '{col_hint}' not found",
+                    )
             elif "bbands" in indicator_name:
                 band = condition_logic.get("band")
                 if band:
                     band = band.lower()
                     if band == "upper":
                         df = indicator_output.filter(like="BBU")
-                        if df.shape[1] == 0:
-                            raise KeyError(
-                                "Upper band not found in BBands output; expected columns like 'BBU_*'",
-                            )
-                        target_series = df.iloc[:, 0]
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in BBands output; expected columns like 'BBU_*'",
+                            fallback=False,
+                        )
                     elif band == "lower":
                         df = indicator_output.filter(like="BBL")
-                        if df.shape[1] == 0:
-                            raise KeyError(
-                                "Lower band not found in BBands output; expected columns like 'BBL_*'",
-                            )
-                        target_series = df.iloc[:, 0]
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in BBands output; expected columns like 'BBL_*'",
+                            fallback=False,
+                        )
                     else:
                         if band not in {"middle", "mid", "basis"}:
                             warnings.warn(
@@ -342,33 +388,137 @@ def process_strategy_rules(
                                 stacklevel=2,
                             )
                         df = indicator_output.filter(like="BBM")
-                        if df.shape[1] == 0:
-                            raise KeyError(
-                                "Middle band not found in BBands output; expected columns like 'BBM_*'",
-                            )
-                        target_series = df.iloc[:, 0]
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in BBands output; expected columns like 'BBM_*'",
+                            fallback=False,
+                        )
                 else:
                     if "upper" in condition_type:
                         df = indicator_output.filter(like="BBU")
-                        if df.shape[1] == 0:
-                            raise KeyError(
-                                "Upper band not found in BBands output; expected columns like 'BBU_*'",
-                            )
-                        target_series = df.iloc[:, 0]
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in BBands output; expected columns like 'BBU_*'",
+                            fallback=False,
+                        )
                     elif "lower" in condition_type:
                         df = indicator_output.filter(like="BBL")
-                        if df.shape[1] == 0:
-                            raise KeyError(
-                                "Lower band not found in BBands output; expected columns like 'BBL_*'",
-                            )
-                        target_series = df.iloc[:, 0]
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in BBands output; expected columns like 'BBL_*'",
+                            fallback=False,
+                        )
                     else:
                         df = indicator_output.filter(like="BBM")
-                        if df.shape[1] == 0:
-                            raise KeyError(
-                                "Middle band not found in BBands output; expected columns like 'BBM_*'",
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in BBands output; expected columns like 'BBM_*'",
+                            fallback=False,
+                        )
+            elif "keltner" in indicator_name:
+                band = condition_logic.get("band")
+                if band:
+                    band = band.lower()
+                    if band == "upper":
+                        df = indicator_output.filter(like="KCU")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in Keltner output; expected columns like 'KCU_*'",
+                            fallback=False,
+                        )
+                    elif band == "lower":
+                        df = indicator_output.filter(like="KCL")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in Keltner output; expected columns like 'KCL_*'",
+                            fallback=False,
+                        )
+                    else:
+                        if band not in {"middle", "mid", "basis"}:
+                            warnings.warn(
+                                f"Unknown band '{band}' for Keltner Channels; defaulting to middle",
+                                stacklevel=2,
                             )
-                        target_series = df.iloc[:, 0]
+                        df = indicator_output.filter(like="KCM")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in Keltner output; expected columns like 'KCM_*'",
+                            fallback=False,
+                        )
+                else:
+                    if "upper" in condition_type:
+                        df = indicator_output.filter(like="KCU")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in Keltner output; expected columns like 'KCU_*'",
+                            fallback=False,
+                        )
+                    elif "lower" in condition_type:
+                        df = indicator_output.filter(like="KCL")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in Keltner output; expected columns like 'KCL_*'",
+                            fallback=False,
+                        )
+                    else:
+                        df = indicator_output.filter(like="KCM")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in Keltner output; expected columns like 'KCM_*'",
+                            fallback=False,
+                        )
+            elif "donchian" in indicator_name:
+                band = condition_logic.get("band")
+                if band:
+                    band = band.lower()
+                    if band == "upper":
+                        df = indicator_output.filter(like="DCU")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in Donchian output; expected columns like 'DCU_*'",
+                            fallback=False,
+                        )
+                    elif band == "lower":
+                        df = indicator_output.filter(like="DCL")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in Donchian output; expected columns like 'DCL_*'",
+                            fallback=False,
+                        )
+                    else:
+                        if band not in {"middle", "mid", "basis"}:
+                            warnings.warn(
+                                f"Unknown band '{band}' for Donchian Channels; defaulting to middle",
+                                stacklevel=2,
+                            )
+                        df = indicator_output.filter(like="DCM")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in Donchian output; expected columns like 'DCM_*'",
+                            fallback=False,
+                        )
+                else:
+                    if "upper" in condition_type:
+                        df = indicator_output.filter(like="DCU")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in Donchian output; expected columns like 'DCU_*'",
+                            fallback=False,
+                        )
+                    elif "lower" in condition_type:
+                        df = indicator_output.filter(like="DCL")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in Donchian output; expected columns like 'DCL_*'",
+                            fallback=False,
+                        )
+                    else:
+                        df = indicator_output.filter(like="DCM")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in Donchian output; expected columns like 'DCM_*'",
+                            fallback=False,
+                        )
             elif "macd" in indicator_name:
                 if isinstance(indicator_output, pd.Series):
                     target_series = indicator_output
@@ -391,6 +541,66 @@ def process_strategy_rules(
                                 "No MACD columns found; available: "
                                 f"{list(indicator_output.columns)}"
                             )
+            elif "adx" in indicator_name:
+                col = condition_logic.get("column")
+                if col and col in indicator_output.columns:
+                    target_series = indicator_output[col]
+                else:
+                    df = indicator_output.filter(like="ADX")
+                    target_series = choose_first(
+                        df,
+                        "ADX column not found",
+                        fallback=False,
+                    )
+            elif "stoch" in indicator_name:
+                col = condition_logic.get("column")
+                if col and col in indicator_output.columns:
+                    target_series = indicator_output[col]
+                else:
+                    df = indicator_output.filter(like="STOCHk")
+                    target_series = choose_first(
+                        df,
+                        "%K column not found in Stochastic output; expected columns like 'STOCHk_*'",
+                        fallback=False,
+                    )
+            elif "ichimoku" in indicator_name:
+                col = condition_logic.get("column")
+                if col and col in indicator_output.columns:
+                    target_series = indicator_output[col]
+                else:
+                    df = indicator_output.filter(like="IKS")
+                    target_series = choose_first(
+                        df,
+                        "Baseline column not found in Ichimoku output; expected columns like 'IKS_*'",
+                        fallback=False,
+                    )
+            elif "pivot_points" in indicator_name or "pivots" in indicator_name:
+                col = condition_logic.get("column")
+                if col and col in indicator_output.columns:
+                    target_series = indicator_output[col]
+                else:
+                    if "P" in indicator_output.columns:
+                        target_series = indicator_output["P"]
+                    elif indicator_output.shape[1]:
+                        target_series = indicator_output.iloc[:, 0]
+                    else:
+                        raise KeyError(
+                            "Pivot Points output produced no columns; available: "
+                            f"{list(indicator_output.columns)}"
+                        )
+            elif "trix" in indicator_name and isinstance(
+                indicator_output, pd.DataFrame
+            ):
+                col = condition_logic.get("column")
+                if col and col in indicator_output.columns:
+                    target_series = indicator_output[col]
+                else:
+                    df = indicator_output.filter(regex=r"(?i)^TRIX(?!s)")
+                    target_series = choose_first(
+                        df,
+                        "TRIX line not found; expected columns like 'TRIX_*'",
+                        fallback=False,
+                    )
             else:
                 if isinstance(indicator_output, pd.Series):
                     target_series = indicator_output
