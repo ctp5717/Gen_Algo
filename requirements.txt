@@ -4,7 +4,9 @@ pandas
 numpy
 yfinance
 python-binance
-pandas-ta==0.3.14b0
+# pandas-ta currently lacks wheels for Python 3.10+, so only install it on
+# Python 3.9 and below. Tests stub this dependency when absent.
+pandas-ta ; python_version < '3.10'
 setuptools
 python-dateutil
 matplotlib
