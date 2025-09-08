@@ -102,3 +102,19 @@ def test_ensure_real_vectorbt_is_relative_to_fallback(monkeypatch):
     monkeypatch.setattr(sys.modules["vectorbt"], "__file__", str(fake_path))
     with pytest.raises(ImportError):
         ensure_real_vectorbt(root)
+
+
+def test_ensure_real_vectorbt_allows_site_packages(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr(pd.Series, "vbt", object, raising=False)
+    fake_path = (
+        root
+        / "env"
+        / "lib"
+        / "python3.11"
+        / "site-packages"
+        / "vectorbt"
+        / "__init__.py"
+    )
+    monkeypatch.setattr(sys.modules["vectorbt"], "__file__", str(fake_path))
+    ensure_real_vectorbt(root)
