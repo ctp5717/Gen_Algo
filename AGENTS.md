@@ -108,7 +108,7 @@
 ## 3) Environment & setup
 
 ```bash
-python -V   # Use Python 3.11+
+python -V   # Use Python 3.13+
 pip install -r requirements.txt -r requirements-dev.txt
 
 # Optional heavy deps for real backtests (tests stub them if missing)
@@ -306,7 +306,7 @@ The tuning module also supports a deeper GA candidate for exhaustive searches:
 Add it to `config.HYPERPARAMETER_SEARCH_SPACE` when exploring larger populations.
 
 CI expectations:
-- Linux, Python 3.11, `pytest -q -n auto` with coverage.
+- Linux, Python 3.13, `pytest -q -n auto` with coverage.
 - Lint via pre-commit; basic security scan via CodeQL & Bandit.
 - No secrets in tree (`gitleaks` hook).
 

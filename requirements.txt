@@ -1,10 +1,11 @@
-pygad
-vectorbt
-pandas
-numpy
-yfinance
-python-binance
-pandas-ta
-setuptools
-python-dateutil
-matplotlib
+# Core dependencies compatible with Python 3.13
+pygad>=3.5.0
+vectorbt>=0.28.1
+pandas>=2.3
+numpy>=2.0
+yfinance>=0.2.65
+python-binance>=1.0.29
+pandas-ta>=0.4.67b0
+setuptools>=80
+python-dateutil>=2.9.0.post0
+matplotlib>=3.10
