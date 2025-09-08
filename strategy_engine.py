@@ -519,6 +519,60 @@ def process_strategy_rules(
                             "Middle band not found in Donchian output; expected columns like 'DCM_*'",
                             fallback=False,
                         )
+            elif "stdev" in indicator_name:
+                band = condition_logic.get("band")
+                if band:
+                    band = band.lower()
+                    if band in {"upper", "u"}:
+                        df = indicator_output.filter(like="SDU")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in Standard Deviation output; expected columns like 'SDU_*'",
+                            fallback=False,
+                        )
+                    elif band in {"lower", "l"}:
+                        df = indicator_output.filter(like="SDL")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in Standard Deviation output; expected columns like 'SDL_*'",
+                            fallback=False,
+                        )
+                    else:
+                        df = indicator_output.filter(like="SDM")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in Standard Deviation output; expected columns like 'SDM_*'",
+                            fallback=False,
+                        )
+                else:
+                    if "upper" in condition_type:
+                        df = indicator_output.filter(like="SDU")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in Standard Deviation output; expected columns like 'SDU_*'",
+                            fallback=False,
+                        )
+                    elif "lower" in condition_type:
+                        df = indicator_output.filter(like="SDL")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in Standard Deviation output; expected columns like 'SDL_*'",
+                            fallback=False,
+                        )
+                    else:
+                        df = indicator_output.filter(like="SDM")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in Standard Deviation output; expected columns like 'SDM_*'",
+                            fallback=False,
+                        )
+            elif indicator_name == "psar":
+                df = indicator_output.filter(like="PSAR_")
+                target_series = choose_first(
+                    df,
+                    "Merged PSAR column not found; expected columns like 'PSAR_*'",
+                    fallback=False,
+                )
             elif "macd" in indicator_name:
                 if isinstance(indicator_output, pd.Series):
                     target_series = indicator_output

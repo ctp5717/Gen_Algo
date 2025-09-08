@@ -58,7 +58,13 @@ INDICATOR_CASES = [
         ["ADX_14", "DMP_14", "DMN_14"],
         {"period": 14},
     ),
-    ("calculate_psar", "psar", "series", None, {}),
+    (
+        "calculate_psar",
+        "psar",
+        "df",
+        ["PSAR_0.02_0.2", "PSARl_0.02_0.2", "PSARs_0.02_0.2"],
+        {},
+    ),
     (
         "calculate_keltner",
         "kc",
@@ -73,7 +79,13 @@ INDICATOR_CASES = [
         ["DCU_20", "DCM_20", "DCL_20"],
         {"period": 20},
     ),
-    ("calculate_stdev_channel", "stdev", "series", None, {"period": 5}),
+    (
+        "calculate_stdev_channel",
+        "stdev",
+        "df",
+        ["SDM_5", "SDU_5_2.0", "SDL_5_2.0"],
+        {"period": 5, "multiplier": 2.0},
+    ),
     ("calculate_cmo", "cmo", "series", None, {"period": 5}),
     ("calculate_obv", "obv", "series", None, {}),
     ("calculate_mfi", "mfi", "series", None, {"period": 5}),
@@ -112,17 +124,31 @@ def test_indicator_output_shapes(
     func_name, ta_method, out_kind, cols, params, monkeypatch
 ):
     df = _base_df()
-    if out_kind == "series":
-        output = pd.Series(range(len(df)), index=df.index)
+    if func_name == "calculate_stdev_channel":
+        st_series = pd.Series(range(len(df)), index=df.index)
+        df.ta = types.SimpleNamespace(
+            stdev=lambda **kwargs: st_series,
+            sma=lambda **kwargs: st_series,
+        )
     else:
-        cols = cols or ["col1"]
-        output = pd.DataFrame({c: range(len(df)) for c in cols}, index=df.index)
-    df.ta = types.SimpleNamespace(**{ta_method: lambda **kwargs: output})
+        if out_kind == "series":
+            output = pd.Series(range(len(df)), index=df.index)
+        else:
+            cols = cols or ["col1"]
+            output = pd.DataFrame({c: range(len(df)) for c in cols}, index=df.index)
+        df.ta = types.SimpleNamespace(**{ta_method: lambda **kwargs: output})
     func = getattr(indicator_library, func_name)
     result = func(df, **params)
     assert len(result) == len(df)
     if isinstance(result, pd.DataFrame) and cols is not None:
         assert list(result.columns) == cols
+
+
+def test_stdev_alias_registered():
+    assert (
+        indicator_library.INDICATOR_REGISTRY["stdev"]
+        is indicator_library.calculate_stdev_channel
+    )
 
 
 BAD_PARAMS = [
@@ -146,6 +172,7 @@ BAD_PARAMS = [
     ),
     (indicator_library.calculate_adx, {"period": 0}),
     (indicator_library.calculate_psar, {"acceleration": 0.0}),
+    (indicator_library.calculate_psar, {"acceleration": 0.3, "maximum": 0.2}),
     (indicator_library.calculate_keltner, {"period": 0, "multiplier": 2.0}),
     (indicator_library.calculate_donchian, {"period": 0}),
     (indicator_library.calculate_stdev_channel, {"period": 0}),
@@ -197,6 +224,82 @@ def test_volume_column_required():
         indicator_library.calculate_adl(df)
     with pytest.raises(ValueError):
         indicator_library.calculate_cmf(df, period=2)
+
+
+@pytest.mark.parametrize(
+    "val, expected",
+    [(2, "2.0"), (2.5, "2.5"), (2.33333, "2.333")],
+)
+def test_fmt_num(val, expected):
+    assert indicator_library._fmt_num(val) == expected
+
+
+def test_stdev_column_name_format():
+    df = _base_df()
+    st_series = pd.Series(range(len(df)), index=df.index)
+    df.ta = types.SimpleNamespace(
+        stdev=lambda **k: st_series,
+        sma=lambda **k: st_series,
+    )
+    result = indicator_library.calculate_stdev_channel(df, period=5, multiplier=2.5)
+    assert list(result.columns) == ["SDM_5", "SDU_5_2.5", "SDL_5_2.5"]
+
+
+def test_stdev_requires_close():
+    df = _base_df().drop(columns=["Close"])
+    st_series = pd.Series(range(len(df)), index=df.index)
+    df.ta = types.SimpleNamespace(
+        stdev=lambda **k: st_series,
+        sma=lambda **k: st_series,
+    )
+    with pytest.raises(ValueError):
+        indicator_library.calculate_stdev_channel(df, period=5)
+
+
+def test_psar_column_name_formatting():
+    df = _base_df()
+    long = pd.Series(range(len(df)), name="PSARl_0.03000_0.20000")
+    short = pd.Series(range(len(df)), name="PSARs_0.03000_0.20000")
+    df.ta = types.SimpleNamespace(psar=lambda **k: pd.concat([long, short], axis=1))
+    result = indicator_library.calculate_psar(df, acceleration=0.03, maximum=0.2)
+    assert list(result.columns) == [
+        "PSAR_0.03_0.2",
+        "PSARl_0.03_0.2",
+        "PSARs_0.03_0.2",
+    ]
+
+
+def test_psar_kwarg_shim():
+    df = _base_df()
+    long = pd.Series([1.0, np.nan, 3.0], name="PSARl_0.02_0.2")
+    short = pd.Series([np.nan, 2.0, np.nan], name="PSARs_0.02_0.2")
+
+    class DummyTA:
+        def __init__(self):
+            self.calls = []
+
+        def psar(self, **kwargs):
+            self.calls.append(kwargs)
+            if "acc" in kwargs or "max" in kwargs:
+                raise TypeError("bad args")
+            return pd.concat([long, short], axis=1)
+
+    df.ta = DummyTA()
+    result = indicator_library.calculate_psar(df)
+    assert df.ta.calls[0] == {"acc": 0.02, "max": 0.2}
+    assert df.ta.calls[1] == {"af": 0.02, "m": 0.2}
+    assert "PSAR_0.02_0.2" in result.columns
+
+
+def test_psar_combined_series():
+    df = _base_df()
+    long = pd.Series([1.0, np.nan, 3.0], name="PSARl_0.02_0.2")
+    short = pd.Series([np.nan, 2.0, np.nan], name="PSARs_0.02_0.2")
+    df.ta = types.SimpleNamespace(psar=lambda **k: pd.concat([long, short], axis=1))
+    result = indicator_library.calculate_psar(df)
+    expected = long.fillna(short)
+    expected.name = "PSAR_0.02_0.2"
+    pd.testing.assert_series_equal(result["PSAR_0.02_0.2"], expected)
 
 
 def test_sma_expected_values():

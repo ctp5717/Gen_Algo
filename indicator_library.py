@@ -47,6 +47,12 @@ except ModuleNotFoundError:  # Fall back to a lightweight stub
     ta = types.ModuleType("pandas_ta")
 
 
+def _fmt_num(x: float) -> str:
+    """Format numeric parameters for use in column names."""
+    s = f"{x:.3f}".rstrip("0").rstrip(".")
+    return s if "." in s else f"{s}.0"
+
+
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     """
     Calculates the Exponential Moving Average (EMA).
@@ -314,16 +320,75 @@ def calculate_adx(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
 
 def calculate_psar(
     ohlc_data: pd.DataFrame, acceleration: float = 0.02, maximum: float = 0.2
-) -> pd.Series:
-    """Calculate the Parabolic SAR indicator."""
+) -> pd.DataFrame:
+    """Compute the Parabolic Stop and Reverse (PSAR).
+
+    Parameters
+    ----------
+    ohlc_data : pd.DataFrame
+        Price data with ``'High'`` and ``'Low'`` columns.
+    acceleration : float, default ``0.02``
+        Acceleration factor controlling sensitivity.
+    maximum : float, default ``0.2``
+        Maximum value for the acceleration factor.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns are returned in the following order:
+
+        - ``PSAR_*`` – merged series from long/short legs via ``fillna``.
+        - ``PSARl_*`` – long leg values.
+        - ``PSARs_*`` – short leg values.
+
+    Raises
+    ------
+    TypeError
+        If ``acceleration`` or ``maximum`` is not numeric.
+    ValueError
+        If either parameter is ``<= 0`` or ``acceleration > maximum``.
+    ConnectionError
+        If ``pandas_ta`` fails to compute the indicator.
+    """
+
     for name, val in {"acceleration": acceleration, "maximum": maximum}.items():
         if not isinstance(val, (int, float)) or isinstance(val, bool):
             raise TypeError(f"PSAR '{name}' must be numeric")
         if val <= 0:
             raise ValueError(f"PSAR '{name}' must be > 0")
-    psar = ohlc_data.ta.psar(acc=acceleration, max=maximum)
+    if acceleration > maximum:
+        raise ValueError("PSAR 'acceleration' must be <= 'maximum'")
+
+    for col in ("High", "Low"):
+        if col not in ohlc_data.columns:
+            raise ValueError("PSAR requires 'High' and 'Low' columns")
+
+    try:
+        psar = ohlc_data.ta.psar(acc=acceleration, max=maximum)
+    except TypeError:  # pragma: no cover - alt pandas_ta kwarg names
+        psar = ohlc_data.ta.psar(af=acceleration, m=maximum)
     if psar is None:
         raise ConnectionError("Failed to calculate PSAR")
+
+    fmt_acc = _fmt_num(acceleration)
+    fmt_max = _fmt_num(maximum)
+    suffix = f"{fmt_acc}_{fmt_max}"
+
+    try:
+        long_col = next(c for c in psar.columns if c.startswith("PSARl"))
+        short_col = next(c for c in psar.columns if c.startswith("PSARs"))
+    except StopIteration as exc:  # pragma: no cover - defensive
+        raise KeyError("Unexpected PSAR column names") from exc
+
+    psar = psar.rename(
+        columns={
+            long_col: f"PSARl_{suffix}",
+            short_col: f"PSARs_{suffix}",
+        }
+    )
+    combined_name = f"PSAR_{suffix}"
+    psar[combined_name] = psar[f"PSARl_{suffix}"].fillna(psar[f"PSARs_{suffix}"])
+    psar = psar[[combined_name, f"PSARl_{suffix}", f"PSARs_{suffix}"]]
     return psar
 
 
@@ -365,16 +430,62 @@ def calculate_donchian(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
     return dc
 
 
-def calculate_stdev_channel(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
-    """Calculate Standard Deviation of price over a period."""
+def calculate_stdev_channel(
+    ohlc_data: pd.DataFrame, period: int, multiplier: float = 2.0
+) -> pd.DataFrame:
+    """Construct a simple standard-deviation channel.
+
+    Parameters
+    ----------
+    ohlc_data : pd.DataFrame
+        Price data containing a ``'Close'`` column.
+    period : int
+        Lookback window for the midline and deviation, in bars. Must be ``>=1``.
+    multiplier : float, default ``2.0``
+        Number of standard deviations used to set the bands.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns are returned in the following order:
+
+        - ``SDM_{period}`` – midline (SMA).
+        - ``SDU_{period}_{multiplier}`` – upper band.
+        - ``SDL_{period}_{multiplier}`` – lower band.
+
+    Raises
+    ------
+    TypeError
+        If ``period`` is not ``int`` or ``multiplier`` not numeric.
+    ValueError
+        If ``period`` < 1 or ``multiplier`` <= 0.
+    ConnectionError
+        If ``pandas_ta`` fails to compute the standard deviation.
+    """
+
     if not isinstance(period, int):
         raise TypeError("Standard Deviation 'period' must be int")
     if period < 1:
         raise ValueError("Standard Deviation 'period' must be ≥1")
+    if not isinstance(multiplier, (int, float)) or isinstance(multiplier, bool):
+        raise TypeError("Standard Deviation 'multiplier' must be numeric")
+    if multiplier <= 0:
+        raise ValueError("Standard Deviation 'multiplier' must be > 0")
+    if "Close" not in ohlc_data.columns:
+        raise ValueError("Standard Deviation channel requires a 'Close' column")
+
+    mid = calculate_sma(ohlc_data, period)
     stdev = ohlc_data.ta.stdev(length=period)
     if stdev is None:
         raise ConnectionError("Failed to calculate Standard Deviation")
-    return stdev
+
+    upper = mid + multiplier * stdev
+    lower = mid - multiplier * stdev
+    fmt = _fmt_num(multiplier)
+    mid.name = f"SDM_{period}"
+    upper.name = f"SDU_{period}_{fmt}"
+    lower.name = f"SDL_{period}_{fmt}"
+    return pd.concat([mid, upper, lower], axis=1)
 
 
 def calculate_cmo(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
