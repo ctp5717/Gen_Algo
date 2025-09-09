@@ -13,9 +13,22 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
+import analysis  # noqa: E402
 import fitness  # noqa: E402
 import indicator_library  # noqa: E402
+import params_resolver  # noqa: E402
 import strategy_engine  # noqa: E402
+import tuner  # noqa: E402
+import walk_forward  # noqa: E402
+
+
+def test_inject_genes_consistency():
+    assert analysis.inject_genes_into_rules is params_resolver.inject_genes_into_rules
+    assert fitness.inject_genes_into_rules is params_resolver.inject_genes_into_rules
+    assert (
+        walk_forward.inject_genes_into_rules is params_resolver.inject_genes_into_rules
+    )
+    assert tuner.inject_genes_into_rules is params_resolver.inject_genes_into_rules
 
 
 def _base_data():
@@ -219,10 +232,46 @@ def test_inject_genes_repairs_nested_macd():
         }
     }
 
-    repaired = fitness._inject_genes_into_rules(base_rules, {}, [])
+    repaired = params_resolver.inject_genes_into_rules(base_rules, {}, [])
     top_params = repaired["entry_rules"]["conditions"][0]["params"]
     nested_params = repaired["entry_rules"]["nested"][0]["conditions"][0]["params"]
     assert top_params["fast"] < top_params["slow"]
     assert 1 <= top_params["signal"] < top_params["slow"]
     assert nested_params["fast"] < nested_params["slow"]
     assert 1 <= nested_params["signal"] < nested_params["slow"]
+
+
+def test_resolve_effective_rules_repairs_macd():
+    base = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {"fast": 10, "slow": 5, "signal": 12},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+    gene_map = {
+        0: {
+            "name": "fast",
+            "path": ["entry_rules", "conditions", 0, "params", "fast"],
+            "type": int,
+        },
+        1: {
+            "name": "slow",
+            "path": ["entry_rules", "conditions", 0, "params", "slow"],
+            "type": int,
+        },
+        2: {
+            "name": "signal",
+            "path": ["entry_rules", "conditions", 0, "params", "signal"],
+            "type": int,
+        },
+    }
+    solution = [10, 5, 12]
+    resolved = params_resolver.resolve_effective_rules(base, gene_map, solution)
+    params = resolved["entry_rules"]["conditions"][0]["params"]
+    assert params["fast"] < params["slow"]
+    assert 1 <= params["signal"] < params["slow"]

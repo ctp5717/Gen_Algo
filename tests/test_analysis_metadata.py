@@ -46,4 +46,23 @@ def test_write_run_metadata_skips_missing_artifacts(tmp_path, monkeypatch):
     analysis._write_run_metadata(start, [str(existing), str(tmp_path / "missing.png")])
     with open("run_metadata.json") as fh:
         meta = json.load(fh)
-    assert meta["artifacts"] == [str(existing)]
+    assert meta["artifacts"] == ["exists.png"]
+
+
+def test_write_run_metadata_dedupes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(analysis, "_get_cache_hashes", lambda: {})
+    analysis.set_run_dir(tmp_path)
+
+    class _VBT:
+        __version__ = "0.0.0"
+        __file__ = __file__
+
+    monkeypatch.setattr(analysis, "vbt", _VBT)
+    start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    file1 = tmp_path / "a.png"
+    file1.write_text("x")
+    analysis._write_run_metadata(start, [str(file1), str(file1), str(file1)])
+    with open("run_metadata.json") as fh:
+        meta = json.load(fh)
+    assert meta["artifacts"] == ["a.png"]

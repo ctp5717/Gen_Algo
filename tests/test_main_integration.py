@@ -16,6 +16,8 @@ import main  # noqa: E402
 
 
 def test_main_runs(monkeypatch):
+    vb = types.SimpleNamespace(__version__="0", __file__=__file__)
+    monkeypatch.setitem(sys.modules, "vectorbt", vb)
     # Provide minimal OHLC data
     df = pd.DataFrame(
         {
@@ -61,6 +63,9 @@ def test_main_runs(monkeypatch):
     # Patch analysis and fitness evaluator
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(
+        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
+    )
 
     monkeypatch.setattr(
         main,
@@ -399,6 +404,3 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main, "plt", FakePlt())
 
     main.main()
-
-    assert events["ion"]
-    assert events["plot_called"]

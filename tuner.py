@@ -9,6 +9,7 @@ import config
 import fitness
 import strategy_engine as engine
 import trade_floor
+from params_resolver import inject_genes_into_rules
 
 
 def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
@@ -77,7 +78,7 @@ def _evaluate_on_validation(solution, gene_map, val_data):
     if val_data is None or val_data.empty:
         return -np.inf
 
-    rules = fitness._inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
+    rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
     entries = engine.process_strategy_rules(val_data, rules)
     if entries.sum() < 1:
         return -np.inf

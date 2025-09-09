@@ -68,7 +68,7 @@ def test_config_walk_forward_start_date():
     )
 
 
-def test_walk_forward_uses_all_cores(monkeypatch):
+def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
     """GA in walk-forward should leverage all available CPU cores"""
     import os
     import types
@@ -128,7 +128,6 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     fitness_stub = types.SimpleNamespace(
         FitnessEvaluator=DummyEvaluator,
         get_fitness_evaluator=lambda *a, **k: DummyEvaluator(),
-        _inject_genes_into_rules=lambda *a, **k: {},
         print_floor_failures=lambda *a, **k: None,
     )
     engine_stub = types.SimpleNamespace(
@@ -136,6 +135,7 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
     monkeypatch.setitem(sys.modules, "strategy_engine", engine_stub)
+    monkeypatch.setattr(walk_forward, "inject_genes_into_rules", lambda *a, **k: {})
 
     class DummyPortfolio:
         def __init__(self, *a, **k):
@@ -157,12 +157,12 @@ def test_walk_forward_uses_all_cores(monkeypatch):
     )
     monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "enabled", False)
 
-    walk_forward.run_walk_forward_validation()
+    walk_forward.run_walk_forward_validation(tmp_path)
 
     assert captured["parallel_processing"][1] == os.cpu_count()
 
 
-def test_walk_forward_returns_summary(monkeypatch):
+def test_walk_forward_returns_summary(monkeypatch, tmp_path):
     """run_walk_forward_validation should return aggregate metrics"""
     import types
 
@@ -211,7 +211,6 @@ def test_walk_forward_returns_summary(monkeypatch):
     fitness_stub = types.SimpleNamespace(
         FitnessEvaluator=DummyEvaluator,
         get_fitness_evaluator=lambda *a, **k: DummyEvaluator(),
-        _inject_genes_into_rules=lambda *a, **k: {},
         print_floor_failures=lambda *a, **k: None,
     )
     monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
@@ -232,6 +231,7 @@ def test_walk_forward_returns_summary(monkeypatch):
         process_strategy_rules=lambda *a, **k: pd.Series([True, False], index=df.index)
     )
     monkeypatch.setitem(sys.modules, "strategy_engine", engine_stub)
+    monkeypatch.setattr(walk_forward, "inject_genes_into_rules", lambda *a, **k: {})
 
     class DummyPortfolio:
         def stats(self):
@@ -256,11 +256,19 @@ def test_walk_forward_returns_summary(monkeypatch):
     )
     monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "enabled", False)
 
-    summary = walk_forward.run_walk_forward_validation()
+    summary = walk_forward.run_walk_forward_validation(tmp_path)
 
     assert isinstance(summary, dict)
     for key in ["average_return", "total_compounded_return", "folds"]:
         assert key in summary
+    results_path = tmp_path / "walk_forward" / "walk_forward_results.csv"
+    assert results_path.exists()
+
+
+def test_round_floats_helper():
+    obj = {"a": 0.05500000000000001, "b": [0.3333333], "c": {"d": 1.234567}}
+    rounded = walk_forward._round_floats(obj, ndigits=3)
+    assert rounded == {"a": 0.055, "b": [0.333], "c": {"d": 1.235}}
 
 
 def test_update_champion_pool_logic(monkeypatch, capsys):
@@ -290,7 +298,7 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert "cloning" in out
 
 
-def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
+def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None, run_dir=None):
     import types
 
     import pandas as pd
@@ -307,9 +315,7 @@ def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
     )
 
     monkeypatch.setattr(
-        walk_forward.data_loader,
-        "get_group_data",
-        lambda *a, **k: {"AAA": df},
+        walk_forward.data_loader, "get_group_data", lambda *a, **k: {"AAA": df}
     )
     monkeypatch.setattr(
         walk_forward,
@@ -356,10 +362,10 @@ def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
 
     fitness_stub = types.SimpleNamespace(
         MultiAssetFitnessEvaluator=lambda *a, **k: DummyEvaluator(),
-        _inject_genes_into_rules=lambda *a, **k: {},
         print_floor_failures=lambda *a, **k: None,
     )
     monkeypatch.setitem(sys.modules, "fitness", fitness_stub)
+    monkeypatch.setattr(walk_forward, "inject_genes_into_rules", lambda *a, **k: {})
     monkeypatch.setattr(walk_forward, "ensure_real_vectorbt", lambda *a, **k: None)
     monkeypatch.setattr(walk_forward, "_write_run_metadata", lambda *a, **k: None)
     monkeypatch.setattr(
@@ -380,7 +386,8 @@ def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
     if mode:
         monkeypatch.setitem(walk_forward.config.MULTI_ASSET, "soft_penalty_mode", mode)
 
-    return walk_forward.run_walk_forward_validation()
+    run_dir = Path(run_dir or Path("."))
+    return walk_forward.run_walk_forward_validation(run_dir)
 
 
 @pytest.mark.parametrize(
@@ -396,9 +403,9 @@ def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None):
     ],
 )
 def test_walk_forward_trade_floor_penalties(
-    monkeypatch, capsys, penalty, mode, expected
+    monkeypatch, capsys, tmp_path, penalty, mode, expected
 ):
-    summary = _run_walk_forward_with_penalty(monkeypatch, penalty, mode)
+    summary = _run_walk_forward_with_penalty(monkeypatch, penalty, mode, tmp_path)
     assert isinstance(summary, dict)
     out = capsys.readouterr().out
     for token in expected:

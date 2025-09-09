@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,7 @@ import data_loader
 import trade_floor
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config
+from params_resolver import inject_genes_into_rules
 from run_metadata import merge_run_metadata
 
 
@@ -67,6 +68,7 @@ def _get_cache_hashes(start_date: str, end_date: str) -> dict:
 
 
 def _write_run_metadata(
+    run_dir: Path,
     start: datetime,
     start_date: str,
     end_date: str,
@@ -76,7 +78,17 @@ def _write_run_metadata(
     """Persist run metadata to ``run_metadata.json``."""
     end = datetime.now(timezone.utc)
 
-    existing_artifacts = [str(a) for a in artifacts if Path(a).exists()]
+    existing_artifacts = []
+    root = run_dir.resolve()
+    for a in artifacts:
+        p = Path(a)
+        if not p.exists():
+            continue
+        try:
+            rel = p.resolve().relative_to(root)
+            existing_artifacts.append(str(rel))
+        except ValueError:
+            existing_artifacts.append(str(p.resolve()))
 
     metadata = {
         "artifact_version": "1.0.0",
@@ -97,7 +109,7 @@ def _write_run_metadata(
         },
         "artifacts": existing_artifacts,
     }
-    merge_run_metadata("run_metadata.json", metadata)
+    merge_run_metadata(run_dir / "run_metadata.json", metadata)
 
 
 def _generate_periods(
@@ -173,17 +185,35 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     return pool
 
 
-def run_walk_forward_validation(initial_champions=None, data=None):
+def _round_floats(obj, ndigits: int = 4):
+    """Recursively round float values in ``obj``."""
+    if isinstance(obj, float):
+        return round(obj, ndigits)
+    if isinstance(obj, dict):
+        return {k: _round_floats(v, ndigits) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_round_floats(v, ndigits) for v in obj]
+    return obj
+
+
+def run_walk_forward_validation(
+    run_dir: Path | str = ".", initial_champions=None, data=None
+):
     """Execute walk-forward validation across the available data.
 
     Parameters
     ----------
+    run_dir : Path
+        Directory where artifacts and metadata should be written.
     initial_champions : list[list[float]] or None
         Optional list of solutions to seed the first population. Each solution
         should be an iterable of gene values matching the strategy's genes.
     data : DataFrame or dict, optional
         Preloaded dataset to reuse instead of fetching from disk/API.
     """
+    run_dir = Path(run_dir)
+    wf_dir = run_dir / "walk_forward"
+    wf_dir.mkdir(parents=True, exist_ok=True)
     ensure_real_vectorbt(Path(__file__).resolve().parent)
     import vectorbt as vbt
 
@@ -206,7 +236,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         if multi:
             if not all_data:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [], vbt)
+                _write_run_metadata(wf_dir, start_time, start_date, end_date, [], vbt)
                 return
             sample_df = next(iter(all_data.values()))
             start = sample_df.index[0]
@@ -214,7 +244,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         else:
             if all_data.empty:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [], vbt)
+                _write_run_metadata(wf_dir, start_time, start_date, end_date, [], vbt)
                 return
             start = all_data.index[0]
             end = all_data.index[-1]
@@ -230,7 +260,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             if not all_data:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [], vbt)
+                _write_run_metadata(wf_dir, start_time, start_date, end_date, [], vbt)
                 return
             sample_df = next(iter(all_data.values()))
             start = sample_df.index[0]
@@ -245,7 +275,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             if all_data.empty:
                 print("No data available for walk-forward validation.")
-                _write_run_metadata(start_time, start_date, end_date, [], vbt)
+                _write_run_metadata(wf_dir, start_time, start_date, end_date, [], vbt)
                 return
             start = all_data.index[0]
             end = all_data.index[-1]
@@ -261,7 +291,7 @@ def run_walk_forward_validation(initial_champions=None, data=None):
     periods = _generate_periods(start, end, train_months, test_months)
     if not periods:
         print("Insufficient data for the requested walk-forward windows.")
-        _write_run_metadata(start_time, start_date, end_date, [], vbt)
+        _write_run_metadata(wf_dir, start_time, start_date, end_date, [], vbt)
         return
 
     results = []
@@ -379,10 +409,9 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         winning_params = {
             gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
         }
+        winning_params = _round_floats(winning_params)
 
-        rules = fitness._inject_genes_into_rules(
-            config.STRATEGY_RULES, gene_map, best_solution
-        )
+        rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         if multi:
             settings_val = dict(config.MULTI_ASSET)
             per_asset_base_val = settings_val.get("per_asset_min_trades")
@@ -528,8 +557,8 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             )
             continue
 
-        entries = engine.process_strategy_rules(test_data, rules)
-        if entries.sum() < config.FITNESS_WEIGHTS["min_trades"]:
+        entries = cast(pd.Series, engine.process_strategy_rules(test_data, rules))
+        if entries.astype(bool).sum() < config.FITNESS_WEIGHTS["min_trades"]:
             print("No trades in test period.")
             per_asset_records.append(
                 {
@@ -658,15 +687,16 @@ def run_walk_forward_validation(initial_champions=None, data=None):
 
     if not results:
         print("\nNo walk-forward runs produced trades.")
-        _write_run_metadata(start_time, start_date, end_date, [], vbt)
+        _write_run_metadata(wf_dir, start_time, start_date, end_date, [], vbt)
         return None
 
     results_df = pd.DataFrame(results)
-    results_df.to_csv("walk_forward_results.csv", index=False)
+    results_csv = wf_dir / "walk_forward_results.csv"
+    results_df.to_csv(results_csv, index=False)
+    per_asset_csv = None
     if per_asset_records:
-        pd.DataFrame(per_asset_records).to_csv(
-            "walk_forward_per_asset.csv", index=False
-        )
+        per_asset_csv = wf_dir / "walk_forward_per_asset.csv"
+        pd.DataFrame(per_asset_records).to_csv(per_asset_csv, index=False)
     print("\n=== Walk-Forward Summary ===")
     with pd.option_context("display.max_colwidth", None, "display.width", None):
         if multi:
@@ -714,16 +744,17 @@ def run_walk_forward_validation(initial_champions=None, data=None):
             "seed": config.SEED,
             "ga_seed": os.environ.get("GA_SEED"),
             "commit_hash": _get_commit_hash(),
-            "run_metadata_file": "run_metadata.json",
+            "run_metadata_file": "walk_forward/run_metadata.json",
         }
         summary_json = summary.copy()
         summary_json["folds"] = json.loads(results_df.to_json(orient="records"))
-        with open("walk_forward_summary.json", "w") as f:
+        summary_path = wf_dir / "walk_forward_summary.json"
+        with open(summary_path, "w") as f:
             json.dump(summary_json, f, indent=2)
-        artifacts = ["walk_forward_results.csv", "walk_forward_summary.json"]
-        if per_asset_records:
-            artifacts.append("walk_forward_per_asset.csv")
-        _write_run_metadata(start_time, start_date, end_date, artifacts, vbt)
+        artifacts = [results_csv, summary_path]
+        if per_asset_csv:
+            artifacts.append(per_asset_csv)
+        _write_run_metadata(wf_dir, start_time, start_date, end_date, artifacts, vbt)
         return summary
 
     avg_return = results_df["Total Return [%]"].mean()
@@ -752,14 +783,15 @@ def run_walk_forward_validation(initial_champions=None, data=None):
         "seed": config.SEED,
         "ga_seed": os.environ.get("GA_SEED"),
         "commit_hash": _get_commit_hash(),
-        "run_metadata_file": "run_metadata.json",
+        "run_metadata_file": "walk_forward/run_metadata.json",
     }
     summary_json = summary.copy()
     summary_json["folds"] = json.loads(results_df.to_json(orient="records"))
-    with open("walk_forward_summary.json", "w") as f:
+    summary_path = wf_dir / "walk_forward_summary.json"
+    with open(summary_path, "w") as f:
         json.dump(summary_json, f, indent=2)
-    artifacts = ["walk_forward_results.csv", "walk_forward_summary.json"]
-    if per_asset_records:
-        artifacts.append("walk_forward_per_asset.csv")
-    _write_run_metadata(start_time, start_date, end_date, artifacts, vbt)
+    artifacts = [results_csv, summary_path]
+    if per_asset_csv:
+        artifacts.append(per_asset_csv)
+    _write_run_metadata(wf_dir, start_time, start_date, end_date, artifacts, vbt)
     return summary
