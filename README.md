@@ -20,6 +20,39 @@ The core philosophy is a modular, "batteries-included" design that separates the
   * **Automated Validation:** After optimization, the "champion" strategy is automatically tested on a separate, unseen out-of-sample dataset.
   * **Progress Tracking:** A live progress bar provides real-time feedback during optimization runs.
 
+### Indicator Defaults & Aliases
+
+Multi-output indicators default to specific outputs when a rule omits a target column or band:
+
+| Indicator | Default selection |
+| --------- | ----------------- |
+| MACD | Histogram |
+| Stochastic | %K line |
+| Bollinger/Keltner/Donchian | Middle band |
+| ADX/DMI | ADX line |
+| Ichimoku | Baseline (`IKS_*`) |
+| Pivot Points | `P` |
+| TRIX (with signal) | TRIX line |
+
+Override these defaults by specifying `condition["column"]` or `condition["band"]`.
+
+Indicator names are case-insensitive and support these shorthands:
+
+| Alias | Full name |
+| ----- | --------- |
+| uo | ultimate_oscillator |
+| willr | williams_r |
+| kc | keltner |
+| dc | donchian |
+| dmi | adx |
+| bb | bbands |
+| bollinger | bbands |
+| keltner_channels | keltner |
+
+Missing columns or bands raise an error by default (`strict_column=True`).
+Set `strict_column=False` globally under `entry_rules` or per rule via
+`condition["strict_column"]` to fall back to the first available column.
+
 ### Project Architecture
 
 Of course. Here is a comprehensive breakdown of each file in our project and its specific role in the framework.
@@ -140,6 +173,7 @@ This module's purpose is to provide a final, unbiased report on the performance 
     * **Champion Backtest:** It re-runs the backtest **one time** using the winning set of parameters found by the GA.
     * **Statistical Reporting:** It uses `vectorbt` to generate and print a detailed table of performance statistics (Total Return, Max Drawdown, Win Rate, etc.).
     * **Visualization:** It generates and displays a plot of the strategy's equity curve against the benchmark "buy and hold" return for the validation period.
+    * **Artifacts:** All plots and metadata are written to `Reporting/<run_id>`; the most recent run is linked via `Reporting/latest` or, if symlinks are unsupported, a `Reporting/LATEST_RUN.txt` pointer file.
 
 ### Setup and Installation
 
@@ -179,6 +213,18 @@ This module's purpose is to provide a final, unbiased report on the performance 
 
     ```bash
     pip install -r requirements.txt
+    ```
+
+    Optionally install and run `pre-commit` for linting:
+
+    ```bash
+    pre-commit run -a
+    ```
+
+    If you encounter SSL certificate errors (e.g., behind a corporate proxy), point Git to the certifi bundle:
+
+    ```bash
+    export SSL_CERT_FILE="$(python -c 'import certifi; print(certifi.where())')"
     ```
 
 4.  **Add API Keys:**

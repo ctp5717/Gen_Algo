@@ -23,6 +23,18 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_cache")
 _first_group_load = True
 
 
+def _validate_volume(df: pd.DataFrame) -> bool:
+    """Ensure a valid ``Volume`` column exists and is numeric."""
+    if "Volume" not in df.columns:
+        return False
+    vol = df["Volume"]
+    if not pd.api.types.is_numeric_dtype(vol):
+        raise KeyError("Volume column must be numeric")
+    if (vol < 0).any():
+        raise KeyError("Volume column contains negative values")
+    return True
+
+
 def _normalize_ticker(ticker: str) -> str:
     """Normalize ticker symbols based on the configured data source.
 
@@ -147,9 +159,20 @@ def get_data(
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
+            if not _validate_volume(data):
+                try:
+                    from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
+                except Exception:
+                    VOLUME_INDICATORS = set()
+                if VOLUME_INDICATORS and verbose:
+                    print(
+                        "Warning: Volume column missing; volume-based indicators will fail."
+                    )
             if verbose:
                 print("Cache loaded successfully.")
             return data, "cache"
+        except KeyError:
+            raise
         except Exception as e:
             if verbose:
                 print(
@@ -188,8 +211,26 @@ def get_data(
                 )
             return pd.DataFrame(), "API"
 
-        # Standardize column names
-        data.columns = [col.capitalize() for col in data.columns]
+        # Standardize column names without mangling "Adj Close"
+        rename = {
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "adj close": "Adj Close",
+            "volume": "Volume",
+        }
+        data.columns = [rename.get(str(col).lower(), col) for col in data.columns]
+
+        if not _validate_volume(data):
+            try:
+                from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
+            except Exception:
+                VOLUME_INDICATORS = set()
+            if VOLUME_INDICATORS and verbose:
+                print(
+                    "Warning: Volume column missing; volume-based indicators will fail."
+                )
 
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -199,6 +240,8 @@ def get_data(
 
         return data, "API"
 
+    except KeyError:
+        raise
     except Exception as e:
         if verbose:
             print(f"An error occurred while downloading data for {ticker}: {e}")

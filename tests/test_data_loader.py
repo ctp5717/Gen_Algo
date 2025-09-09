@@ -3,6 +3,7 @@ import types
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 # Ensure repository root is on the import path
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +25,10 @@ import data_loader  # noqa: E402
 
 
 def test_get_data_uses_cache(monkeypatch):
-    df = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020-01-01", periods=2))
+    df = pd.DataFrame(
+        {"Close": [1, 2], "Volume": [1, 1]},
+        index=pd.date_range("2020-01-01", periods=2),
+    )
 
     # Force cache path to exist and return our dataframe
     monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
@@ -37,3 +41,25 @@ def test_get_data_uses_cache(monkeypatch):
 
     pd.testing.assert_frame_equal(result, df)
     assert src == "cache"
+
+
+def test_get_data_warns_when_volume_missing(monkeypatch, capsys):
+    df = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020-01-01", periods=2))
+    monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(data_loader.pd, "read_csv", lambda *a, **k: df)
+    result, src = data_loader.get_data("TEST", "2020-01-01", "2020-01-02", verbose=True)
+    pd.testing.assert_frame_equal(result, df)
+    assert src == "cache"
+    out = capsys.readouterr().out
+    assert "Volume column missing" in out
+
+
+def test_get_data_raises_when_volume_invalid(monkeypatch):
+    df = pd.DataFrame(
+        {"Close": [1, 2], "Volume": [1, -1]},
+        index=pd.date_range("2020-01-01", periods=2),
+    )
+    monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(data_loader.pd, "read_csv", lambda *a, **k: df)
+    with pytest.raises(KeyError):
+        data_loader.get_data("TEST", "2020-01-01", "2020-01-02", verbose=False)

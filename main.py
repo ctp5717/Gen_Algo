@@ -67,6 +67,10 @@ def on_generation(ga_instance):
 
 def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     """Compute indicators once to ensure required components exist."""
+    import inspect
+
+    import indicator_library
+
     print("Performing indicator preflight...")
     start = datetime.now(timezone.utc)
     rules_pf = copy.deepcopy(rules)
@@ -79,8 +83,9 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         entry["vote_threshold"] = vt.get("low", vt.get("high"))
 
     indicator_columns = {}
+    results: dict[str, dict] = {}
     for cond in entry.get("conditions", []):
-        ind = cond.get("indicator")
+        ind = (cond.get("indicator") or "").lower()
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
         if func is None:
             continue
@@ -96,7 +101,11 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         cond["params"] = params_pf
         try:
             out = func(sample, **params_pf)
-        except Exception:
+            results[ind] = {"success": True}
+        except Exception as e:  # noqa: BLE001 - we want to surface the error
+            msg = f"{type(e).__name__}: {e}"
+            print(f"{ind} failed: {msg}")
+            results[ind] = {"success": False, "error": msg}
             continue
         if isinstance(out, pd.DataFrame):
             cols = list(out.columns)
@@ -105,13 +114,78 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         else:
             print(f"{ind}: (Series)")
             indicator_columns[ind] = {"type": "Series", "columns": []}
+
+    if getattr(config, "PREFLIGHT_ALL_INDICATORS", False):
+        SANE_DEFAULTS = {
+            "period": 14,
+            "length": 14,
+            "window": 14,
+            "fast": 12,
+            "slow": 26,
+            "signal": 9,
+            "k": 14,
+            "d": 3,
+            "smooth_k": 3,
+            "multiplier": 2.0,
+            "std_dev": 2.0,
+            "conversion_period": 9,
+            "base_period": 26,
+            "span_b_period": 52,
+        }
+        for name, func in indicator_library.INDICATOR_REGISTRY.items():
+            key = name.lower()
+            if key in results:
+                continue
+            try:
+                sig = inspect.signature(func)
+                kwargs: dict = {}
+                for param in list(sig.parameters.values())[1:]:
+                    if param.kind in (
+                        inspect.Parameter.VAR_POSITIONAL,
+                        inspect.Parameter.VAR_KEYWORD,
+                    ):
+                        continue
+                    if param.default is inspect.Signature.empty:
+                        if param.name in SANE_DEFAULTS:
+                            kwargs[param.name] = SANE_DEFAULTS[param.name]
+                        else:
+                            raise RuntimeError(
+                                f"missing safe default for '{param.name}'"
+                            )
+                    else:
+                        kwargs[param.name] = param.default
+                func(sample, **kwargs)
+                results[key] = {"success": True}
+            except Exception as e:  # noqa: BLE001
+                msg = f"{type(e).__name__}: {e}"
+                print(f"{key} failed: {msg}")
+                results[key] = {"success": False, "error": msg}
+
     try:
         strategy_engine.process_strategy_rules(sample, rules_pf)
     except KeyError as e:
         raise SystemExit(f"Indicator preflight failed: {e}") from e
     except Exception:
         pass
-    analysis._write_run_metadata(start, [], {"indicator_columns": indicator_columns})
+    extra = {
+        "indicator_columns": indicator_columns,
+        "indicator_results": results,
+        "preflight_all": bool(getattr(config, "PREFLIGHT_ALL_INDICATORS", False)),
+        "preflight_sample_len": int(getattr(sample, "shape", (0,))[0] or 0),
+    }
+    analysis._write_run_metadata(start, [], extra)
+    if getattr(config, "PREFLIGHT_ALL_INDICATORS", False):
+        active_fail = {
+            (cond.get("indicator") or "").lower()
+            for cond in entry.get("conditions", [])
+            if not results.get((cond.get("indicator") or "").lower(), {}).get(
+                "success", True
+            )
+        }
+        if active_fail:
+            raise SystemExit(
+                f"Indicator preflight failed for active indicators: {sorted(active_fail)}"
+            )
 
 
 def main():
@@ -158,6 +232,25 @@ def main():
     num_cores = os.cpu_count()
     print(f"Detected {num_cores} CPU cores available for parallel processing.")
     print("-" * 35)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = f"{timestamp}_{config.TIMEFRAME}"
+    report_root = Path("Reporting")
+    run_dir = report_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    latest_symlink = report_root / "latest"
+    try:
+        if latest_symlink.is_symlink() or latest_symlink.exists():
+            try:
+                latest_symlink.unlink()
+            except IsADirectoryError:
+                import shutil
+
+                shutil.rmtree(latest_symlink)
+        latest_symlink.symlink_to(run_dir, target_is_directory=True)
+    except Exception:
+        (report_root / "LATEST_RUN.txt").write_text(str(run_dir))
+    analysis.set_run_dir(run_dir)
 
     # Determine the full date range needed across training, validation, and walk-forward
     train_start = pd.to_datetime(config.TRAINING_PERIOD["start"])
@@ -309,10 +402,10 @@ def main():
         ax.set_title("GA Fitness Evolution")
         ax.set_xlabel("Generation")
         ax.set_ylabel("Fitness")
-    fig_path = "ga_fitness_evolution.png"
+    fig_path = run_dir / "ga_fitness_evolution.png"
     plt.savefig(fig_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    artifacts = [fig_path]
+    artifacts = [str(fig_path)]
 
     try:
         analysis.run_champion_analysis(

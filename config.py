@@ -21,6 +21,9 @@ SEED = int(os.environ.get("GA_SEED", 42))
 # constant rather than hard-coding fee rates.
 FEES = 0.001
 
+# When True, preflight computes all indicators to surface latent errors.
+PREFLIGHT_ALL_INDICATORS = False
+
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"
