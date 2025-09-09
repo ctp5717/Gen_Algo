@@ -289,15 +289,17 @@ def process_strategy_rules(
                 stacklevel=2,
             )
             vote_threshold = n
-        logger.debug(
-            {
-                "logic": "VOTE",
-                "M": n,
-                "requested_k": requested_k,
-                "final_k": vote_threshold,
-                "treat_nan_as_false": treat_nan_as_false,
-            }
-        )
+        payload = {
+            "logic": "VOTE",
+            "M": n,
+            "requested_k": requested_k,
+            "final_k": vote_threshold,
+            "treat_nan_as_false": treat_nan_as_false,
+        }
+        if requested_k != vote_threshold:
+            logger.info(payload)
+        else:
+            logger.debug(payload)
 
     if vote_threshold is not None and not isinstance(vote_threshold, int):
         raise TypeError("vote_threshold must be an integer or None")

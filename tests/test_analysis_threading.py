@@ -43,7 +43,7 @@ def test_run_champion_analysis_non_blocking(monkeypatch, tmp_path):
     monkeypatch.setitem(analysis.config.MULTI_ASSET, "enabled", False)
 
     monkeypatch.setattr(
-        analysis.fitness, "_inject_genes_into_rules", lambda *a, **k: {"exit_rules": {}}
+        analysis, "inject_genes_into_rules", lambda *a, **k: {"exit_rules": {}}
     )
     monkeypatch.setattr(
         analysis.engine,
