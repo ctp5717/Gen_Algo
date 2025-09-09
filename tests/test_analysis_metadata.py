@@ -1,12 +1,14 @@
 import json
 from datetime import datetime, timezone
 
+import json
 import analysis
 
 
 def test_write_run_metadata_extra(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(analysis, "_get_cache_hashes", lambda: {})
+    analysis.set_run_dir(tmp_path)
 
     class _VBT:
         __version__ = "0.0.0"
@@ -31,6 +33,7 @@ def test_write_run_metadata_extra(tmp_path, monkeypatch):
 def test_write_run_metadata_skips_missing_artifacts(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(analysis, "_get_cache_hashes", lambda: {})
+    analysis.set_run_dir(tmp_path)
 
     class _VBT:
         __version__ = "0.0.0"

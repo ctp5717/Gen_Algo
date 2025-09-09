@@ -58,6 +58,8 @@ def weighted_mean_std(values, weights):
         x = np.array([float(x)])
     if len(w) != len(x) or len(w) == 0:
         raise ValueError("weighted_mean_std: values/weights length mismatch")
+    if (w < 0).any():
+        raise ValueError("weighted_mean_std: weights must be non-negative")
     total = w.sum()
     if total == 0:
         w = np.ones_like(w) / len(w)

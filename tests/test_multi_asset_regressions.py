@@ -1,8 +1,14 @@
 import json
+import sys
 import types
 
 import numpy as np
 import pandas as pd
+
+try:
+    import vectorbt  # noqa: F401
+except Exception:  # pragma: no cover
+    sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import analysis
 import config
@@ -167,6 +173,7 @@ def test_csv_and_json_include_exclusions(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis, "vbt", _VBT)
     monkeypatch.setattr(analysis, "_write_run_metadata", lambda *a, **k: None)
     monkeypatch.chdir(tmp_path)
+    analysis.set_run_dir(tmp_path)
 
     analysis._run_multi_asset_analysis([], {}, group, [])
 
