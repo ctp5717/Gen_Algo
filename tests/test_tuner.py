@@ -263,3 +263,57 @@ def test_lambda_rescore_disables_mutation(monkeypatch):
 
     tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
     assert calls == [(None, 0.0)]
+
+
+def test_lambda_grid_generations(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1],
+            "High": [1],
+            "Low": [1],
+            "Close": [1],
+            "Volume": [1],
+        },
+        index=pd.date_range("2020-01-01", periods=1),
+    )
+
+    gene_space = [{"low": 0, "high": 1}]
+    gene_map = {0: {"name": "x", "path": [], "type": float}}
+    gene_types = [float]
+
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid", [0.1])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_top_k", 1)
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_rescore_seeds", [1])
+    monkeypatch.setitem(tuner.config.MULTI_ASSET, "lambda_grid_generations", 3)
+    monkeypatch.setattr(tuner.config, "HYPERPARAMETER_SEARCH_SPACE", [], raising=False)
+
+    class DummyEval:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, ga, sol, idx):
+            return 0
+
+    gens = []
+
+    class DummyGA:
+        def __init__(self, *a, **k):
+            gens.append(k.get("num_generations"))
+
+        def run(self):
+            pass
+
+        def best_solution(self, **kwargs):
+            return [0], 0, None
+
+    monkeypatch.setattr(tuner.fitness, "MultiAssetFitnessEvaluator", DummyEval)
+    monkeypatch.setattr(
+        tuner.fitness,
+        "get_fitness_evaluator",
+        lambda *a, **k: types.SimpleNamespace(__call__=lambda *a, **k: 0),
+    )
+    monkeypatch.setattr(tuner.pygad, "GA", DummyGA)
+    monkeypatch.setattr(tuner, "_evaluate_on_validation", lambda sol, gm, val: 0)
+
+    tuner.find_best_hyperparameters(df, gene_space, gene_map, gene_types, df)
+    assert gens == [3, 3]
