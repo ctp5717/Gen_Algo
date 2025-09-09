@@ -26,7 +26,8 @@ import data_loader  # noqa: E402
 
 def test_get_data_uses_cache(monkeypatch):
     df = pd.DataFrame(
-        {"Close": [1, 2], "Volume": [1, 1]}, index=pd.date_range("2020-01-01", periods=2)
+        {"Close": [1, 2], "Volume": [1, 1]},
+        index=pd.date_range("2020-01-01", periods=2),
     )
 
     # Force cache path to exist and return our dataframe
@@ -55,7 +56,8 @@ def test_get_data_warns_when_volume_missing(monkeypatch, capsys):
 
 def test_get_data_raises_when_volume_invalid(monkeypatch):
     df = pd.DataFrame(
-        {"Close": [1, 2], "Volume": [1, -1]}, index=pd.date_range("2020-01-01", periods=2)
+        {"Close": [1, 2], "Volume": [1, -1]},
+        index=pd.date_range("2020-01-01", periods=2),
     )
     monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
     monkeypatch.setattr(data_loader.pd, "read_csv", lambda *a, **k: df)
