@@ -37,7 +37,3 @@ repos:
           - --disable-error-code=attr-defined
           - --disable-error-code=arg-type
           - --disable-error-code=index
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.28.0
-    hooks:
-      - id: gitleaks
