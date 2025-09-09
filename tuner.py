@@ -142,7 +142,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     train_data, config.STRATEGY_RULES, gene_map, settings
                 )
                 probe = pygad.GA(
-                    num_generations=1,
+                    num_generations=config.MULTI_ASSET.get(
+                        "lambda_grid_generations", 1
+                    ),
                     num_parents_mating=2,
                     sol_per_pop=4,
                     num_genes=len(gene_space),
@@ -182,7 +184,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                         mutation_kwargs["mutation_probability"] = 0.0
 
                     probe = pygad.GA(
-                        num_generations=1,
+                        num_generations=config.MULTI_ASSET.get(
+                            "lambda_grid_generations", 1
+                        ),
                         num_parents_mating=2,
                         sol_per_pop=4,
                         num_genes=len(gene_space),
