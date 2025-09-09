@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
+import gene_parser  # noqa: E402
 import indicator_library  # noqa: E402,F401
 import strategy_engine  # noqa: E402
 
@@ -117,13 +118,13 @@ def test_vote_threshold_exceeds_active(monkeypatch, caplog):
         }
     }
 
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.INFO):
         with pytest.warns(
             RuntimeWarning, match="vote_threshold exceeds active conditions"
         ):
             res = strategy_engine.process_strategy_rules(data, rules)
 
-    record = next(r for r in caplog.records if r.levelno == logging.DEBUG)
+    record = next(r for r in caplog.records if r.levelno == logging.INFO)
     payload = ast.literal_eval(record.getMessage())
     assert payload == {
         "logic": "VOTE",
@@ -156,3 +157,23 @@ def test_invalid_threshold_raises(monkeypatch):
 
     with pytest.raises(AssertionError):
         strategy_engine.process_strategy_rules(data, rules)
+
+
+def test_parse_genes_clamps_vote_threshold():
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "vote_threshold": {"gene": "vote_threshold", "low": 0, "high": 10},
+            "conditions": [
+                {"indicator": "a", "params": {}, "condition": {}, "is_active": True}
+                for _ in range(3)
+            ],
+        }
+    }
+    gs, gm, _ = gene_parser.parse_genes_from_config(rules)
+    idx = next(i for i, g in gm.items() if g["name"] == "vote_threshold")
+    assert gs[idx]["high"] == 3
+    assert gs[idx]["low"] == 1
+    vt = rules["entry_rules"]["vote_threshold"]
+    assert vt["high"] == 3
+    assert vt["low"] == 1

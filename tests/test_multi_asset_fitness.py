@@ -663,6 +663,7 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     analysis._run_multi_asset_analysis([], {}, group, [])
     fname = tmp_path / "multi_asset_stats_1d_2024-01-31.csv"
     assert fname.exists()
+    assert (tmp_path / "champion_equity.png").exists()
     df = pd.read_csv(fname)
     assert list(df.columns) == [
         "ticker",

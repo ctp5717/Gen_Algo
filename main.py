@@ -22,9 +22,20 @@ import data_loader
 import strategy_engine
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config  # now defined in its own module
+from params_resolver import resolve_effective_rules
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
+
+
+def _roundish(x, nd=4):
+    try:
+        fx = float(x)
+    except (TypeError, ValueError):
+        return x
+    if abs(fx - round(fx)) < 10 ** (-nd):
+        return int(round(fx))
+    return round(fx, nd)
 
 
 # Placeholders for delayed imports (useful for tests to monkeypatch)
@@ -84,6 +95,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
 
     indicator_columns = {}
     results: dict[str, dict] = {}
+    max_lookback = 0
     for cond in entry.get("conditions", []):
         ind = (cond.get("indicator") or "").lower()
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
@@ -99,6 +111,33 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
             else:
                 params_pf[p] = val
         cond["params"] = params_pf
+        nums = [v for v in params_pf.values() if isinstance(v, (int, float))]
+        if ind == "macd" and {"slow", "signal"} <= params_pf.keys():
+            nums.append(params_pf["slow"] + params_pf["signal"])
+        elif ind == "trix" and {"period", "signal"} <= params_pf.keys():
+            nums.append(params_pf["period"] * 3 + params_pf["signal"])
+        elif ind == "stoch":
+            nums.append(
+                max(
+                    params_pf.get("k", 0),
+                    params_pf.get("d", 0),
+                    params_pf.get("smooth_k", 0),
+                )
+            )
+        elif ind == "ichimoku":
+            nums.append(
+                max(
+                    params_pf.get("base_period", 0),
+                    params_pf.get("span_b_period", 0),
+                )
+            )
+        elif ind in {"bbands", "kc", "donchian"}:
+            if "length" in params_pf:
+                nums.append(params_pf["length"])
+            elif "window" in params_pf:
+                nums.append(params_pf["window"])
+        if nums:
+            max_lookback = max(max_lookback, int(max(nums)))
         try:
             out = func(sample, **params_pf)
             results[ind] = {"success": True}
@@ -173,6 +212,15 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         "preflight_all": bool(getattr(config, "PREFLIGHT_ALL_INDICATORS", False)),
         "preflight_sample_len": int(getattr(sample, "shape", (0,))[0] or 0),
     }
+    sample_len = extra["preflight_sample_len"]
+    if sample_len < max_lookback:
+        hint = f"sample too short: need >= {max_lookback} rows"
+        print(
+            f"Warning: preflight sample length {sample_len} < required {max_lookback}"
+        )
+    else:
+        hint = f"sample length ok (>= {max_lookback})"
+    extra["preflight_sufficiency_hint"] = hint
     analysis._write_run_metadata(start, [], extra)
     if getattr(config, "PREFLIGHT_ALL_INDICATORS", False):
         active_fail = {
@@ -382,15 +430,23 @@ def main():
     print("Optimization finished.")
 
     best_solution, best_solution_fitness, _ = ga_instance.best_solution()
-    print(f"\nBest Solution's Fitness (Training Period): {best_solution_fitness:.4f}")
+    print(
+        f"\nBest Solution's Fitness (Training Period): {_roundish(best_solution_fitness)}"
+    )
     print("Optimal Parameters Found:")
+    resolved = resolve_effective_rules(config.STRATEGY_RULES, gene_map, best_solution)
     for i, gene_value in enumerate(best_solution):
-        gene_name = gene_map[i]["name"]
-        gene_type = gene_map[i]["type"]
-        if gene_type == int:
-            print(f"  - {gene_name}: {int(gene_value)}")
-        else:
-            print(f"  - {gene_name}: {gene_value:.4f}")
+        info = gene_map[i]
+        gene_name = info["name"]
+        path = info.get("path", [])
+        value = gene_value
+        if path:
+            node = resolved
+            for key in path:
+                node = node[key]
+            value = node
+        value = _roundish(value)
+        print(f"  - {gene_name}: {value}")
     print("\nDisplaying GA fitness evolution plot...")
     plt.ion()
     fig, ax = plt.subplots()
@@ -427,7 +483,9 @@ def main():
             else:
                 wf_data = all_data.loc[wf_start:wf_end]
             walk_forward.run_walk_forward_validation(
-                initial_champions=[best_solution], data=wf_data
+                run_dir,
+                initial_champions=[best_solution],
+                data=wf_data,
             )
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")

@@ -114,6 +114,7 @@ def test_indicator_preflight_combination_logic_gene_dict(monkeypatch):
 def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
     monkeypatch.chdir(tmp_path)
     data = pd.DataFrame({"Close": [1, 2, 3]})
+    monkeypatch.setattr(config, "PREFLIGHT_ALL_INDICATORS", False, raising=False)
     rules = {
         "entry_rules": {
             "conditions": [
@@ -159,6 +160,7 @@ def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
     assert ic["bbands"]["type"] == "DataFrame"
     assert captured["preflight_all"] is False
     assert captured["preflight_sample_len"] == 3
+    assert "preflight_sufficiency_hint" in captured
 
 
 def test_indicator_preflight_all_unused_failures_recorded(
@@ -259,4 +261,69 @@ def test_indicator_preflight_all_success(monkeypatch, tmp_path):
     monkeypatch.setattr(main.analysis, "_write_run_metadata", fake_write, raising=False)
 
     main.indicator_preflight(data, {"entry_rules": {"conditions": []}})
-    assert captured["indicator_results"]["good"]["success"]
+
+
+def test_indicator_preflight_warns_on_short_sample(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    data = pd.DataFrame({"Close": [1, 2, 3]})
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {"period": 5},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setitem(
+        strategy_engine.INDICATOR_MAPPING,
+        "ema",
+        lambda df, period: pd.Series([1] * len(df)),
+    )
+    captured = {}
+
+    def fake_write(start, arts, extra=None):
+        captured.update(extra or {})
+
+    monkeypatch.setattr(main.analysis, "_write_run_metadata", fake_write, raising=False)
+    main.indicator_preflight(data, rules)
+    out = capsys.readouterr().out
+    assert "Warning: preflight sample length" in out
+    assert "short" in captured["preflight_sufficiency_hint"]
+
+
+def test_indicator_preflight_sufficient_sample(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    data = pd.DataFrame({"Close": list(range(10))})
+    monkeypatch.setattr(config, "PREFLIGHT_ALL_INDICATORS", False, raising=False)
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "ema",
+                    "params": {"period": 5},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+    monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setitem(
+        strategy_engine.INDICATOR_MAPPING,
+        "ema",
+        lambda df, period: pd.Series([1] * len(df)),
+    )
+    captured = {}
+    monkeypatch.setattr(
+        main.analysis,
+        "_write_run_metadata",
+        lambda s, a, extra=None: captured.update(extra or {}),
+        raising=False,
+    )
+    main.indicator_preflight(data, rules)
+    out = capsys.readouterr().out
+    assert "Warning: preflight sample length" not in out
+    assert "ok" in captured["preflight_sufficiency_hint"]

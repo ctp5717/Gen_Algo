@@ -25,6 +25,7 @@ import fitness
 import strategy_engine as engine
 import trade_floor
 from deps import ensure_real_vectorbt
+from params_resolver import inject_genes_into_rules
 from run_metadata import merge_run_metadata
 
 RUN_DIR = Path(".")
@@ -102,7 +103,27 @@ def _write_run_metadata(
     end_time = datetime.now(timezone.utc)
 
     # Only include artifact paths that actually exist
-    existing_artifacts = [str(a) for a in artifacts if Path(a).exists()]
+    existing_artifacts = []
+    run_dir = RUN_DIR.resolve()
+    for a in artifacts:
+        p = Path(a)
+        if not p.exists():
+            continue
+        try:
+            rel = p.resolve().relative_to(run_dir)
+            existing_artifacts.append(str(rel))
+        except ValueError:
+            existing_artifacts.append(str(p.resolve()))
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_artifacts: list[str] = []
+    for a in existing_artifacts:
+        if a in seen:
+            continue
+        seen.add(a)
+        unique_artifacts.append(a)
+    existing_artifacts = unique_artifacts
 
     metadata = {
         "artifact_version": "1.0.0",
@@ -191,9 +212,7 @@ def run_champion_analysis(
         return
 
     try:
-        rules = fitness._inject_genes_into_rules(
-            config.STRATEGY_RULES, gene_map, best_solution
-        )
+        rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
         outputs = engine.process_strategy_rules(
             validation_data, rules, collect_counts=True
         )
@@ -325,9 +344,7 @@ def _run_multi_asset_analysis(
     )
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
-    rules = fitness._inject_genes_into_rules(
-        config.STRATEGY_RULES, gene_map, best_solution
-    )
+    rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
     combo = rules.get("entry_rules", {}).get("combination_logic")
     vt = rules.get("entry_rules", {}).get("vote_threshold")
     fitness.print_floor_failures(getattr(evaluator, "floor_failures", {}))
@@ -338,6 +355,44 @@ def _run_multi_asset_analysis(
     per_asset_scores = {t: details["per_asset"][t]["score"] for t in tickers}
     per_asset_trades = {t: details["per_asset"][t].get("trades", 0) for t in tickers}
     equity_curves = {t: details["per_asset"][t].get("equity_curve") for t in tickers}
+    weights_map = dict(settings.get("asset_weights") or {})
+    frames = []
+    for t in tickers:
+        eq = equity_curves.get(t)
+        if eq is None or len(eq) == 0:
+            continue
+        base = float(eq.iloc[0])
+        if base == 0:
+            continue
+        frames.append(eq.rename(t) / base)
+
+    combined = None
+    if frames:
+        df = pd.concat(frames, axis=1).sort_index()
+        w = pd.Series(weights_map).reindex(df.columns).fillna(1.0).astype(float)
+        w = w / w.sum() if w.sum() else w
+
+        mask = df.notna()
+        active_w = mask.mul(w, axis=1)
+        row_w = active_w.sum(axis=1).replace(0.0, np.nan)
+        combined = (df.fillna(0.0) * active_w).sum(axis=1) / row_w
+
+    if combined is not None:
+        combined = combined.where(np.isfinite(combined))
+        if not combined.dropna().empty:
+            plt.ion()
+            fig, ax = plt.subplots()
+            combined.plot(ax=ax, title="Champion Equity Curve")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Equity")
+            champ_path = RUN_DIR / "champion_equity.png"
+            fig.savefig(champ_path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            try:
+                rel = champ_path.resolve().relative_to(RUN_DIR.resolve())
+            except ValueError:
+                rel = champ_path
+            artifacts.append(str(rel))
     mu = details.get("mu")
     sigma = details.get("sigma")
     lam_sigma = details.get("lambda_sigma")
