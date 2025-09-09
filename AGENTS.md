@@ -99,7 +99,7 @@
 
 - CI / Quality:
   - `.github/workflows/` (lint, tests, security),
-  - `.pre-commit-config.yaml` (black, isort, flake8, mypy relaxed, gitleaks),
+  - `.pre-commit-config.yaml` (black, isort, flake8, mypy relaxed),
   - `.flake8` per-file ignores,
   - `requirements.txt`, `requirements-dev.txt`.
 
@@ -308,7 +308,7 @@ Add it to `config.HYPERPARAMETER_SEARCH_SPACE` when exploring larger populations
 CI expectations:
 - Linux, Python 3.13, `pytest -q -n auto` with coverage.
 - Lint via pre-commit; basic security scan via CodeQL & Bandit.
-- No secrets in tree (`gitleaks` hook).
+- No secrets in tree.
 
 ---
 
