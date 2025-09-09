@@ -11,12 +11,12 @@ sys.path.insert(0, str(ROOT))
 # Stub heavy dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 
-import fitness  # noqa: E402
-import main  # noqa: E402
-import strategy_engine  # noqa: E402
 import analysis  # noqa: E402
 import config  # noqa: E402
+import fitness  # noqa: E402
 import indicator_library  # noqa: E402
+import main  # noqa: E402
+import strategy_engine  # noqa: E402
 
 
 def test_indicator_preflight_failure(monkeypatch):
@@ -161,7 +161,9 @@ def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
     assert captured["preflight_sample_len"] == 3
 
 
-def test_indicator_preflight_all_unused_failures_recorded(monkeypatch, capsys, tmp_path):
+def test_indicator_preflight_all_unused_failures_recorded(
+    monkeypatch, capsys, tmp_path
+):
     monkeypatch.setattr(config, "PREFLIGHT_ALL_INDICATORS", True, raising=False)
     analysis.set_run_dir(tmp_path)
     data = pd.DataFrame({"Close": [1, 2], "Volume": [1, 1]})
@@ -172,8 +174,12 @@ def test_indicator_preflight_all_unused_failures_recorded(monkeypatch, capsys, t
     def bad(df, **p):
         raise ValueError("boom")
 
-    monkeypatch.setattr(indicator_library, "INDICATOR_REGISTRY", {"good": good, "bad": bad})
-    monkeypatch.setattr(strategy_engine, "INDICATOR_MAPPING", {"good": good, "bad": bad})
+    monkeypatch.setattr(
+        indicator_library, "INDICATOR_REGISTRY", {"good": good, "bad": bad}
+    )
+    monkeypatch.setattr(
+        strategy_engine, "INDICATOR_MAPPING", {"good": good, "bad": bad}
+    )
     captured = {}
 
     def fake_write(start, arts, extra=None):
@@ -203,9 +209,13 @@ def test_indicator_preflight_all_active_failure_exits(monkeypatch, capsys, tmp_p
     monkeypatch.setattr(
         indicator_library, "INDICATOR_REGISTRY", {"bad": bad}, raising=False
     )
-    monkeypatch.setattr(strategy_engine, "INDICATOR_MAPPING", {"bad": bad}, raising=False)
+    monkeypatch.setattr(
+        strategy_engine, "INDICATOR_MAPPING", {"bad": bad}, raising=False
+    )
     monkeypatch.setattr(main, "analysis", analysis, raising=False)
-    monkeypatch.setattr(main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(
+        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
+    )
 
     with pytest.raises(SystemExit):
         main.indicator_preflight(
@@ -216,7 +226,10 @@ def test_indicator_preflight_all_active_failure_exits(monkeypatch, capsys, tmp_p
                         {
                             "indicator": "bad",
                             "params": {},
-                            "condition": {"type": "indicator_is_above_value", "value": 0},
+                            "condition": {
+                                "type": "indicator_is_above_value",
+                                "value": 0,
+                            },
                         }
                     ]
                 }
