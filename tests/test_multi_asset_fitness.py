@@ -658,6 +658,7 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "vectorbt", _VBT)
     monkeypatch.setattr(analysis, "vbt", _VBT)
     monkeypatch.chdir(tmp_path)
+    analysis.set_run_dir(tmp_path)
 
     analysis._run_multi_asset_analysis([], {}, group, [])
     fname = tmp_path / "multi_asset_stats_1d_2024-01-31.csv"

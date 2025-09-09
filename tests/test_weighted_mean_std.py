@@ -18,3 +18,8 @@ def test_weighted_mean_std_handles_zero_total():
     mu, sigma = weighted_mean_std([1, 3], [0, 0])
     assert mu == pytest.approx(2.0)
     assert sigma == pytest.approx(1.0)
+
+
+def test_weighted_mean_std_rejects_negative_weights():
+    with pytest.raises(ValueError):
+        weighted_mean_std([1, 3], [1, -1])

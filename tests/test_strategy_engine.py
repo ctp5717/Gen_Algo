@@ -1270,6 +1270,7 @@ def test_volume_missing_early_validation(monkeypatch):
             "conditions": [
                 {
                     "indicator": "obv",
+                    "rule_name": "vol_rule",
                     "params": {},
                     "condition": {"type": "price_is_above_indicator"},
                 }
@@ -1281,5 +1282,6 @@ def test_volume_missing_early_validation(monkeypatch):
         raise AssertionError("indicator should not run")
 
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "obv", fake_obv)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc:
         strategy_engine.process_strategy_rules(df, rules)
+    assert "vol_rule" in str(exc.value)

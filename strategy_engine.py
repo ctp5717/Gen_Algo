@@ -34,7 +34,23 @@ import indicator_library as ind_lib  # Import our toolbox of indicators
 logger = logging.getLogger(__name__)
 
 # Auto-registered indicator mapping from ``indicator_library``
-INDICATOR_MAPPING = ind_lib.INDICATOR_REGISTRY
+INDICATOR_MAPPING = {k.lower(): v for k, v in ind_lib.INDICATOR_REGISTRY.items()}
+
+# Common shorthand aliases for indicators
+ALIASES = {
+    "uo": "ultimate_oscillator",
+    "willr": "williams_r",
+    "kc": "keltner",
+    "dc": "donchian",
+    "dmi": "adx",
+    "bb": "bbands",
+    "bollinger": "bbands",
+    "keltner_channels": "keltner",
+}
+for alias, target in ALIASES.items():
+    func = INDICATOR_MAPPING.get(target.lower())
+    if func:
+        INDICATOR_MAPPING[alias] = func
 
 # Indicators that require a ``Volume`` column
 VOLUME_INDICATORS = {"obv", "mfi", "adl", "cmf"}
@@ -232,14 +248,18 @@ def process_strategy_rules(
         raise TypeError("strict_column must be a boolean")
 
     active_conds = [c for c in conditions if c.get("is_active", True)]
-    if (
-        VOLUME_INDICATORS.intersection({c.get("indicator") for c in active_conds})
-        and "Volume" not in ohlc_data.columns
-    ):
-        missing = sorted(
-            VOLUME_INDICATORS.intersection({c.get("indicator") for c in active_conds})
+    used_inds = {c.get("indicator", "").lower() for c in active_conds}
+    missing_inds = VOLUME_INDICATORS.intersection(used_inds)
+    if missing_inds and "Volume" not in ohlc_data.columns:
+        affected = [
+            canonical_rule_label(c)
+            for c in active_conds
+            if c.get("indicator", "").lower() in missing_inds
+        ]
+        raise ValueError(
+            f"Volume column required for indicators: {sorted(missing_inds)}; "
+            f"affected rules: {affected}"
         )
-        raise ValueError(f"Volume column required for indicators: {missing}")
     n = len(active_conds)
     requested_k = vote_threshold
 
@@ -297,7 +317,8 @@ def process_strategy_rules(
         if not rule.get("is_active", True):
             continue
 
-        indicator_name = rule.get("indicator")
+        indicator_name_raw = rule.get("indicator", "")
+        indicator_name = indicator_name_raw.lower()
         params = rule.get("params", {})
         condition_logic = rule.get("condition", {})
         indicator_func = INDICATOR_MAPPING.get(indicator_name)
@@ -309,7 +330,12 @@ def process_strategy_rules(
             )
             continue
 
-        params_key = json.dumps({k: repr(v) for k, v in params.items()}, sort_keys=True)
+        norm_params = {
+            k: (round(v, 10) if isinstance(v, float) else v) for k, v in params.items()
+        }
+        params_key = json.dumps(
+            {k: repr(v) for k, v in norm_params.items()}, sort_keys=True
+        )
         key = (
             indicator_name,
             params_key,
@@ -319,7 +345,7 @@ def process_strategy_rules(
         if key in cache:
             indicator_output = cache[key]
         else:
-            indicator_output = indicator_func(ohlc_data, **params)
+            indicator_output = indicator_func(ohlc_data, **norm_params)
             cache[key] = indicator_output
         condition_type = condition_logic.get("type")
 
@@ -342,15 +368,19 @@ def process_strategy_rules(
                 msg = f"{msg}; available: {avail}"
                 if df.shape[1] == 0:
                     if strict:
-                        raise KeyError(msg)
+                        raise KeyError(
+                            msg + "; set strict_column=False to allow fallback"
+                        )
                     warnings.warn(msg + "; using first available column", stacklevel=2)
                     if output.shape[1] == 0:
-                        raise KeyError(msg)
+                        raise KeyError(
+                            msg + "; set strict_column=False to allow fallback"
+                        )
                     return output.iloc[:, 0]
                 if not fallback:
                     return df.iloc[:, 0]
                 if strict:
-                    raise KeyError(msg)
+                    raise KeyError(msg + "; set strict_column=False to allow fallback")
                 warnings.warn(msg + "; using first available column", stacklevel=2)
                 return df.iloc[:, 0]
 

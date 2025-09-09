@@ -27,6 +27,14 @@ import trade_floor
 from deps import ensure_real_vectorbt
 from run_metadata import merge_run_metadata
 
+RUN_DIR = Path(".")
+
+
+def set_run_dir(path: Path) -> None:
+    """Set the directory where analysis artifacts and metadata are stored."""
+    global RUN_DIR
+    RUN_DIR = Path(path)
+
 
 def _get_commit_hash() -> str:
     """Return the current git commit hash or "unknown" if unavailable."""
@@ -116,7 +124,7 @@ def _write_run_metadata(
     }
     if extra:
         metadata.update(extra)
-    merge_run_metadata("run_metadata.json", metadata)
+    merge_run_metadata(RUN_DIR / "run_metadata.json", metadata)
 
 
 def _canonical_rule_slugs(rules: dict):
@@ -264,10 +272,10 @@ def run_champion_analysis(
         title=f"Champion Strategy Performance on {config.SELECTED_ASSET_NAME} (Validation)"
     )
     fig.show()
-    fig_path = "champion_equity.png"
+    fig_path = RUN_DIR / "champion_equity.png"
     plt.savefig(fig_path, dpi=150, bbox_inches="tight")
     plt.close()
-    artifacts.append(fig_path)
+    artifacts.append(str(fig_path))
     combo = rules.get("entry_rules", {}).get("combination_logic")
     vt = rules.get("entry_rules", {}).get("vote_threshold")
     extra = {
@@ -403,12 +411,12 @@ def _run_multi_asset_analysis(
             key=lambda s: pd.to_numeric(s, errors="coerce").fillna(-np.inf),
             ascending=False,
         )
-        fname = f"multi_asset_stats_{config.TIMEFRAME}_{end_str}.csv"
+        fname = RUN_DIR / f"multi_asset_stats_{config.TIMEFRAME}_{end_str}.csv"
         save_csv = charts_cfg.get("save_csv", True)
         if save_csv:
             df.to_csv(fname, index=False)
             print(f"Saved per-asset stats: {fname}")
-        counts_fname = f"per_asset_counts_{config.TIMEFRAME}_{end_str}.csv"
+        counts_fname = RUN_DIR / f"per_asset_counts_{config.TIMEFRAME}_{end_str}.csv"
         if save_csv:
             counts_df.to_csv(counts_fname, index=False)
             print(f"Saved per-asset counts: {counts_fname}")
@@ -435,14 +443,14 @@ def _run_multi_asset_analysis(
             "vote_threshold": vt,
             "per_asset_signal_counts": per_asset_signal_counts,
         }
-        jf = f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
+        jf = RUN_DIR / f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
         summary["run_metadata_file"] = "run_metadata.json"
         with open(jf, "w") as fh:
             json.dump(summary, fh, indent=2)
         print(f"Saved run summary: {jf}")
-        written = [jf]
+        written = [str(jf)]
         if save_csv:
-            written.extend([fname, counts_fname])
+            written.extend([str(fname), str(counts_fname)])
         artifacts.extend(written)
     _plot_multi_asset_overview(
         per_asset_scores,
@@ -462,6 +470,9 @@ def _run_multi_asset_analysis(
         config.VALIDATION_PERIOD["end"],
         settings.get("min_total_trades"),
     )
+    if charts_cfg.get("save_pngs"):
+        png = RUN_DIR / f"multi_asset_overview_{config.TIMEFRAME}_{end_str}.png"
+        artifacts.append(str(png))
 
     extra = {
         "combination_logic": combo,
@@ -488,7 +499,7 @@ def _plot_multi_asset_overview(
     start_date,
     end_date,
     floor,
-):
+) -> None:
     """Render multi-asset overview charts with KPI strip."""
 
     plt.ion()
@@ -584,7 +595,8 @@ def _plot_multi_asset_overview(
     end_dt = pd.to_datetime(end_date)
     end_str = end_dt.strftime("%Y-%m-%d")
     if charts_cfg.get("save_pngs"):
-        fname = f"multi_asset_overview_{config.TIMEFRAME}_{end_str}.png"
+        fname = RUN_DIR / f"multi_asset_overview_{config.TIMEFRAME}_{end_str}.png"
         fig.savefig(fname, dpi=144, bbox_inches="tight")
     else:
         fig.show()
+    plt.close(fig)

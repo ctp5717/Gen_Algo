@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - fallback to stub
 import analysis  # noqa: E402
 
 
-def test_run_champion_analysis_non_blocking(monkeypatch):
+def test_run_champion_analysis_non_blocking(monkeypatch, tmp_path):
     df = pd.DataFrame(
         {
             "Open": [1, 2],
@@ -98,6 +98,8 @@ def test_run_champion_analysis_non_blocking(monkeypatch):
             close=lambda *a, **k: None,
         ),
     )
+
+    analysis.set_run_dir(tmp_path)
 
     analysis.run_champion_analysis(
         [0],
