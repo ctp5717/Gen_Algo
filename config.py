@@ -241,6 +241,8 @@ MULTI_ASSET = {
     "lambda_top_k": 2,
     # Seeds used when re-scoring lambda candidates without mutation
     "lambda_rescore_seeds": [SEED, SEED + 1],
+    # Number of GA generations to run when sweeping or rescoring lambda
+    "lambda_grid_generations": 1,
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
     # Profit factor cap to avoid outliers
