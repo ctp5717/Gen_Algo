@@ -292,7 +292,10 @@ def test_indicator_preflight_warns_on_short_sample(monkeypatch, capsys, tmp_path
     main.indicator_preflight(data, rules)
     out = capsys.readouterr().out
     assert "Warning: preflight sample length" in out
-    assert "short" in captured["preflight_sufficiency_hint"]
+    hint = captured["preflight_sufficiency_hint"]
+    assert hint.startswith("sample too short")
+    assert "\u2265 5" in hint
+    assert "from ema period=5" in hint
 
 
 def test_indicator_preflight_sufficient_sample(monkeypatch, tmp_path, capsys):
@@ -326,4 +329,7 @@ def test_indicator_preflight_sufficient_sample(monkeypatch, tmp_path, capsys):
     main.indicator_preflight(data, rules)
     out = capsys.readouterr().out
     assert "Warning: preflight sample length" not in out
-    assert "ok" in captured["preflight_sufficiency_hint"]
+    hint = captured["preflight_sufficiency_hint"]
+    assert hint.startswith("sample length ok")
+    assert "\u2265 5" in hint
+    assert "from ema period=5" in hint
