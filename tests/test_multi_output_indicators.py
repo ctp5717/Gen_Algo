@@ -131,6 +131,25 @@ def test_donchian_defaults_to_middle_band():
     assert entries.iloc[-1]
 
 
+def test_ma_envelope_defaults_to_middle_band():
+    df = _base_df()
+    output = pd.DataFrame(
+        {
+            "MAE_U_2_2.0": [5, 5, 5, 5],
+            "MAE_M_2_2.0": [0, 1, 2, 3],
+            "MAE_L_2_2.0": [0, 0, 0, 0],
+        },
+        index=df.index,
+    )
+    entries = _run_rule(
+        df,
+        "ma_envelope",
+        output,
+        {"type": "price_is_above_indicator"},
+    )
+    assert entries.iloc[-1]
+
+
 def test_ichimoku_defaults_to_baseline():
     df = _base_df()
     output = pd.DataFrame(

@@ -156,7 +156,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
 
     if getattr(config, "PREFLIGHT_ALL_INDICATORS", False):
         SANE_DEFAULTS = {
-            "period": 14,
+            "period": 20,
             "length": 14,
             "window": 14,
             "fast": 12,
@@ -167,6 +167,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
             "smooth_k": 3,
             "multiplier": 2.0,
             "std_dev": 2.0,
+            "percent": 2.0,
             "conversion_period": 9,
             "base_period": 26,
             "span_b_period": 52,
