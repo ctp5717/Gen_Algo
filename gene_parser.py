@@ -26,12 +26,16 @@ def parse_genes_from_config(
     ]
     n_active = len(active_conditions) or 1
     comb_logic = entry_rules.get("combination_logic", "AND")
-    if str(comb_logic).upper() == "VOTE":
+    if str(comb_logic).upper() == "VOTE" or (
+        isinstance(comb_logic, dict)
+        and (comb_logic.get("gene") or comb_logic.get("options"))
+    ):
         vt_gene = entry_rules.get("vote_threshold")
         if isinstance(vt_gene, dict) and vt_gene.get("gene"):
             high = vt_gene.get("high", n_active)
             vt_gene["high"] = min(high, n_active)
-            vt_gene["low"] = max(1, vt_gene.get("low", 1))
+            vt_gene["low"] = max(1, min(vt_gene.get("low", 1), n_active))
+            entry_rules["vote_threshold"] = vt_gene
 
     def find_genes(sub_config: Any, path: List[Any]) -> None:
         nonlocal gene_index
@@ -47,8 +51,11 @@ def parse_genes_from_config(
                     gene_name = gene_info["gene"]
 
                     if key == "vote_threshold" and not (
-                        isinstance(comb_logic, dict)
-                        or str(comb_logic).upper() == "VOTE"
+                        str(comb_logic).upper() == "VOTE"
+                        or (
+                            isinstance(comb_logic, dict)
+                            and (comb_logic.get("gene") or comb_logic.get("options"))
+                        )
                     ):
                         continue
 

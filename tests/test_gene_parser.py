@@ -99,7 +99,7 @@ def test_parse_top_level_combination_genes():
     assert "logic" in names
     assert "vt" in names
     assert {"options": ["AND", "OR"]} in gene_space
-    assert any(gs.get("low") == 1 and gs.get("high") == 3 for gs in gene_space)
+    assert any(gs.get("low") == 1 and gs.get("high") == 1 for gs in gene_space)
     assert str in gene_types and int in gene_types
 
 
@@ -203,3 +203,59 @@ def test_vote_threshold_high_clamped_and_other_genes_unaffected():
     assert space[foo_idx] == {"low": 2, "high": 4, "step": 1}
     assert all(info["name"] != "bar" for info in gene_map.values())
     assert len(space) == 2
+
+
+def test_combination_logic_gene_clamps_vote_threshold_and_shrinks_with_inactive():
+    rules = {
+        "entry_rules": {
+            "combination_logic": {"gene": "logic", "options": ["AND", "VOTE"]},
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 9, "step": 1},
+            "conditions": [
+                {"is_active": True},
+                {"is_active": True},
+                {"is_active": False},
+            ],
+        }
+    }
+    space, gene_map, _ = parse_genes_from_config(rules)
+    vt_idx = next(i for i, info in gene_map.items() if info["name"] == "vt")
+    assert space[vt_idx]["high"] == 2
+    assert rules["entry_rules"]["vote_threshold"]["high"] == 2
+    # deactivate another condition and ensure shrinkage
+    rules["entry_rules"]["conditions"][0]["is_active"] = False
+    space2, gene_map2, _ = parse_genes_from_config(rules)
+    vt_idx2 = next(i for i, info in gene_map2.items() if info["name"] == "vt")
+    assert space2[vt_idx2]["high"] == 1
+
+
+def test_vote_threshold_warning_on_zero_active(caplog):
+    import logging
+
+    from params_resolver import resolve_effective_rules
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": {"gene": "logic", "options": ["AND", "VOTE"]},
+            "vote_threshold": {"gene": "vt", "low": 1, "high": 5, "step": 1},
+            "conditions": [
+                {"is_active": {"gene": "c0", "options": [True, False]}},
+                {"is_active": {"gene": "c1", "options": [True, False]}},
+            ],
+        }
+    }
+
+    space, gene_map, _ = parse_genes_from_config(rules)
+    sol = [None] * len(gene_map)
+    idx_logic = next(i for i, g in gene_map.items() if g["name"] == "logic")
+    idx_vt = next(i for i, g in gene_map.items() if g["name"] == "vt")
+    idx_c0 = next(i for i, g in gene_map.items() if g["name"] == "c0")
+    idx_c1 = next(i for i, g in gene_map.items() if g["name"] == "c1")
+    sol[idx_logic] = "VOTE"
+    sol[idx_vt] = 5
+    sol[idx_c0] = False
+    sol[idx_c1] = False
+
+    with caplog.at_level(logging.WARNING):
+        resolved = resolve_effective_rules(rules, gene_map, sol)
+    assert resolved["entry_rules"]["vote_threshold"] == 1
+    assert any("vote_threshold set to 1" in msg for msg in caplog.messages)
