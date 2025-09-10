@@ -96,8 +96,10 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     indicator_columns = {}
     results: dict[str, dict] = {}
     max_lookback = 0
+    max_lookback_source = ""
     for cond in entry.get("conditions", []):
-        ind = (cond.get("indicator") or "").lower()
+        ind_orig = cond.get("indicator") or ""
+        ind = ind_orig.lower()
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
         if func is None:
             continue
@@ -111,33 +113,55 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
             else:
                 params_pf[p] = val
         cond["params"] = params_pf
-        nums = [v for v in params_pf.values() if isinstance(v, (int, float))]
+
+        lb = 0.0
+        lb_expr = ""
+        numeric_items = [
+            (p, v) for p, v in params_pf.items() if isinstance(v, (int, float))
+        ]
+        if numeric_items:
+            max_param, max_val = max(numeric_items, key=lambda t: t[1])
+            lb = float(max_val)
+            lb_expr = f"{max_param}={max_val}"
+
         if ind == "macd" and {"slow", "signal"} <= params_pf.keys():
-            nums.append(params_pf["slow"] + params_pf["signal"])
+            derived = params_pf["slow"] + params_pf["signal"]
+            if derived > lb:
+                lb = derived
+                lb_expr = f"slow+signal={params_pf['slow']}+{params_pf['signal']}"
         elif ind == "trix" and {"period", "signal"} <= params_pf.keys():
-            nums.append(params_pf["period"] * 3 + params_pf["signal"])
+            derived = params_pf["period"] * 3 + params_pf["signal"]
+            if derived > lb:
+                lb = derived
+                lb_expr = (
+                    f"period*3+signal={params_pf['period']}*3+{params_pf['signal']}"
+                )
         elif ind == "stoch":
-            nums.append(
-                max(
-                    params_pf.get("k", 0),
-                    params_pf.get("d", 0),
-                    params_pf.get("smooth_k", 0),
-                )
-            )
+            k = params_pf.get("k", 0)
+            d = params_pf.get("d", 0)
+            smooth_k = params_pf.get("smooth_k", 0)
+            derived = max(k, d, smooth_k)
+            if derived > lb:
+                lb = derived
+                lb_expr = f"max(k={k},d={d},smooth_k={smooth_k})"
         elif ind == "ichimoku":
-            nums.append(
-                max(
-                    params_pf.get("base_period", 0),
-                    params_pf.get("span_b_period", 0),
-                )
-            )
+            base = params_pf.get("base_period", 0)
+            span_b = params_pf.get("span_b_period", 0)
+            derived = max(base, span_b)
+            if derived > lb:
+                lb = derived
+                lb_expr = f"max(base_period={base},span_b_period={span_b})"
         elif ind in {"bbands", "kc", "donchian"}:
-            if "length" in params_pf:
-                nums.append(params_pf["length"])
-            elif "window" in params_pf:
-                nums.append(params_pf["window"])
-        if nums:
-            max_lookback = max(max_lookback, int(max(nums)))
+            if "length" in params_pf and params_pf["length"] > lb:
+                lb = params_pf["length"]
+                lb_expr = f"length={params_pf['length']}"
+            if "window" in params_pf and params_pf["window"] > lb:
+                lb = params_pf["window"]
+                lb_expr = f"window={params_pf['window']}"
+
+        if lb > max_lookback:
+            max_lookback = int(lb)
+            max_lookback_source = f"{ind_orig} {lb_expr}".strip()
         try:
             out = func(sample, **params_pf)
             results[ind] = {"success": True}
@@ -214,13 +238,16 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         "preflight_sample_len": int(getattr(sample, "shape", (0,))[0] or 0),
     }
     sample_len = extra["preflight_sample_len"]
+    source_hint = max_lookback_source or "n/a"
     if sample_len < max_lookback:
-        hint = f"sample too short: need >= {max_lookback} rows"
+        hint = f"sample too short: need ≥ {max_lookback} rows (from {source_hint})"
         print(
             f"Warning: preflight sample length {sample_len} < required {max_lookback}"
         )
     else:
-        hint = f"sample length ok (>= {max_lookback})"
+        hint = f"sample length ok (≥ {max_lookback}, from {source_hint})"
+    extra["preflight_required_len"] = int(max_lookback)
+    extra["preflight_required_source"] = source_hint
     extra["preflight_sufficiency_hint"] = hint
     analysis._write_run_metadata(start, [], extra)
     if getattr(config, "PREFLIGHT_ALL_INDICATORS", False):
