@@ -83,4 +83,23 @@ def inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) ->
 
 def resolve_effective_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """Return strategy rules with genes applied and constraints repaired."""
-    return inject_genes_into_rules(base_rules, gene_map, solution)
+    resolved = inject_genes_into_rules(base_rules, gene_map, solution)
+    entry = resolved.get("entry_rules", {})
+    comb_logic = entry.get("combination_logic", "AND")
+    if str(comb_logic).upper() == "VOTE":
+        conditions = [
+            c for c in entry.get("conditions", []) if c.get("is_active", True)
+        ]
+        n_active = len(conditions)
+        vt_val = entry.get("vote_threshold")
+        if n_active == 0:
+            entry["vote_threshold"] = 1
+            logger.warning(
+                "resolve_effective_rules: vote_threshold set to 1 due to zero active conditions"
+            )
+        else:
+            if vt_val is None:
+                vt_val = n_active
+            vt_val = max(1, min(int(vt_val), n_active))
+            entry["vote_threshold"] = vt_val
+    return resolved
