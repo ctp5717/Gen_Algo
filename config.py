@@ -397,6 +397,519 @@ STRATEGY_RULES = {
                     "band": "upper",
                 },
             },
+            {
+                "is_active": False,
+                "rule_name": "ATR_Volatility_Filter",
+                "indicator": "atr",
+                "params": {
+                    "period": {
+                        "gene": "atr_period",
+                        "low": 5,
+                        "high": 35,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "atr_threshold",
+                        "low": 0.5,
+                        "high": 5.0,
+                        "step": 0.5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "SMA_Trend_Filter",
+                "indicator": "sma",
+                "params": {
+                    "period": {
+                        "gene": "sma_period",
+                        "low": 5,
+                        "high": 60,
+                        "step": 1,
+                    }
+                },
+                "condition": {"type": "price_is_above_indicator"},
+            },
+            {
+                "is_active": False,
+                "rule_name": "WMA_Trend_Filter",
+                "indicator": "wma",
+                "params": {
+                    "period": {
+                        "gene": "wma_period",
+                        "low": 5,
+                        "high": 60,
+                        "step": 1,
+                    }
+                },
+                "condition": {"type": "price_is_above_indicator"},
+            },
+            {
+                "is_active": False,
+                "rule_name": "HMA_Trend_Filter",
+                "indicator": "hma",
+                "params": {
+                    "period": {
+                        "gene": "hma_period",
+                        "low": 5,
+                        "high": 60,
+                        "step": 1,
+                    }
+                },
+                "condition": {"type": "price_is_above_indicator"},
+            },
+            {
+                "is_active": False,
+                "rule_name": "Stoch_Momentum_Filter",
+                "indicator": "stoch",
+                "params": {
+                    "k": {
+                        "gene": "stoch_k",
+                        "low": 5,
+                        "high": 20,
+                        "step": 1,
+                    },
+                    "d": {
+                        "gene": "stoch_d",
+                        "low": 3,
+                        "high": 20,
+                        "step": 1,
+                    },
+                    "smooth_k": {
+                        "gene": "stoch_smooth_k",
+                        "low": 1,
+                        "high": 5,
+                        "step": 1,
+                    },
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "stoch_threshold",
+                        "low": 20,
+                        "high": 80,
+                        "step": 5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "CCI_Momentum_Filter",
+                "indicator": "cci",
+                "params": {
+                    "period": {
+                        "gene": "cci_period",
+                        "low": 10,
+                        "high": 40,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "cci_threshold",
+                        "low": 50,
+                        "high": 200,
+                        "step": 10,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "WilliamsR_Momentum_Filter",
+                "indicator": "williams_r",
+                "params": {
+                    "period": {
+                        "gene": "williams_period",
+                        "low": 10,
+                        "high": 40,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "williams_threshold",
+                        "low": -80,
+                        "high": -20,
+                        "step": 5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "TSI_Momentum_Filter",
+                "indicator": "tsi",
+                "params": {
+                    "long": {
+                        "gene": "tsi_long",
+                        "low": 25,
+                        "high": 60,
+                        "step": 1,
+                    },
+                    "short": {
+                        "gene": "tsi_short",
+                        "low": 5,
+                        "high": 24,
+                        "step": 1,
+                    },
+                    "signal": {
+                        "gene": "tsi_signal",
+                        "low": 5,
+                        "high": 25,
+                        "step": 1,
+                    },
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "tsi_threshold",
+                        "low": -50,
+                        "high": 50,
+                        "step": 5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "Ultimate_Oscillator_Filter",
+                "indicator": "ultimate_oscillator",
+                "params": {
+                    "short": {
+                        "gene": "uo_short",
+                        "low": 7,
+                        "high": 14,
+                        "step": 1,
+                    },
+                    "medium": {
+                        "gene": "uo_medium",
+                        "low": 15,
+                        "high": 28,
+                        "step": 1,
+                    },
+                    "long": {
+                        "gene": "uo_long",
+                        "low": 29,
+                        "high": 60,
+                        "step": 1,
+                    },
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "uo_threshold",
+                        "low": 40,
+                        "high": 60,
+                        "step": 1,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "ADX_Trend_Strength",
+                "indicator": "adx",
+                "params": {
+                    "period": {
+                        "gene": "adx_period",
+                        "low": 5,
+                        "high": 30,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "adx_threshold",
+                        "low": 20,
+                        "high": 40,
+                        "step": 1,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "PSAR_Trend_Follow",
+                "indicator": "psar",
+                "params": {
+                    "acceleration": {
+                        "gene": "psar_acceleration",
+                        "low": 0.01,
+                        "high": 0.2,
+                        "step": 0.01,
+                    },
+                    "maximum": {
+                        "gene": "psar_maximum",
+                        "low": 0.1,
+                        "high": 0.5,
+                        "step": 0.05,
+                    },
+                },
+                "condition": {"type": "price_crosses_above_indicator"},
+            },
+            {
+                "is_active": False,
+                "rule_name": "Keltner_Channel_Breakout",
+                "indicator": "keltner",
+                "params": {
+                    "period": {
+                        "gene": "keltner_period",
+                        "low": 10,
+                        "high": 40,
+                        "step": 1,
+                    },
+                    "multiplier": {
+                        "gene": "keltner_multiplier",
+                        "low": 1.0,
+                        "high": 3.0,
+                        "step": 0.1,
+                    },
+                },
+                "condition": {
+                    "type": "price_crosses_above_indicator",
+                    "band": "upper",
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "Donchian_Channel_Breakout",
+                "indicator": "donchian",
+                "params": {
+                    "period": {
+                        "gene": "donchian_period",
+                        "low": 10,
+                        "high": 60,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "price_crosses_above_indicator",
+                    "band": "upper",
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "Stdev_Channel_Filter",
+                "indicator": "stdev_channel",
+                "params": {
+                    "period": {
+                        "gene": "stdev_period",
+                        "low": 10,
+                        "high": 40,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "stdev_threshold",
+                        "low": 0.5,
+                        "high": 5.0,
+                        "step": 0.5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "CMO_Momentum_Filter",
+                "indicator": "cmo",
+                "params": {
+                    "period": {
+                        "gene": "cmo_period",
+                        "low": 5,
+                        "high": 40,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "cmo_threshold",
+                        "low": -50,
+                        "high": 50,
+                        "step": 5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "OBV_Trend_Filter",
+                "indicator": "obv",
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "obv_threshold",
+                        "low": -100000,
+                        "high": 100000,
+                        "step": 10000,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "MFI_Momentum_Filter",
+                "indicator": "mfi",
+                "params": {
+                    "period": {
+                        "gene": "mfi_period",
+                        "low": 5,
+                        "high": 40,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "mfi_threshold",
+                        "low": 20,
+                        "high": 80,
+                        "step": 5,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "ADL_Accumulation_Filter",
+                "indicator": "adl",
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "adl_threshold",
+                        "low": -100000,
+                        "high": 100000,
+                        "step": 10000,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "CMF_Momentum_Filter",
+                "indicator": "cmf",
+                "params": {
+                    "period": {
+                        "gene": "cmf_period",
+                        "low": 5,
+                        "high": 40,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "cmf_threshold",
+                        "low": -0.5,
+                        "high": 0.5,
+                        "step": 0.05,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "MA_Envelope_Breakout",
+                "indicator": "ma_envelope",
+                "params": {
+                    "period": {
+                        "gene": "mae_period",
+                        "low": 10,
+                        "high": 60,
+                        "step": 1,
+                    },
+                    "percent": {
+                        "gene": "mae_percent",
+                        "low": 0.5,
+                        "high": 5.0,
+                        "step": 0.5,
+                    },
+                },
+                "condition": {
+                    "type": "price_crosses_above_indicator",
+                    "band": "upper",
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "Ichimoku_Trend_Filter",
+                "indicator": "ichimoku",
+                "params": {
+                    "tenkan": {
+                        "gene": "ichimoku_tenkan",
+                        "low": 7,
+                        "high": 12,
+                        "step": 1,
+                    },
+                    "kijun": {
+                        "gene": "ichimoku_kijun",
+                        "low": 20,
+                        "high": 30,
+                        "step": 1,
+                    },
+                    "senkou": {
+                        "gene": "ichimoku_senkou",
+                        "low": 40,
+                        "high": 60,
+                        "step": 5,
+                    },
+                },
+                "condition": {"type": "price_is_above_indicator"},
+            },
+            {
+                "is_active": False,
+                "rule_name": "Pivot_Point_Filter",
+                "indicator": "pivot_points",
+                "condition": {"type": "price_is_above_indicator"},
+            },
+            {
+                "is_active": False,
+                "rule_name": "TRIX_Momentum_Filter",
+                "indicator": "trix",
+                "params": {
+                    "period": {
+                        "gene": "trix_period",
+                        "low": 5,
+                        "high": 50,
+                        "step": 1,
+                    },
+                    "signal": {
+                        "gene": "trix_signal",
+                        "low": 2,
+                        "high": 20,
+                        "step": 1,
+                    },
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "trix_threshold",
+                        "low": -0.5,
+                        "high": 0.5,
+                        "step": 0.05,
+                    },
+                },
+            },
+            {
+                "is_active": False,
+                "rule_name": "ROC_Momentum_Filter",
+                "indicator": "roc",
+                "params": {
+                    "period": {
+                        "gene": "roc_period",
+                        "low": 5,
+                        "high": 30,
+                        "step": 1,
+                    }
+                },
+                "condition": {
+                    "type": "indicator_is_above_value",
+                    "value": {
+                        "gene": "roc_threshold",
+                        "low": -5.0,
+                        "high": 5.0,
+                        "step": 0.5,
+                    },
+                },
+            },
         ],
     },
     "exit_rules": {
