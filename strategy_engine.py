@@ -332,9 +332,18 @@ def process_strategy_rules(
             )
             continue
 
-        norm_params = {
-            k: (round(v, 10) if isinstance(v, float) else v) for k, v in params.items()
-        }
+        norm_params: dict[str, float | int | str] = {}
+        for k, v in params.items():
+            if (
+                indicator_name == "ma_envelope"
+                and k == "percent"
+                and isinstance(v, (int, float))
+                and not isinstance(v, bool)
+            ):
+                v = v / 100 if v > 1 else v
+            if isinstance(v, float):
+                v = round(v, 10)
+            norm_params[k] = v
         params_key = json.dumps(
             {k: repr(v) for k, v in norm_params.items()}, sort_keys=True
         )
@@ -549,6 +558,58 @@ def process_strategy_rules(
                         target_series = choose_first(
                             df,
                             "Middle band not found in Donchian output; expected columns like 'DCM_*'",
+                            fallback=False,
+                        )
+            elif "ma_envelope" in indicator_name:
+                band = condition_logic.get("band")
+                if band:
+                    band = band.lower()
+                    if band == "upper":
+                        df = indicator_output.filter(like="MAE_U")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in MA Envelope output; expected columns like 'MAE_U_*'",
+                            fallback=False,
+                        )
+                    elif band == "lower":
+                        df = indicator_output.filter(like="MAE_L")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in MA Envelope output; expected columns like 'MAE_L_*'",
+                            fallback=False,
+                        )
+                    else:
+                        if band not in {"middle", "mid", "basis"}:
+                            warnings.warn(
+                                f"Unknown band '{band}' for MA Envelope; defaulting to middle",
+                                stacklevel=2,
+                            )
+                        df = indicator_output.filter(like="MAE_M")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in MA Envelope output; expected columns like 'MAE_M_*'",
+                            fallback=False,
+                        )
+                else:
+                    if "upper" in condition_type:
+                        df = indicator_output.filter(like="MAE_U")
+                        target_series = choose_first(
+                            df,
+                            "Upper band not found in MA Envelope output; expected columns like 'MAE_U_*'",
+                            fallback=False,
+                        )
+                    elif "lower" in condition_type:
+                        df = indicator_output.filter(like="MAE_L")
+                        target_series = choose_first(
+                            df,
+                            "Lower band not found in MA Envelope output; expected columns like 'MAE_L_*'",
+                            fallback=False,
+                        )
+                    else:
+                        df = indicator_output.filter(like="MAE_M")
+                        target_series = choose_first(
+                            df,
+                            "Middle band not found in MA Envelope output; expected columns like 'MAE_M_*'",
                             fallback=False,
                         )
             elif "macd" in indicator_name:
