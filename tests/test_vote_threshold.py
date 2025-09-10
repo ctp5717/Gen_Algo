@@ -32,7 +32,7 @@ def _make_cond(name, series):
 
 
 @pytest.mark.parametrize("comb_logic", ["vote", "Vote"])
-def test_vote_threshold_none_and_casing(monkeypatch, comb_logic):
+def test_vote_threshold_none_and_casing(monkeypatch, comb_logic, caplog):
     data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
     ind_a, cond_a = _make_cond("a", [1, 0])
     ind_b, cond_b = _make_cond("b", [0, 1])
@@ -56,7 +56,17 @@ def test_vote_threshold_none_and_casing(monkeypatch, comb_logic):
         }
     }
 
-    res = strategy_engine.process_strategy_rules(data, rules)
+    with caplog.at_level(logging.INFO):
+        res = strategy_engine.process_strategy_rules(data, rules)
+
+    record = next(r for r in caplog.records if r.levelno == logging.INFO)
+    payload = ast.literal_eval(record.getMessage())
+    assert payload == {
+        "logic": "VOTE",
+        "M": 2,
+        "k": 1,
+        "treat_nan_as_false": True,
+    }
 
     # Expect majority threshold (ceil(2/2) == 1) and sanitized logic
     assert captured["combination_logic"] == "VOTE"
@@ -129,8 +139,7 @@ def test_vote_threshold_exceeds_active(monkeypatch, caplog):
     assert payload == {
         "logic": "VOTE",
         "M": 2,
-        "requested_k": 5,
-        "final_k": 2,
+        "k": 2,
         "treat_nan_as_false": True,
     }
 
