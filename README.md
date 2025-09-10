@@ -29,12 +29,20 @@ Multi-output indicators default to specific outputs when a rule omits a target c
 | MACD | Histogram |
 | Stochastic | %K line |
 | Bollinger/Keltner/Donchian | Middle band |
+| MA Envelope | Middle band |
 | ADX/DMI | ADX line |
 | Ichimoku | Baseline (`IKS_*`) |
 | Pivot Points | `P` |
 | TRIX (with signal) | TRIX line |
 
 Override these defaults by specifying `condition["column"]` or `condition["band"]`.
+
+The **MA Envelope** indicator (`ma_envelope`) accepts `period`, `percent`, and
+`ma` parameters. The `percent` distance may be supplied as either `2.0` or
+`0.02`; both are normalised to the same fractional float for caching and column
+names. Output columns follow the pattern
+`MAE_{U|M|L}_<period>_<percent>` where the middle band is selected by default
+when no `column` or `band` is specified.
 
 Indicator names are case-insensitive and support these shorthands:
 
@@ -102,17 +110,22 @@ This is the core processor that translates your ideas from the config file into 
     * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from the config.
     * **Dynamic Indicator Calls:** It uses the `INDICATOR_MAPPING` dictionary to dynamically call the correct calculation functions from the `indicator_library.py` based on the active rules.
     * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
-    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger Bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger Bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. The default column used when `column` is omitted is listed below:
+    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger/Keltner/Donchian/MA Envelope bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger, Keltner, Donchian, or MA Envelope bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. The default column used when `column` is omitted is listed below:
 
       | Indicator            | Default column            |
       | -------------------- | ------------------------- |
       | MACD                 | Histogram (falls back to line)
-      | Bollinger/Keltner/Donchian | Middle band
+      | Bollinger/Keltner/Donchian/MA Envelope | Middle band
       | ADX/DMI             | ADX line
       | Stochastic          | %K line (`STOCHk_*`)
       | Ichimoku            | Baseline (`IKS_*`)
       | Pivot Points        | `P`
       | TRIX (with signal)  | TRIX line
+
+    * **Deterministic Caching:** Indicator outputs are cached using a hash of the
+      indicator name, normalised parameters, and input columns. Percent inputs,
+      such as MA Envelope's `percent`, are converted to a fractional float before
+      hashing, so `2.0` and `0.02` produce the same cache entry.
 
       When a requested column or band is missing, the engine raises a `KeyError` by default. Setting `strict_column=False` under `entry_rules` falls back to the first available column **and emits a warning**. This fallback may use an unintended column; override per-rule via `condition["strict_column"]` when needed.
 
@@ -296,9 +309,9 @@ Both `combination_logic` and `vote_threshold` may be declared as genes (using
 the `gene` key) so the GA can explore different combination modes and
 thresholds.
 
-To target specific Bollinger Bands, provide a `band` hint or use the `*_band`
-condition types. The `band` hint accepts `"upper"`, `"middle"`/`"mid"`/`"basis"`,
-or `"lower"`:
+To target specific Bollinger, Keltner, Donchian, or MA Envelope bands, provide a
+`band` hint or use the `*_band` condition types. The `band` hint accepts
+`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`:
 
 ```python
 {

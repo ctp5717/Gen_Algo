@@ -456,11 +456,18 @@ def calculate_ma_envelope(
     period : int
         Lookback period for the base moving average.
     percent : float
-        Distance from the base moving average expressed either as a
-        percentage (``2.0`` for two percent) or a fraction (``0.02``).
+        Distance from the base moving average. ``2.0`` and ``0.02`` are
+        treated equivalently and normalised to a fractional float.
     ma : str, default ``"sma"``
-        Moving average method.  Any ``pandas_ta`` moving average name is
-        accepted.  If unavailable, a simple rolling mean is used.
+        Moving average method. Any ``pandas_ta`` moving average name is
+        accepted. If unavailable, a simple rolling mean is used.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``MAE_U_<period>_<percent>``, ``MAE_M_<period>_<percent>``, and
+        ``MAE_L_<period>_<percent>`` for the upper, middle (default), and lower
+        bands respectively.
     """
 
     if "Close" not in ohlc_data.columns:
