@@ -185,20 +185,24 @@ def _combine_signals(
         return reduce(lambda x, y: x | y, prepared)
 
     if combination_logic == "VOTE":
-        threshold = (
-            vote_threshold
-            if vote_threshold is not None
-            else math.ceil(len(prepared) / 2)
-        )
-        if threshold < 1 or threshold > len(prepared):
+        M = len(prepared)
+        threshold = vote_threshold if vote_threshold is not None else math.ceil(M / 2)
+        if threshold < 1 or threshold > M:
             raise ValueError(
                 "vote_threshold must be between 1 and the number of active conditions"
             )
+        payload = {
+            "logic": "VOTE",
+            "M": M,
+            "k": threshold,
+            "treat_nan_as_false": treat_nan_as_false,
+        }
+        logger.info(payload)
         if treat_nan_as_false:
             signal_sum = pd.concat(prepared, axis=1).astype(int).sum(axis=1)
             return signal_sum >= threshold
         signal_df = pd.concat(prepared, axis=1)
-        signal_sum = signal_df.astype("Int64").sum(axis=1, min_count=len(prepared))
+        signal_sum = signal_df.astype("Int64").sum(axis=1, min_count=M)
         return signal_sum >= threshold
 
     raise ValueError(
@@ -261,7 +265,6 @@ def process_strategy_rules(
             f"affected rules: {affected}"
         )
     n = len(active_conds)
-    requested_k = vote_threshold
 
     if n == 1:
         if combination_logic != "AND" or vote_threshold not in (None, 1):
@@ -289,17 +292,6 @@ def process_strategy_rules(
                 stacklevel=2,
             )
             vote_threshold = n
-        payload = {
-            "logic": "VOTE",
-            "M": n,
-            "requested_k": requested_k,
-            "final_k": vote_threshold,
-            "treat_nan_as_false": treat_nan_as_false,
-        }
-        if requested_k != vote_threshold:
-            logger.info(payload)
-        else:
-            logger.debug(payload)
 
     if vote_threshold is not None and not isinstance(vote_threshold, int):
         raise TypeError("vote_threshold must be an integer or None")
