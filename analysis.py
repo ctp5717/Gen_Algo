@@ -107,13 +107,16 @@ def _write_run_metadata(
     run_dir = RUN_DIR.resolve()
     for a in artifacts:
         p = Path(a)
+        if not p.is_absolute():
+            p = run_dir / p
         if not p.exists():
             continue
+        resolved = p.resolve()
         try:
-            rel = p.resolve().relative_to(run_dir)
+            rel = resolved.relative_to(run_dir)
             existing_artifacts.append(str(rel))
         except ValueError:
-            existing_artifacts.append(str(p.resolve()))
+            existing_artifacts.append(str(resolved))
 
     # Deduplicate while preserving order
     seen: set[str] = set()
@@ -388,11 +391,8 @@ def _run_multi_asset_analysis(
             champ_path = RUN_DIR / "champion_equity.png"
             fig.savefig(champ_path, dpi=150, bbox_inches="tight")
             plt.close(fig)
-            try:
-                rel = champ_path.resolve().relative_to(RUN_DIR.resolve())
-            except ValueError:
-                rel = champ_path
-            artifacts.append(str(rel))
+            artifacts.append(str(champ_path))
+            _write_run_metadata(start_time, [str(champ_path)])
     mu = details.get("mu")
     sigma = details.get("sigma")
     lam_sigma = details.get("lambda_sigma")
