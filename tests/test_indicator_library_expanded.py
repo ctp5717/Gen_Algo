@@ -15,6 +15,7 @@ sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 
 import indicator_library  # noqa: E402
+import strategy_engine  # noqa: E402
 
 
 def _base_df():
@@ -81,9 +82,9 @@ INDICATOR_CASES = [
     ("calculate_cmf", "cmf", "series", None, {"period": 5}),
     (
         "calculate_ma_envelope",
-        "maenvelope",
-        "df",
-        ["UPPER", "LOWER"],
+        "sma",
+        "series",
+        ["MAE_U_20_2.5", "MAE_M_20_2.5", "MAE_L_20_2.5"],
         {"period": 20, "percent": 2.5},
     ),
     (
@@ -157,6 +158,18 @@ BAD_PARAMS = [
         {"period": 0, "percent": 2.5},
     ),
     (
+        indicator_library.calculate_ma_envelope,
+        {"period": 20, "percent": 0},
+    ),
+    (
+        indicator_library.calculate_ma_envelope,
+        {"period": 20, "percent": -1},
+    ),
+    (
+        indicator_library.calculate_ma_envelope,
+        {"period": 20, "percent": "bad"},
+    ),
+    (
         indicator_library.calculate_ichimoku,
         {"tenkan": 0, "kijun": 26, "senkou": 52},
     ),
@@ -197,6 +210,78 @@ def test_volume_column_required():
         indicator_library.calculate_adl(df)
     with pytest.raises(ValueError):
         indicator_library.calculate_cmf(df, period=2)
+
+
+def test_ma_envelope_percent_synonyms():
+    df = _base_df()
+    df.ta = types.SimpleNamespace()
+    res1 = indicator_library.calculate_ma_envelope(df, period=2, percent=2.0)
+    res2 = indicator_library.calculate_ma_envelope(df, period=2, percent=0.02)
+    assert res1.equals(res2)
+    assert list(res1.columns) == [
+        "MAE_U_2_2.0",
+        "MAE_M_2_2.0",
+        "MAE_L_2_2.0",
+    ]
+
+
+def test_ma_envelope_caching_percent_synonyms(monkeypatch):
+    df = _base_df()
+    df.ta = types.SimpleNamespace()
+    calls = {"n": 0}
+
+    real = indicator_library.calculate_ma_envelope
+
+    def wrapped(data, **p):
+        calls["n"] += 1
+        return real(data, **p)
+
+    monkeypatch.setattr(indicator_library, "calculate_ma_envelope", wrapped)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ma_envelope", wrapped)
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "ma_envelope",
+                    "params": {"period": 2, "percent": 2.0},
+                    "condition": {"type": "price_is_above_indicator"},
+                },
+                {
+                    "indicator": "ma_envelope",
+                    "params": {"period": 2, "percent": 0.02},
+                    "condition": {"type": "price_is_above_indicator"},
+                },
+            ]
+        }
+    }
+    strategy_engine.process_strategy_rules(df, rules)
+    assert calls["n"] == 1
+
+
+def test_ma_envelope_requires_close_column():
+    df = pd.DataFrame({"Open": [1, 2]})
+    df.ta = types.SimpleNamespace()
+    with pytest.raises(ValueError):
+        indicator_library.calculate_ma_envelope(df, period=2, percent=2.0)
+
+
+def test_ma_envelope_nan_propagation():
+    df = pd.DataFrame(
+        {
+            "Open": [1, 2, 3, 4],
+            "High": [1, 2, 3, 4],
+            "Low": [1, 2, 3, 4],
+            "Close": [1, np.nan, 3, 4],
+            "Volume": [1, 1, 1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+    df.ta = types.SimpleNamespace()
+    res = indicator_library.calculate_ma_envelope(df, period=2, percent=2.0)
+    assert res.isna().iloc[0].all()
+    assert res.isna().iloc[1].all()
+    assert res.isna().iloc[2].all()
+    assert not res.isna().iloc[3].any()
 
 
 def test_sma_expected_values():

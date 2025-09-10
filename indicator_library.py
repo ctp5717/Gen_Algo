@@ -445,9 +445,26 @@ def calculate_cmf(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
 
 
 def calculate_ma_envelope(
-    ohlc_data: pd.DataFrame, period: int, percent: float
+    ohlc_data: pd.DataFrame, period: int, percent: float, ma: str = "sma"
 ) -> pd.DataFrame:
-    """Calculate Moving Average Envelopes."""
+    """Calculate Moving Average Envelopes.
+
+    Parameters
+    ----------
+    ohlc_data : pd.DataFrame
+        Price data containing at least a ``"Close"`` column.
+    period : int
+        Lookback period for the base moving average.
+    percent : float
+        Distance from the base moving average expressed either as a
+        percentage (``2.0`` for two percent) or a fraction (``0.02``).
+    ma : str, default ``"sma"``
+        Moving average method.  Any ``pandas_ta`` moving average name is
+        accepted.  If unavailable, a simple rolling mean is used.
+    """
+
+    if "Close" not in ohlc_data.columns:
+        raise ValueError("MA Envelope requires a 'Close' column")
     if not isinstance(period, int):
         raise TypeError("MA Envelope 'period' must be int")
     if period < 1:
@@ -456,10 +473,41 @@ def calculate_ma_envelope(
         raise TypeError("MA Envelope 'percent' must be numeric")
     if percent <= 0:
         raise ValueError("MA Envelope 'percent' must be > 0")
-    mae = ohlc_data.ta.maenvelope(length=period, percent=percent)
-    if mae is None:
-        raise ConnectionError("Failed to calculate MA Envelopes")
-    return mae
+    if not isinstance(ma, str):
+        raise TypeError("MA Envelope 'ma' must be str")
+
+    # normalise percent for caching: accept 2.0 or 0.02 as the same value
+    pct_frac = percent / 100 if percent > 1 else percent
+    pct_frac = round(pct_frac, 10)
+    pct_display = round(pct_frac * 100, 10)
+    percent_str = f"{pct_display:.10g}"
+    if "." not in percent_str:
+        percent_str += ".0"
+
+    ma_lower = ma.lower()
+    ta_obj = ohlc_data.ta
+    base = None
+    if hasattr(ta_obj, ma_lower):
+        base = getattr(ta_obj, ma_lower)(length=period)
+    elif hasattr(ta_obj, "ma"):
+        try:
+            base = ta_obj.ma(mamode=ma_lower, length=period)
+        except Exception:  # pragma: no cover - fallback handles errors
+            base = None
+    if base is None:
+        base = ohlc_data["Close"].rolling(window=period, min_periods=period).mean()
+
+    upper = base * (1 + pct_frac)
+    lower = base * (1 - pct_frac)
+    df = pd.concat(
+        [
+            upper.rename(f"MAE_U_{period}_{percent_str}"),
+            base.rename(f"MAE_M_{period}_{percent_str}"),
+            lower.rename(f"MAE_L_{period}_{percent_str}"),
+        ],
+        axis=1,
+    )
+    return df
 
 
 def calculate_ichimoku(
