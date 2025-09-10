@@ -83,27 +83,18 @@ ASSET_GROUP = [
     ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
     ("Ethereum", CRYPTO_UNIVERSE["Ethereum"]),
     ("Solana", CRYPTO_UNIVERSE["Solana"]),
-    ("XRP", CRYPTO_UNIVERSE["XRP"]),
-    ("Cardano", CRYPTO_UNIVERSE["Cardano"]),
     ("Avalanche", CRYPTO_UNIVERSE["Avalanche"]),
-    ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
     ("Chainlink", CRYPTO_UNIVERSE["Chainlink"]),
-    ("Polkadot", CRYPTO_UNIVERSE["Polkadot"]),
     ("Polygon", CRYPTO_UNIVERSE["Polygon"]),
-    ("Litecoin", CRYPTO_UNIVERSE["Litecoin"]),
-    ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
-    ("TRON", CRYPTO_UNIVERSE["TRON"]),
-    ("Stellar", CRYPTO_UNIVERSE["Stellar"]),
-    ("Near_Protocol", CRYPTO_UNIVERSE["Near_Protocol"]),
 ]
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
 
-SELECTED_ASSET_NAME = "Dogecoin"
+SELECTED_ASSET_NAME = "Bitcoin"
 
 # Set your desired timeframe here. This now controls everything.
 # Allow overrides by checking for an existing global.
-TIMEFRAME = globals().get("TIMEFRAME", "1h")
+TIMEFRAME = globals().get("TIMEFRAME", "4h")
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
@@ -191,18 +182,17 @@ WALK_FORWARD_SETTINGS = {
 }
 
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
-# Use these settings for quick tests
-GA_POPULATION_SIZE = 50
-GA_NUM_GENERATIONS = 30
-GA_PARENTS_MATING = 20
-GA_MUTATION_NUM_GENES = 1
-
-# For serious, overnight "Discovery" runs, comment out the block above
-# and uncomment the block below.
-# GA_POPULATION_SIZE = 200
-# GA_NUM_GENERATIONS = 100
-# GA_PARENTS_MATING = 50
-# GA_MUTATION_NUM_GENES = 3 # Mutate more genes with a more complex strategy
+# Default to discovery-run settings but allow quick-test overrides via env.
+if os.getenv("GA_QUICK_TEST", "").lower() in {"1", "true", "yes"}:
+    GA_POPULATION_SIZE = 50
+    GA_NUM_GENERATIONS = 30
+    GA_PARENTS_MATING = 20
+    GA_MUTATION_NUM_GENES = 1
+else:
+    GA_POPULATION_SIZE = 200
+    GA_NUM_GENERATIONS = 100
+    GA_PARENTS_MATING = 50
+    GA_MUTATION_NUM_GENES = 3  # Mutate more genes with a more complex strategy
 
 # --- AUTO-TUNER SETTINGS ---
 AUTO_TUNE_ENABLED = True
@@ -233,7 +223,7 @@ MULTI_ASSET = {
     # Optional per-ticker weights; if None, all assets are weighted equally
     "asset_weights": None,
     # Penalty multiplier for dispersion across assets
-    "lambda_dispersion": 0.20,
+    "lambda_dispersion": 0.25,
     # Optional coarse tuning grid for lambda. If provided the tuner can try
     # multiple values and pick the best one.
     "lambda_grid": [0.2, 0.3, 0.4],
@@ -260,13 +250,13 @@ MULTI_ASSET = {
     # Penalty applied when ignoring assets
     "coverage_penalty": 0.25,
     # Minimal trades to consider an asset as traded
-    "per_asset_min_trades": 10,
+    "per_asset_min_trades": 5,
     # Minimal number of assets that must be included
-    "min_included_assets": 4,
+    "min_included_assets": 3,
     # Annualisation base for trade floor scaling
     "trading_days_per_year": 252,
     # Optional scaling of the group trade floor based on fold length (years)
-    "min_total_trades_per_year": 36,
+    "min_total_trades_per_year": 50,
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs
@@ -327,7 +317,7 @@ STRATEGY_RULES = {
         "vote_threshold": {
             "gene": "vote_threshold",
             "low": 2,
-            "high": 3,
+            "high": 4,
             "step": 1,
         },
         "treat_nan_as_false": True,
@@ -496,7 +486,7 @@ STRATEGY_RULES = {
                 },
             },
             {
-                "is_active": False,
+                "is_active": True,
                 "rule_name": "CCI_Momentum_Filter",
                 "indicator": "cci",
                 "params": {
@@ -608,7 +598,7 @@ STRATEGY_RULES = {
                 },
             },
             {
-                "is_active": False,
+                "is_active": True,
                 "rule_name": "ADX_Trend_Strength",
                 "indicator": "adx",
                 "params": {
@@ -624,7 +614,7 @@ STRATEGY_RULES = {
                     "value": {
                         "gene": "adx_threshold",
                         "low": 20,
-                        "high": 40,
+                        "high": 50,
                         "step": 1,
                     },
                 },
@@ -919,7 +909,7 @@ STRATEGY_RULES = {
             "params": {  # Correctly nested
                 "value": {
                     "gene": "stop_loss_pct",
-                    "low": 0.01,
+                    "low": 0.02,
                     "high": 0.10,
                     "step": 0.005,
                 }
@@ -932,7 +922,7 @@ STRATEGY_RULES = {
                 "value": {
                     "gene": "tsl_pct",
                     "low": 0.02,
-                    "high": 0.06,
+                    "high": 0.12,
                     "step": 0.005,
                 }
             },
@@ -943,8 +933,8 @@ STRATEGY_RULES = {
             "params": {  # Correctly nested
                 "value": {
                     "gene": "take_profit_pct",
-                    "low": 0.02,
-                    "high": 0.20,
+                    "low": 0.05,
+                    "high": 0.25,
                     "step": 0.01,
                 }
             },
