@@ -1,3 +1,4 @@
+import importlib.machinery
 import json
 import sys
 import types
@@ -6,9 +7,9 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("yfinance", types.ModuleType("yfinance"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+vbt_stub = types.ModuleType("vectorbt")
+vbt_stub.__spec__ = importlib.machinery.ModuleSpec("vectorbt", loader=None)
+sys.modules.setdefault("vectorbt", vbt_stub)
 
 import analysis  # noqa: E402
 import config  # noqa: E402
