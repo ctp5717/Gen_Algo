@@ -1,14 +1,8 @@
 # data_loader.py
 
-"""
-Data Loader & Caching Module
-============================
+"""Data loading and caching utilities."""
 
-(This final version flattens MultiIndex columns from yfinance and ensures
-the DatetimeIndex is correctly loaded from the cache, which is critical
-for the indicator and backtesting engines.)
-"""
-
+import logging
 import os
 
 import pandas as pd
@@ -16,11 +10,9 @@ import yfinance as yf
 
 import config
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_cache")
+logger = logging.getLogger(__name__)
 
-# Tracks whether the first group data load has occurred so we can automatically
-# show verbose output once.
-_first_group_load = True
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_cache")
 
 
 def _validate_volume(df: pd.DataFrame) -> bool:
@@ -52,18 +44,22 @@ def _normalize_ticker(ticker: str) -> str:
 
 
 def _get_binance_data(
-    ticker: str, start_date: str, end_date: str, interval: str, *, verbose: bool = True
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    interval: str,
+    *,
+    verbose: bool = True,
+    logger: logging.Logger | None = None,
 ) -> pd.DataFrame:
-    """Fetch historical kline data from Binance and format it.
+    """Fetch historical kline data from Binance and format it."""
+    logger = logger or logging.getLogger(__name__)
 
-    The real ``binance`` package is an optional dependency and importing it
-    at module import time causes deprecation warnings in the test
-    environment. We therefore import the client lazily inside this
-    function.
-    """
     if verbose:
-        print(
-            f"Loading '{ticker}' data from Binance.{config.API_KEYS['binance']['tld']} API..."
+        logger.info(
+            "Loading '%s' data from Binance.%s API...",
+            ticker,
+            config.API_KEYS["binance"]["tld"],
         )
 
     from binance.client import Client  # type: ignore
@@ -82,9 +78,9 @@ def _get_binance_data(
 
     if not klines:
         if verbose:
-            print(
-                "No data returned from Binance for "
-                f"{ticker}. It may not be listed on Binance.US or have history in this range."
+            logger.warning(
+                "No data returned from Binance for %s. It may not be listed on Binance.US or have history in this range.",
+                ticker,
             )
         return pd.DataFrame()
 
@@ -114,7 +110,7 @@ def _get_binance_data(
     data = data.apply(pd.to_numeric, errors="coerce")
 
     if verbose:
-        print("Binance data loaded and formatted successfully.")
+        logger.info("Binance data loaded and formatted successfully.")
     return data
 
 
@@ -125,6 +121,7 @@ def get_data(
     interval: str = "1d",
     *,
     verbose: bool = True,
+    logger: logging.Logger | None = None,
 ) -> tuple[pd.DataFrame, str]:
     """Fetch OHLCV data for a single ticker.
 
@@ -145,6 +142,8 @@ def get_data(
         The data frame and a marker indicating ``'cache'`` or ``'API'`` for the
         data source used.
     """
+    logger = logger or logging.getLogger(__name__)
+
     source = config.DATA_SOURCE.lower()
     ticker = _normalize_ticker(ticker)
 
@@ -154,7 +153,9 @@ def get_data(
 
     if os.path.exists(cache_filepath):
         if verbose:
-            print(f"Loading '{ticker}' data from local cache: {cache_filename}")
+            logger.info(
+                "Loading '%s' data from local cache: %s", ticker, cache_filename
+            )
         try:
             data = pd.read_csv(cache_filepath, index_col=0, parse_dates=True)
             if not isinstance(data.index, pd.DatetimeIndex):
@@ -165,30 +166,38 @@ def get_data(
                 except Exception:
                     VOLUME_INDICATORS = set()
                 if VOLUME_INDICATORS and verbose:
-                    print(
-                        "Warning: Volume column missing; volume-based indicators will fail."
+                    logger.warning(
+                        "Volume column missing; volume-based indicators will fail."
                     )
             if verbose:
-                print("Cache loaded successfully.")
+                logger.info("Cache loaded successfully.")
             return data, "cache"
         except KeyError:
             raise
         except Exception as e:
             if verbose:
-                print(
-                    f"Error loading from cache file {cache_filepath}: {e}. Re-downloading."
+                logger.warning(
+                    "Error loading from cache file %s: %s. Re-downloading.",
+                    cache_filepath,
+                    e,
                 )
 
     # --- Router Logic ---
     try:
         if source == "binance":
             data = _get_binance_data(
-                ticker, start_date, end_date, interval, verbose=verbose
+                ticker,
+                start_date,
+                end_date,
+                interval,
+                verbose=verbose,
+                logger=logger,
             )
         elif source == "yfinance":
             if verbose:
-                print(
-                    f"Cache not found. Downloading '{ticker}' data from Yahoo Finance..."
+                logger.info(
+                    "Cache not found. Downloading '%s' data from Yahoo Finance...",
+                    ticker,
                 )
             data = yf.download(
                 ticker,
@@ -206,8 +215,10 @@ def get_data(
 
         if data.empty:
             if verbose:
-                print(
-                    f"No data returned for ticker '{ticker}' from source '{source}'. Check parameters."
+                logger.warning(
+                    "No data returned for ticker '%s' from source '%s'. Check parameters.",
+                    ticker,
+                    source,
                 )
             return pd.DataFrame(), "API"
 
@@ -228,15 +239,15 @@ def get_data(
             except Exception:
                 VOLUME_INDICATORS = set()
             if VOLUME_INDICATORS and verbose:
-                print(
-                    "Warning: Volume column missing; volume-based indicators will fail."
+                logger.warning(
+                    "Volume column missing; volume-based indicators will fail."
                 )
 
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
         data.to_csv(cache_filepath)
         if verbose:
-            print(f"Saved data to cache: {cache_filename}")
+            logger.info("Saved data to cache: %s", cache_filename)
 
         return data, "API"
 
@@ -244,7 +255,9 @@ def get_data(
         raise
     except Exception as e:
         if verbose:
-            print(f"An error occurred while downloading data for {ticker}: {e}")
+            logger.warning(
+                "An error occurred while downloading data for %s: %s", ticker, e
+            )
         return pd.DataFrame(), "API"
 
 
@@ -256,40 +269,16 @@ def get_group_data(
     coverage_threshold=None,
     *,
     verbose: bool = False,
+    logger: logging.Logger | None = None,
 ):
-    """Load and align OHLCV data for a group of assets.
+    """Load and align OHLCV data for a group of assets."""
 
-    Each asset is downloaded via :func:`get_data`. The resulting dataframes are
-    aligned to the **intersection** of their timestamps to ensure fairness when
-    comparing strategies across assets. Assets that lack sufficient coverage of
-    the overall date range are discarded. Coverage is measured as the fraction
-    of bars present for an asset relative to the union of timestamps across all
-    assets. Assets with coverage below ``coverage_threshold`` are excluded.
-
-    Parameters
-    ----------
-    asset_group : iterable
-        Iterable of ``(name, ticker)`` pairs describing the assets.
-    start_date, end_date : str
-        Date boundaries to pass to :func:`get_data`.
-    interval : str
-        Timeframe to request from the data source.
-    coverage_threshold : float, optional
-        Minimum fraction of bars required for an asset to be kept. Default is
-        ``0.8`` (80%).
-
-    Returns
-    -------
-    dict
-        Mapping of ticker -> aligned OHLCV dataframe.  If no assets pass the
-        coverage filter an empty dict is returned.
-    """
+    logger = logger or logging.getLogger(__name__)
 
     if coverage_threshold is None:
         coverage_threshold = getattr(config, "COVERAGE_THRESHOLD", 0.8)
 
-    global _first_group_load
-    asset_verbose = verbose or _first_group_load
+    asset_verbose = verbose
 
     raw_data = {}
     sources = {}
@@ -301,25 +290,23 @@ def get_group_data(
             end_date=end_date,
             interval=interval,
             verbose=asset_verbose,
+            logger=logger,
         )
         if not df.empty:
             raw_data[norm] = df
             sources[norm] = src
 
     if not raw_data:
-        if not verbose:
-            print(f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]")
-        if asset_verbose:
-            _first_group_load = False
+        logger.info(
+            "Loaded 0 assets from %s to %s [cache:0, API:0]", start_date, end_date
+        )
         return {}
 
-    # Determine the union of timestamps across all assets to evaluate coverage.
     union_index = None
     for df in raw_data.values():
         union_index = df.index if union_index is None else union_index.union(df.index)
     union_len = len(union_index)
 
-    # Filter out assets with insufficient data coverage.
     filtered = {}
     for ticker, df in raw_data.items():
         coverage = len(df.index) / union_len
@@ -327,18 +314,18 @@ def get_group_data(
             filtered[ticker] = df
         else:
             if asset_verbose:
-                print(
-                    f"Excluding {ticker} due to insufficient coverage ({coverage:.0%})"
+                logger.info(
+                    "Excluding %s due to insufficient coverage (%.0f%%)",
+                    ticker,
+                    coverage * 100,
                 )
 
     if not filtered:
-        if not verbose:
-            print(f"Loaded 0 assets from {start_date} to {end_date} [cache:0, API:0]")
-        if asset_verbose:
-            _first_group_load = False
+        logger.info(
+            "Loaded 0 assets from %s to %s [cache:0, API:0]", start_date, end_date
+        )
         return {}
 
-    # Align remaining assets to the intersection of their timestamps.
     common_index = None
     for df in filtered.values():
         common_index = (
@@ -351,12 +338,13 @@ def get_group_data(
         used_sources = {t: sources[t] for t in aligned.keys()}
         cache_count = sum(1 for s in used_sources.values() if s == "cache")
         api_count = sum(1 for s in used_sources.values() if s == "API")
-        print(
-            f"Loaded {len(aligned)} assets from {start_date} to {end_date} "
-            f"[cache:{cache_count}, API:{api_count}]"
+        logger.info(
+            "Loaded %d assets from %s to %s [cache:%d, API:%d]",
+            len(aligned),
+            start_date,
+            end_date,
+            cache_count,
+            api_count,
         )
-
-    if asset_verbose:
-        _first_group_load = False
 
     return aligned

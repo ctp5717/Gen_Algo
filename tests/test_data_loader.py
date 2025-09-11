@@ -1,3 +1,4 @@
+import logging
 import sys
 import types
 from pathlib import Path
@@ -43,15 +44,17 @@ def test_get_data_uses_cache(monkeypatch):
     assert src == "cache"
 
 
-def test_get_data_warns_when_volume_missing(monkeypatch, capsys):
+def test_get_data_warns_when_volume_missing(monkeypatch, caplog):
     df = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020-01-01", periods=2))
     monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
     monkeypatch.setattr(data_loader.pd, "read_csv", lambda *a, **k: df)
-    result, src = data_loader.get_data("TEST", "2020-01-01", "2020-01-02", verbose=True)
+    with caplog.at_level(logging.WARNING):
+        result, src = data_loader.get_data(
+            "TEST", "2020-01-01", "2020-01-02", verbose=True
+        )
     pd.testing.assert_frame_equal(result, df)
     assert src == "cache"
-    out = capsys.readouterr().out
-    assert "Volume column missing" in out
+    assert "Volume column missing" in caplog.text
 
 
 def test_get_data_raises_when_volume_invalid(monkeypatch):
