@@ -116,7 +116,6 @@ class FitnessEvaluator:
             )
 
             time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-            time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
             portfolio = vbt.Portfolio.from_signals(
                 close=self.ohlc_data["Close"],
@@ -177,6 +176,7 @@ class MultiAssetFitnessEvaluator:
         settings: dict | None = None,
     ):
         self.group_data = group_data  # dict[ticker -> OHLCV DataFrame]
+        self._sorted_tickers = sorted(group_data)
         self.base_rules = base_rules
         self.gene_map = gene_map
         defaults = getattr(config, "MULTI_ASSET", {})
@@ -263,7 +263,6 @@ class MultiAssetFitnessEvaluator:
         )
 
         time_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_exit = time_exit.reindex(entries.index, fill_value=False)
 
         portfolio = vbt.Portfolio.from_signals(
             close=ohlc["Close"],
@@ -301,7 +300,7 @@ class MultiAssetFitnessEvaluator:
             asset_weights_cfg = self.settings.get("asset_weights") or {}
             verbose = bool(self.settings.get("verbose_asset_errors"))
 
-            for ticker in sorted(self.group_data):
+            for ticker in self._sorted_tickers:
                 ohlc = self.group_data[ticker]
                 eval_reason = None
                 reason_detail = None
