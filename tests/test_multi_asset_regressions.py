@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover
 import analysis
 import config
 import fitness
+from utils.math import weighted_mean_std
 
 
 def _make_evaluator(stats_list, settings=None, group_data=None):
@@ -41,7 +42,7 @@ def _make_evaluator(stats_list, settings=None, group_data=None):
 def test_weighted_aggregation_regression():
     vals = [1.6, 1.0, 0.4]
     w = [1 / 3, 1 / 3, 1 / 3]
-    mu, sigma = fitness.weighted_mean_std(vals, w)
+    mu, sigma = weighted_mean_std(vals, w)
     lam = 0.25
     F = mu - lam * sigma
     assert np.isclose(mu, 1.0)

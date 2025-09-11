@@ -20,12 +20,13 @@ except Exception:  # pragma: no cover - fallback stub
 
 import config  # noqa: E402
 import fitness  # noqa: E402
+from utils.math import weighted_mean_std  # noqa: E402
 
 
 def test_dispersion_null_when_metrics_equal():
     m = [1.0, 1.0, 1.0]
     w = [1.0, 1.0, 1.0]
-    mu, sigma = fitness.weighted_mean_std(m, w)
+    mu, sigma = weighted_mean_std(m, w)
     assert mu == 1.0
     assert sigma == 0.0
     for lam in [0.0, 0.25, 2.0]:
@@ -36,7 +37,7 @@ def test_dispersion_null_when_metrics_equal():
 def test_dispersion_example_population_stdev():
     m = [1.6, 1.0, 0.4]
     w = [1.0, 1.0, 1.0]
-    mu, sigma = fitness.weighted_mean_std(m, w)
+    mu, sigma = weighted_mean_std(m, w)
     assert mu == pytest.approx(1.0)
     assert sigma == pytest.approx(0.4899, rel=1e-4)
     lam = 0.25
