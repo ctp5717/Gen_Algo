@@ -478,7 +478,7 @@ def process_strategy_rules(
     ohlc_data : pd.DataFrame
         OHLCV data.
     rules : dict
-        Strategy rules from ``config.STRATEGY_RULES``.
+        Strategy rules from ``strategy_rules.STRATEGY_RULES``.
     collect_counts : bool, optional
         If ``True``, also return per-condition true counts.
 

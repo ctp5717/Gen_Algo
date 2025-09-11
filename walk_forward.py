@@ -21,6 +21,7 @@ from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config
 from params_resolver import inject_genes_into_rules
 from run_metadata import merge_run_metadata
+from strategy_rules import STRATEGY_RULES
 
 
 def _get_commit_hash() -> str:
@@ -102,8 +103,8 @@ def _write_run_metadata(
             "numpy": np.__version__,
             "pandas": pd.__version__,
             "vectorbt": {
-                "version": vbt.__version__,
-                "path": str(Path(vbt.__file__).resolve()),
+                "version": getattr(vbt, "__version__", "unknown"),
+                "path": str(Path(getattr(vbt, "__file__", "")).resolve()),
             },
             "pygad": pygad.__version__,
         },
@@ -311,9 +312,7 @@ def run_walk_forward_validation(
             test_data = all_data.loc[p['test_start']:p['test_end']]
         # fmt: on
 
-        gene_space, gene_map, gene_types = parse_genes_from_config(
-            config.STRATEGY_RULES
-        )
+        gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
         if multi:
             settings_train = dict(config.MULTI_ASSET)
             per_asset_base = settings_train.get("per_asset_min_trades")
@@ -354,11 +353,11 @@ def run_walk_forward_validation(
                 )
             print(f"Training lambda={settings_train.get('lambda_dispersion')}")
             evaluator = fitness.MultiAssetFitnessEvaluator(
-                train_data, config.STRATEGY_RULES, gene_map, settings_train
+                train_data, STRATEGY_RULES, gene_map, settings_train
             )
         else:
             evaluator = fitness.get_fitness_evaluator(
-                train_data, config.STRATEGY_RULES, gene_map
+                train_data, STRATEGY_RULES, gene_map
             )
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
@@ -411,7 +410,7 @@ def run_walk_forward_validation(
         }
         winning_params = _round_floats(winning_params)
 
-        rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
+        rules = inject_genes_into_rules(STRATEGY_RULES, gene_map, best_solution)
         if multi:
             settings_val = dict(config.MULTI_ASSET)
             per_asset_base_val = settings_val.get("per_asset_min_trades")
@@ -453,7 +452,7 @@ def run_walk_forward_validation(
                 )
             print(f"Validation lambda={settings_val.get('lambda_dispersion')}")
             test_eval = fitness.MultiAssetFitnessEvaluator(
-                test_data, config.STRATEGY_RULES, gene_map, settings_val
+                test_data, STRATEGY_RULES, gene_map, settings_val
             )
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
@@ -649,9 +648,7 @@ def run_walk_forward_validation(
             print(f"  {param_name}: {param_value}")
 
         # Evaluate champion on validation data using composite fitness
-        val_evaluator = fitness.FitnessEvaluator(
-            test_data, config.STRATEGY_RULES, gene_map
-        )
+        val_evaluator = fitness.FitnessEvaluator(test_data, STRATEGY_RULES, gene_map)
         validation_score = val_evaluator(None, best_solution, 0)
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
         champion_pool = _update_champion_pool(

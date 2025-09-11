@@ -27,7 +27,7 @@
 
 - **What this is**: A modular, GA-driven trading research framework in Python that:
   - Loads historical OHLCV (Binance US or yfinance) with **caching**.
-  - Builds entry signals from **declarative rules** (`config.STRATEGY_RULES`) using functions in `indicator_library.py`.
+  - Builds entry signals from **declarative rules** (`strategy_rules.STRATEGY_RULES`) using functions in `indicator_library.py`.
   - Backtests via **vectorbt** and scores with a **composite fitness** (Sortino, Profit Factor w/ winsorization, Max DD, etc.).
   - Supports **multi-asset fitness** with dispersion/coverage & trade-floor policies.
   - Includes **auto-tuning**, **walk-forward**, and a **champion analysis** step that writes reproducibility metadata.
@@ -48,7 +48,7 @@
   - Periods: `TRAINING_PERIOD`, `VALIDATION_PERIOD` (auto-computed rolling windows).
   - Risk: `MAX_HOLD_DAYS` → converted to bars (intraday aware).
   - GA knobs: population, generations, mutation, etc.; optional **auto-tuner** settings.
-  - Strategy: `STRATEGY_RULES` with `is_active` flags and per-param **genes** (`low`, `high`, `step`, `name`).
+  - Strategy: `STRATEGY_RULES` (in `strategy_rules.py`) with `is_active` flags and per-param **genes** (`low`, `high`, `step`, `name`).
   - Fitness: `FITNESS_WEIGHTS` for composite score.
   - Multi-asset: `MULTI_ASSET` (lambda dispersion, trade-floor, zero-trade policy, coverage penalty, etc.).
 
@@ -184,7 +184,7 @@ python -c "import vectorbt as vbt; import pandas as pd; assert hasattr(pd.Series
 ### A) Add a new indicator (e.g., VWAP)
 1. Implement `def calculate_vwap(df: pd.DataFrame, period: int) -> pd.Series` in `indicator_library.py`.
 2. Register it in `strategy_engine.py` by adding to `INDICATOR_MAPPING`.
-3. Activate a new rule in `config.STRATEGY_RULES["entry_rules"]["conditions"]`:
+3. Activate a new rule in `strategy_rules.STRATEGY_RULES["entry_rules"]["conditions"]`:
 
 ```json
 {
@@ -220,7 +220,7 @@ python main.py
 ---
 
 ## Exit rules schema (quick reference)
-`config.STRATEGY_RULES["exit_rules"]` supports:
+`strategy_rules.STRATEGY_RULES["exit_rules"]` supports:
 
 ```json
 {

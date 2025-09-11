@@ -74,7 +74,7 @@ This is the single most important file for the user. It is the central "control 
     * **Asset & Timeframe:** Defines which asset to test (`SELECTED_ASSET_NAME`) and at what resolution (`TIMEFRAME`).
     * **Timeframe Conversion:** Minute bars map to `'min'` for pandas frequency strings (e.g., `'15m'` → `'15min'`). See [`tests/test_config_to_pandas_freq.py`](tests/test_config_to_pandas_freq.py) for validation.
     * **Dynamic Date Calculation:** Intelligently calculates the rolling `TRAINING_PERIOD` and `VALIDATION_PERIOD` based on the current date and the selected timeframe, automatically respecting the data history limits of the chosen API.
-    * **Strategy Definition:** Contains the `STRATEGY_RULES` dictionary, the heart of the system. This is where you build your trading strategy by combining indicator rules, setting their parameters, defining which parameters should be optimized as "genes," and using `is_active` flags to turn rules on or off.
+    * **Strategy Definition:** The `strategy_rules.py` module contains the `STRATEGY_RULES` dictionary, the heart of the system. This is where you build your trading strategy by combining indicator rules, setting their parameters, defining which parameters should be optimized as "genes," and using `is_active` flags to turn rules on or off.
     * **Risk Management:** Sets the `MAX_HOLD_PERIOD` for trades, now expressed
       as days converted into bars based on the selected `TIMEFRAME`.
     * **GA Tuning:** Holds all parameters for the Genetic Algorithm (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, etc.).
@@ -107,7 +107,7 @@ This file is a simple, clean, and expandable "toolbox" of functions for calculat
 This is the core processor that translates your ideas from the config file into actual trading signals.
 
 * **Key Responsibilities:**
-    * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from the config.
+    * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from `strategy_rules`.
     * **Dynamic Indicator Calls:** It uses the `INDICATOR_MAPPING` dictionary to dynamically call the correct calculation functions from the `indicator_library.py` based on the active rules.
     * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
     * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger/Keltner/Donchian/MA Envelope bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger, Keltner, Donchian, or MA Envelope bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. The default column used when `column` is omitted is listed below:

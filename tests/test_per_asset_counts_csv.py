@@ -1,5 +1,5 @@
 import analysis
-import config
+from strategy_rules import STRATEGY_RULES
 
 
 def test_per_asset_counts_columns_defaults_and_sorting():
@@ -8,10 +8,8 @@ def test_per_asset_counts_columns_defaults_and_sorting():
         "BBB": {"MACD_Momentum_Cross": 3},
         "AAA": {"Long_Term_Trend_Filter": 2, "RSI_Momentum_Filter": 1},
     }
-    df = analysis._build_per_asset_counts(
-        per_asset_signal_counts, config.STRATEGY_RULES
-    )
-    slugs, _ = analysis._canonical_rule_slugs(config.STRATEGY_RULES)
+    df = analysis._build_per_asset_counts(per_asset_signal_counts, STRATEGY_RULES)
+    slugs, _ = analysis._canonical_rule_slugs(STRATEGY_RULES)
     expected_cols = [
         "asset",
         "combination_logic",

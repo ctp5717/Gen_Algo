@@ -23,6 +23,7 @@ import strategy_engine
 from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config  # now defined in its own module
 from params_resolver import resolve_effective_rules
+from strategy_rules import STRATEGY_RULES
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
@@ -392,10 +393,10 @@ def main():
         if isinstance(training_data, dict)
         else training_data
     )
-    indicator_preflight(sample, config.STRATEGY_RULES)
+    indicator_preflight(sample, STRATEGY_RULES)
 
     print("Parsing strategy rules to identify genes for optimization...")
-    gene_space, gene_map, gene_types = parse_genes_from_config(config.STRATEGY_RULES)
+    gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
     if not gene_space:
         print("No genes found. Exiting.")
         return
@@ -405,7 +406,7 @@ def main():
 
     # Build the appropriate fitness evaluator (single- or multi-asset)
     fitness_evaluator = fitness.get_fitness_evaluator(
-        ohlc_data=training_data, base_rules=config.STRATEGY_RULES, gene_map=gene_map
+        ohlc_data=training_data, base_rules=STRATEGY_RULES, gene_map=gene_map
     )
     fitness_function = fitness_evaluator.__call__
 
@@ -462,7 +463,7 @@ def main():
         f"\nBest Solution's Fitness (Training Period): {_roundish(best_solution_fitness)}"
     )
     print("Optimal Parameters Found:")
-    resolved = resolve_effective_rules(config.STRATEGY_RULES, gene_map, best_solution)
+    resolved = resolve_effective_rules(STRATEGY_RULES, gene_map, best_solution)
     for i, gene_value in enumerate(best_solution):
         info = gene_map[i]
         gene_name = info["name"]
