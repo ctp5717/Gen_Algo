@@ -6,6 +6,7 @@ import functools
 import logging
 import os
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -303,21 +304,29 @@ def get_group_data(
         )
         return {}
 
-    indices = [df.index for df in raw_data.values()]
-    index_lengths = [len(idx) for idx in indices]
-    union_index = functools.reduce(pd.Index.union, indices)
+    raw_values = list(raw_data.values())
+    tickers = list(raw_data.keys())
+    index_lengths = np.fromiter((len(df.index) for df in raw_values), dtype=int)
+    union_index = functools.reduce(pd.Index.union, (df.index for df in raw_values))
     union_len = len(union_index)
 
-    filtered = {}
-    for (ticker, df), idx_len in zip(raw_data.items(), index_lengths):
-        coverage = idx_len / union_len
-        if coverage >= coverage_threshold:
-            filtered[ticker] = df
-        elif asset_verbose:
+    coverages = index_lengths / union_len
+    mask = coverages >= coverage_threshold
+
+    filtered = {
+        ticker: df for ticker, df, keep in zip(tickers, raw_values, mask) if keep
+    }
+
+    if asset_verbose:
+        excluded = [
+            f"{ticker} ({coverage * 100:.0f}%)"
+            for ticker, coverage, keep in zip(tickers, coverages, mask)
+            if not keep
+        ]
+        if excluded:
             logger.info(
-                "Excluding %s due to insufficient coverage (%.0f%%)",
-                ticker,
-                coverage * 100,
+                "Excluding tickers due to insufficient coverage: %s",
+                ", ".join(excluded),
             )
 
     if not filtered:
