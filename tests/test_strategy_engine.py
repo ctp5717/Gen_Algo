@@ -80,6 +80,7 @@ def test_generate_signal_from_value_validates_value_param():
 
 
 def test_indicator_cache(monkeypatch):
+    strategy_engine.clear_indicator_cache()
     data = pd.DataFrame(
         {
             "Open": [1, 2, 3, 4],
@@ -111,6 +112,49 @@ def test_indicator_cache(monkeypatch):
                 {
                     "indicator": "ema",
                     "params": {"period": 2},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+            ]
+        }
+    }
+
+    strategy_engine.process_strategy_rules(data, rules)
+    assert calls["n"] == 1
+
+
+def test_indicator_cache_rounds_float(monkeypatch):
+    strategy_engine.clear_indicator_cache()
+    data = pd.DataFrame(
+        {
+            "Open": [1, 2, 3, 4],
+            "High": [1, 2, 3, 4],
+            "Low": [1, 2, 3, 4],
+            "Close": [1, 2, 3, 4],
+            "Volume": [1, 1, 1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+
+    calls = {"n": 0}
+
+    def rsi_func(df, period):
+        calls["n"] += 1
+        return pd.Series(1, index=df.index)
+
+    monkeypatch.setattr(indicator_library, "calculate_rsi", rsi_func)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "rsi", rsi_func)
+
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "rsi",
+                    "params": {"period": 14.0},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                },
+                {
+                    "indicator": "rsi",
+                    "params": {"period": 14.00000000001},
                     "condition": {"type": "indicator_is_above_value", "value": 0},
                 },
             ]
@@ -372,6 +416,7 @@ def test_combination_logic_case_insensitive(monkeypatch):
 
 
 def test_combination_logic_gene_dict(monkeypatch):
+    strategy_engine.clear_indicator_cache()
     data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
 
     a = pd.Series([1, 0], index=data.index)
