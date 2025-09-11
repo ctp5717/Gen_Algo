@@ -1,6 +1,6 @@
 import pytest
 
-from fitness import weighted_mean_std
+from utils.math import weighted_mean_std
 
 
 def test_weighted_mean_std_handles_scalars():

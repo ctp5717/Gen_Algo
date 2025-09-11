@@ -7,69 +7,42 @@ Fitness Function for Genetic Algorithm
 import copy
 import logging
 import traceback
+import types
 import warnings
 from collections import Counter
 
 import numpy as np
 import pandas as pd
-import vectorbt as vbt
+
+try:  # pragma: no cover - import guard for optional heavy dependency
+    import vectorbt as vbt
+except Exception:  # pragma: no cover - fallback to stub
+    from vbt_stub import Portfolio
+    from vbt_stub import __file__ as _vbt_file
+    from vbt_stub import __version__ as _vbt_ver
+
+    vbt = types.ModuleType("vectorbt")
+    vbt.Portfolio = Portfolio
+    vbt.__version__ = _vbt_ver
+    vbt.__file__ = _vbt_file
+else:  # pragma: no cover - inject stub attributes if minimal module present
+    if not hasattr(vbt, "Portfolio"):
+        from vbt_stub import Portfolio
+        from vbt_stub import __file__ as _vbt_file
+        from vbt_stub import __version__ as _vbt_ver
+
+        vbt.Portfolio = Portfolio
+        vbt.__version__ = getattr(vbt, "__version__", _vbt_ver)
+        vbt.__file__ = getattr(vbt, "__file__", _vbt_file)
 
 import config
 import strategy_engine as engine
 import trade_floor
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
+from utils.math import weighted_mean_std
 
 logger = logging.getLogger(__name__)
-
-
-def weighted_mean_std(values, weights):
-    r"""Compute weighted mean and standard deviation.
-
-    Parameters
-    ----------
-    values : array-like
-        Sequence of values :math:`m_i`.
-    weights : array-like
-        Corresponding weights :math:`u_i`. They do not need to be normalised.
-
-    Returns
-    -------
-    tuple of float
-        ``(mu, sigma)`` where ``mu`` is the weighted mean and ``sigma`` is the
-        weighted *population* standard deviation :math:`\sqrt{\sum u_i(m_i-\mu)^2}`.
-        Weights are normalised internally so that ``sum(u_i)=1``. This helper
-        is shared by evaluators and tests to guarantee consistent dispersion
-        calculations across the project.
-
-    Examples
-    --------
-    >>> vals = [1.6, 1.0, 0.4]
-    >>> weights = [1/3, 1/3, 1/3]
-    >>> mu, sigma = weighted_mean_std(vals, weights)
-    >>> round(mu, 1), round(sigma, 4)
-    (1.0, 0.4899)
-    """
-
-    w = np.asarray(weights, dtype=float)
-    x = np.asarray(values, dtype=float)
-    if w.ndim == 0:
-        w = np.array([float(w)])
-    if x.ndim == 0:
-        x = np.array([float(x)])
-    if len(w) != len(x) or len(w) == 0:
-        raise ValueError("weighted_mean_std: values/weights length mismatch")
-    if (w < 0).any():
-        raise ValueError("weighted_mean_std: weights must be non-negative")
-    total = w.sum()
-    if total == 0:
-        w = np.ones_like(w) / len(w)
-    else:
-        w = w / total
-    mu = float(np.sum(w * x))
-    variance = float(np.sum(w * (x - mu) ** 2))
-    sigma_pop = float(np.sqrt(variance))  # population stdev (ddof=0)
-    return mu, sigma_pop
 
 
 def print_floor_failures(counter: Counter):
