@@ -461,6 +461,29 @@ def test_single_condition_vote(monkeypatch):
     )
 
 
+def test_single_condition_or_normalization(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020", periods=2))
+
+    def ind(ohlc, period=None):
+        return pd.Series([1, 2], index=ohlc.index)
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ind)
+    cond = {
+        "indicator": "ema",
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+
+    rules = {"entry_rules": {"combination_logic": "OR", "conditions": [cond]}}
+    with pytest.warns(
+        RuntimeWarning, match="Single active condition; normalized combination_logic"
+    ):
+        res = strategy_engine.process_strategy_rules(data, rules)
+    pd.testing.assert_series_equal(
+        res.astype(bool), pd.Series([True, True], index=data.index)
+    )
+
+
 def test_nan_handling_toggle(monkeypatch):
     data = pd.DataFrame(
         {"Close": [1, 1, 1]}, index=pd.date_range("2020-01-01", periods=3)
@@ -561,6 +584,59 @@ def test_nan_handling_toggle(monkeypatch):
     pd.testing.assert_series_equal(
         result_vote_true.astype("boolean"), expected_vote_true
     )
+
+
+def test_vote_nan_propagation(monkeypatch):
+    data = pd.DataFrame(
+        {"Close": [1, 1, 1]}, index=pd.date_range("2020-01-01", periods=3)
+    )
+
+    a = pd.Series([True, False, False], index=data.index, dtype="boolean")
+    b = pd.Series([False, False, False], index=data.index, dtype="boolean")
+    c = pd.Series([True, True, pd.NA], index=data.index, dtype="boolean")
+
+    def ind_a(ohlc, period=None):
+        return a
+
+    def ind_b(ohlc, period=None):
+        return b
+
+    def ind_c(ohlc, period=None):
+        return c
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", ind_b)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "c", ind_c)
+
+    cond_template = {
+        "params": {},
+        "condition": {"type": "indicator_is_above_value", "value": 0.5},
+    }
+    conds = [
+        {"indicator": "a", **cond_template},
+        {"indicator": "b", **cond_template},
+        {"indicator": "c", **cond_template},
+    ]
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "treat_nan_as_false": False,
+            "conditions": conds,
+        }
+    }
+    result = strategy_engine.process_strategy_rules(data, rules)
+    expected = pd.Series([True, False, pd.NA], index=data.index, dtype="boolean")
+    pd.testing.assert_series_equal(result.astype("boolean"), expected)
+
+
+@pytest.mark.parametrize("threshold", [0, 3])
+def test_combine_signals_invalid_vote_threshold(threshold):
+    s1 = pd.Series([True, False])
+    s2 = pd.Series([False, True])
+    with pytest.raises(ValueError):
+        strategy_engine._combine_signals(
+            [s1, s2], "VOTE", vote_threshold=threshold, treat_nan_as_false=True
+        )
 
 
 def test_bband_band_hint_and_fallback(monkeypatch):
