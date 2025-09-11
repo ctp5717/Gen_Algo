@@ -119,7 +119,7 @@ def test_backtester_integration_or_vote(monkeypatch):
     assert trade_counts == [3, 3, 0]
 
 
-def test_stop_loss_and_trailing_stop(monkeypatch):
+def test_exit_rule_params(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2, 3]}, index=pd.date_range("2020", periods=3))
 
     monkeypatch.setattr(
@@ -140,6 +140,8 @@ def test_stop_loss_and_trailing_stop(monkeypatch):
     def fake_from_signals(**kwargs):
         captured["sl_stop"] = kwargs.get("sl_stop")
         captured["sl_trail"] = kwargs.get("sl_trail")
+        captured["tp_stop"] = kwargs.get("tp_stop")
+        captured["exits"] = kwargs.get("exits")
         return DummyPF()
 
     monkeypatch.setattr(
@@ -158,6 +160,11 @@ def test_stop_loss_and_trailing_stop(monkeypatch):
                 "type": "percentage",
                 "params": {"value": 0.03},
             },
+            "take_profit": {
+                "is_active": True,
+                "type": "percentage",
+                "params": {"value": 0.07},
+            },
         }
     }
 
@@ -166,3 +173,5 @@ def test_stop_loss_and_trailing_stop(monkeypatch):
 
     assert captured["sl_stop"] == 0.05
     assert captured["sl_trail"] == 0.03
+    assert captured["tp_stop"] == 0.07
+    assert captured["exits"].sum() == 0
