@@ -104,6 +104,7 @@ def test_vote_threshold_clamped_to_one(monkeypatch):
 
 
 def test_vote_threshold_exceeds_active(monkeypatch, caplog):
+    strategy_engine.clear_indicator_cache()
     data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
     ind_a, cond_a = _make_cond("a", [1, 0])
     ind_b, cond_b = _make_cond("b", [1, 1])

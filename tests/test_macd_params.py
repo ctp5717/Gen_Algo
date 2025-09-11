@@ -145,6 +145,7 @@ def test_macd_fallback_to_line(monkeypatch):
 
 
 def test_macd_column_override(monkeypatch):
+    strategy_engine.clear_indicator_cache()
     df = _base_data()
 
     def macd_hist(data, fast, slow, signal):

@@ -20,12 +20,11 @@ Design Philosophy:
   `indicator_library.py` and `config.py`.
 """
 
-import json
 import logging
 import math
 import re
 import warnings
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -71,6 +70,19 @@ INDICATOR_COLUMN_PREFIXES = {
 MACD_HIST_PATTERN = re.compile(r"(?i)macdh(?:\b|_)|macd[_-]?hist(?:ogram)?")
 MACD_LINE_PATTERN = re.compile(r"(?i)^macd(?:\b|_)(?!h|s)")
 TRIX_LINE_PATTERN = re.compile(r"(?i)^TRIX(?!s)")
+
+
+# Global cache for indicator outputs keyed by
+# (indicator_name, params_tuple, data_id, columns)
+_INDICATOR_CACHE: dict[
+    tuple[str, tuple[tuple[str, Any], ...], int, tuple[str, ...]],
+    pd.Series | pd.DataFrame,
+] = {}
+
+
+def clear_indicator_cache() -> None:
+    """Clear the indicator output cache."""
+    _INDICATOR_CACHE.clear()
 
 
 # Mapping of condition strings to comparison or vectorbt crossover functions
@@ -584,7 +596,6 @@ def process_strategy_rules(
 
     signals = []
     counts = {} if collect_counts else None
-    cache: dict[tuple, pd.Series | pd.DataFrame] = {}
 
     for rule in conditions:
         if not rule.get("is_active", True):
@@ -615,20 +626,18 @@ def process_strategy_rules(
             if isinstance(v, float):
                 v = round(v, 10)
             norm_params[k] = v
-        params_key = json.dumps(
-            {k: repr(v) for k, v in norm_params.items()}, sort_keys=True
-        )
+        params_tuple = tuple(sorted(norm_params.items()))
         key = (
             indicator_name,
-            params_key,
+            params_tuple,
             id(ohlc_data),  # different data -> different cache bucket
             tuple(ohlc_data.columns),
         )
-        if key in cache:
-            indicator_output = cache[key]
+        if key in _INDICATOR_CACHE:
+            indicator_output = _INDICATOR_CACHE[key]
         else:
             indicator_output = indicator_func(ohlc_data, **norm_params)
-            cache[key] = indicator_output
+            _INDICATOR_CACHE[key] = indicator_output
         condition_type = condition_logic.get("type")
 
         target_series = select_indicator_series(
