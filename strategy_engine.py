@@ -25,7 +25,6 @@ import logging
 import math
 import re
 import warnings
-from functools import reduce
 from typing import Callable
 
 import numpy as np
@@ -422,46 +421,68 @@ def _combine_signals(
     if not signals:
         return pd.Series(dtype=bool)
 
-    prepared = (
-        [s.fillna(False) for s in signals]
-        if treat_nan_as_false
-        else [s.astype("boolean") for s in signals]
-    )
+    idx = signals[0].index
+    name = signals[0].name
 
-    if combination_logic == "AND":
-        return reduce(lambda x, y: x & y, prepared)
-
-    if combination_logic == "OR":
-        return reduce(lambda x, y: x | y, prepared)
-
-    if combination_logic == "VOTE":
-        M = len(prepared)
-        threshold = vote_threshold if vote_threshold is not None else math.ceil(M / 2)
-        if threshold < 1 or threshold > M:
-            raise ValueError(
-                "vote_threshold must be between 1 and the number of active conditions"
+    if treat_nan_as_false:
+        arr = np.stack(
+            [s.fillna(False).to_numpy(dtype=bool, copy=False) for s in signals]
+        )
+        if combination_logic == "AND":
+            combined = np.logical_and.reduce(arr, axis=0)
+            return pd.Series(combined, index=idx, name=name)
+        if combination_logic == "OR":
+            combined = np.logical_or.reduce(arr, axis=0)
+            return pd.Series(combined, index=idx, name=name)
+        if combination_logic == "VOTE":
+            M = arr.shape[0]
+            threshold = (
+                vote_threshold if vote_threshold is not None else math.ceil(M / 2)
             )
-        payload = {
-            "logic": "VOTE",
-            "M": M,
-            "k": threshold,
-            "treat_nan_as_false": treat_nan_as_false,
-        }
-        logger.info(payload)
+            if threshold < 1 or threshold > M:
+                raise ValueError(
+                    "vote_threshold must be between 1 and the number of active conditions"
+                )
+            payload = {
+                "logic": "VOTE",
+                "M": M,
+                "k": threshold,
+                "treat_nan_as_false": treat_nan_as_false,
+            }
+            logger.info(payload)
+            votes = np.sum(arr, axis=0)
+            return pd.Series(votes >= threshold, index=idx)
 
-        if treat_nan_as_false:
-            stacked = np.stack(
-                [s.to_numpy(dtype=np.uint8, copy=False) for s in prepared]
+    else:
+        arr = np.stack([s.to_numpy(dtype=float, copy=False) for s in signals])
+        has_nan = np.isnan(arr).any(axis=0)
+        if combination_logic == "AND":
+            has_false = (arr == 0).any(axis=0)
+            combined = np.where(has_false, False, np.where(has_nan, np.nan, True))
+            return pd.Series(combined, index=idx, dtype="boolean", name=name)
+        if combination_logic == "OR":
+            has_true = (arr == 1).any(axis=0)
+            combined = np.where(has_true, True, np.where(has_nan, np.nan, False))
+            return pd.Series(combined, index=idx, dtype="boolean", name=name)
+        if combination_logic == "VOTE":
+            M = arr.shape[0]
+            threshold = (
+                vote_threshold if vote_threshold is not None else math.ceil(M / 2)
             )
-            signal_sum = np.add.reduce(stacked, axis=0)
-            return pd.Series(signal_sum >= threshold, index=signals[0].index)
-
-        stacked = np.stack([s.to_numpy(dtype=float, copy=False) for s in prepared])
-        nan_mask = np.isnan(stacked).any(axis=0)
-        summed = np.nansum(stacked, axis=0)
-        summed[nan_mask] = np.nan
-        signal_sum = pd.Series(summed, index=signals[0].index, dtype="Float64")
-        return signal_sum.ge(threshold)
+            if threshold < 1 or threshold > M:
+                raise ValueError(
+                    "vote_threshold must be between 1 and the number of active conditions"
+                )
+            payload = {
+                "logic": "VOTE",
+                "M": M,
+                "k": threshold,
+                "treat_nan_as_false": treat_nan_as_false,
+            }
+            logger.info(payload)
+            votes = np.sum(arr, axis=0)
+            series = pd.Series(votes, index=idx, dtype="Float64")
+            return series.ge(threshold)
 
     raise ValueError(
         f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
