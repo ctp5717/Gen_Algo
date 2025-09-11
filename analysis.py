@@ -28,6 +28,7 @@ from deps import ensure_real_vectorbt
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from run_metadata import merge_run_metadata
+from strategy_rules import STRATEGY_RULES
 
 RUN_DIR = Path(".")
 
@@ -141,8 +142,8 @@ def _write_run_metadata(
             "numpy": np.__version__,
             "pandas": pd.__version__,
             "vectorbt": {
-                "version": vbt.__version__,
-                "path": str(Path(vbt.__file__).resolve()),
+                "version": getattr(vbt, "__version__", "unknown"),
+                "path": str(Path(getattr(vbt, "__file__", "")).resolve()),
             },
         },
         "artifacts": existing_artifacts,
@@ -216,7 +217,7 @@ def run_champion_analysis(
         return
 
     try:
-        rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
+        rules = inject_genes_into_rules(STRATEGY_RULES, gene_map, best_solution)
         outputs = engine.process_strategy_rules(
             validation_data, rules, collect_counts=True
         )
@@ -325,11 +326,11 @@ def _run_multi_asset_analysis(
         print(f"Scaled min_total_trades (validation): {floor} | info={info}")
     end_str = end.strftime("%Y-%m-%d")
     evaluator = fitness.MultiAssetFitnessEvaluator(
-        group_data, config.STRATEGY_RULES, gene_map, settings
+        group_data, STRATEGY_RULES, gene_map, settings
     )
     F = evaluator(None, best_solution, 0)
     details = evaluator.last_details
-    rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, best_solution)
+    rules = inject_genes_into_rules(STRATEGY_RULES, gene_map, best_solution)
     combo = rules.get("entry_rules", {}).get("combination_logic")
     vt = rules.get("entry_rules", {}).get("vote_threshold")
     fitness.print_floor_failures(getattr(evaluator, "floor_failures", {}))
