@@ -165,6 +165,238 @@ def _generate_signal_from_value(
         return pd.Series(False, index=indicator_series.index)
 
 
+def _band_resolver(prefixes: dict[str, str], label: str) -> Callable:
+    """Create a resolver for band-based indicators."""
+
+    def resolver(
+        output: pd.DataFrame,
+        condition_logic: dict,
+        condition_type: str,
+        choose_first: Callable,
+        _df_from_prefix: Callable[[str], pd.DataFrame],
+        _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+    ) -> pd.Series:
+        band = condition_logic.get("band")
+        if not band:
+            if "upper" in condition_type:
+                band = "upper"
+            elif "lower" in condition_type:
+                band = "lower"
+            else:
+                band = "middle"
+        else:
+            band = str(band).lower()
+
+        if band not in {"upper", "lower", "middle", "mid", "basis"}:
+            warnings.warn(
+                f"Unknown band '{band}' for {label}; defaulting to middle",
+                stacklevel=2,
+            )
+            band = "middle"
+
+        key = band
+        if band in {"middle", "mid", "basis"}:
+            key = "middle"
+
+        df = _df_from_prefix(prefixes[key])
+        msg = (
+            f"{key.capitalize()} band not found in {label} output; expected columns like "
+            f"'{prefixes[key]}_*'"
+        )
+        return choose_first(df, msg, fallback=False)
+
+    return resolver
+
+
+def _macd_resolver(
+    output: pd.DataFrame,
+    condition_logic: dict,
+    condition_type: str,
+    choose_first: Callable,
+    _df_from_prefix: Callable[[str], pd.DataFrame],
+    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+) -> pd.Series:
+    hist = _df_from_regex("macd_hist", MACD_HIST_PATTERN)
+    if hist.shape[1]:
+        return hist.iloc[:, 0]
+    macd_line = _df_from_regex("macd_line", MACD_LINE_PATTERN)
+    if macd_line.shape[1]:
+        return macd_line.iloc[:, 0]
+    if output.shape[1]:
+        return output.iloc[:, 0]
+    raise KeyError("No MACD columns found; available: " f"{list(output.columns)}")
+
+
+def _adx_resolver(
+    output: pd.DataFrame,
+    condition_logic: dict,
+    condition_type: str,
+    choose_first: Callable,
+    _df_from_prefix: Callable[[str], pd.DataFrame],
+    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+) -> pd.Series:
+    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["adx"]["main"])
+    return choose_first(df, "ADX column not found", fallback=False)
+
+
+def _stoch_resolver(
+    output: pd.DataFrame,
+    condition_logic: dict,
+    condition_type: str,
+    choose_first: Callable,
+    _df_from_prefix: Callable[[str], pd.DataFrame],
+    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+) -> pd.Series:
+    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["stoch"]["k"])
+    msg = "%K column not found in Stochastic output; expected columns like 'STOCHk_*'"
+    return choose_first(df, msg, fallback=False)
+
+
+def _ichimoku_resolver(
+    output: pd.DataFrame,
+    condition_logic: dict,
+    condition_type: str,
+    choose_first: Callable,
+    _df_from_prefix: Callable[[str], pd.DataFrame],
+    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+) -> pd.Series:
+    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["ichimoku"]["baseline"])
+    msg = "Baseline column not found in Ichimoku output; expected columns like 'IKS_*'"
+    return choose_first(df, msg, fallback=False)
+
+
+def _pivot_resolver(
+    output: pd.DataFrame,
+    condition_logic: dict,
+    condition_type: str,
+    choose_first: Callable,
+    _df_from_prefix: Callable[[str], pd.DataFrame],
+    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+) -> pd.Series:
+    if "P" in output.columns:
+        return output["P"]
+    if output.shape[1]:
+        return output.iloc[:, 0]
+    raise KeyError(
+        "Pivot Points output produced no columns; available: " f"{list(output.columns)}"
+    )
+
+
+def _trix_resolver(
+    output: pd.DataFrame,
+    condition_logic: dict,
+    condition_type: str,
+    choose_first: Callable,
+    _df_from_prefix: Callable[[str], pd.DataFrame],
+    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
+) -> pd.Series:
+    df = _df_from_regex("trix_line", TRIX_LINE_PATTERN)
+    return choose_first(
+        df, "TRIX line not found; expected columns like 'TRIX_*'", fallback=False
+    )
+
+
+INDICATOR_SERIES_RESOLVERS: dict[str, Callable] = {
+    "bbands": _band_resolver(INDICATOR_COLUMN_PREFIXES["bbands"], "BBands"),
+    "keltner": _band_resolver(INDICATOR_COLUMN_PREFIXES["keltner"], "Keltner"),
+    "donchian": _band_resolver(INDICATOR_COLUMN_PREFIXES["donchian"], "Donchian"),
+    "ma_envelope": _band_resolver(
+        INDICATOR_COLUMN_PREFIXES["ma_envelope"], "MA Envelope"
+    ),
+    "macd": _macd_resolver,
+    "adx": _adx_resolver,
+    "stoch": _stoch_resolver,
+    "ichimoku": _ichimoku_resolver,
+    "pivot_points": _pivot_resolver,
+    "pivots": _pivot_resolver,
+    "trix": _trix_resolver,
+}
+
+
+def select_indicator_series(
+    indicator_name: str,
+    indicator_output: pd.Series | pd.DataFrame,
+    condition_logic: dict,
+    strict_column: bool,
+) -> pd.Series:
+    """Return the appropriate Series from ``indicator_output``."""
+
+    if isinstance(indicator_output, pd.Series):
+        return indicator_output
+
+    col_hint = condition_logic.get("column")
+    rule_strict = condition_logic.get("strict_column", strict_column)
+    if not isinstance(rule_strict, bool):
+        raise TypeError("strict_column must be a boolean")
+
+    columns = list(indicator_output.columns)
+    prefix_cache: dict[str, str | None] = {}
+    regex_cache: dict[str, str | None] = {}
+
+    def _df_from_prefix(prefix: str, cols=columns) -> pd.DataFrame:
+        col = prefix_cache.get(prefix)
+        if col is None:
+            col = next((c for c in cols if c.startswith(prefix)), None)
+            prefix_cache[prefix] = col
+        return indicator_output[[col]] if col else indicator_output.iloc[:, 0:0]
+
+    def _df_from_regex(name: str, pattern: re.Pattern, cols=columns) -> pd.DataFrame:
+        col = regex_cache.get(name)
+        if col is None:
+            col = next((c for c in cols if pattern.search(c)), None)
+            regex_cache[name] = col
+        return indicator_output[[col]] if col else indicator_output.iloc[:, 0:0]
+
+    def choose_first(
+        df: pd.DataFrame,
+        msg: str,
+        output: pd.DataFrame = indicator_output,
+        strict: bool = rule_strict,
+        fallback: bool = True,
+    ) -> pd.Series:
+        avail = list(output.columns)
+        msg = f"{msg}; available: {avail}"
+        if df.shape[1] == 0:
+            if strict:
+                raise KeyError(msg + "; set strict_column=False to allow fallback")
+            warnings.warn(msg + "; using first available column", stacklevel=2)
+            if output.shape[1] == 0:
+                raise KeyError(msg + "; set strict_column=False to allow fallback")
+            return output.iloc[:, 0]
+        if not fallback:
+            return df.iloc[:, 0]
+        if strict:
+            raise KeyError(msg + "; set strict_column=False to allow fallback")
+        warnings.warn(msg + "; using first available column", stacklevel=2)
+        return df.iloc[:, 0]
+
+    if col_hint:
+        if col_hint in indicator_output.columns:
+            return indicator_output[col_hint]
+        df = _df_from_regex(col_hint, re.compile(col_hint))
+        return choose_first(df, f"Requested column '{col_hint}' not found")
+
+    condition_type = condition_logic.get("type", "")
+
+    for key, resolver in INDICATOR_SERIES_RESOLVERS.items():
+        if key in indicator_name:
+            return resolver(
+                indicator_output,
+                condition_logic,
+                condition_type,
+                choose_first,
+                _df_from_prefix,
+                _df_from_regex,
+            )
+
+    if indicator_output.shape[1]:
+        return indicator_output.iloc[:, 0]
+
+    raise KeyError(
+        "Indicator produced no columns; available: " f"{list(indicator_output.columns)}"
+    )
+
+
 def _combine_signals(
     signals: list[pd.Series],
     combination_logic: str,
@@ -378,425 +610,9 @@ def process_strategy_rules(
             cache[key] = indicator_output
         condition_type = condition_logic.get("type")
 
-        # --- Intelligent Column Selection ---
-        target_series = indicator_output
-        if isinstance(indicator_output, pd.DataFrame):
-            col_hint = condition_logic.get("column")
-            rule_strict = condition_logic.get("strict_column", strict_column)
-            if not isinstance(rule_strict, bool):
-                raise TypeError("strict_column must be a boolean")
-
-            columns = list(indicator_output.columns)
-            prefix_cache: dict[str, str | None] = {}
-            regex_cache: dict[str, str | None] = {}
-
-            def _df_from_prefix(
-                prefix: str,
-                cols=columns,
-                cache=prefix_cache,
-                output: pd.DataFrame = indicator_output,
-            ) -> pd.DataFrame:
-                col = cache.get(prefix)
-                if col is None:
-                    col = next((c for c in cols if c.startswith(prefix)), None)
-                    cache[prefix] = col
-                return output[[col]] if col else output.iloc[:, 0:0]
-
-            def _df_from_regex(
-                name: str,
-                pattern: re.Pattern,
-                cols=columns,
-                cache=regex_cache,
-                output: pd.DataFrame = indicator_output,
-            ) -> pd.DataFrame:
-                col = cache.get(name)
-                if col is None:
-                    col = next((c for c in cols if pattern.search(c)), None)
-                    cache[name] = col
-                return output[[col]] if col else output.iloc[:, 0:0]
-
-            def choose_first(
-                df: pd.DataFrame,
-                msg: str,
-                output: pd.DataFrame = indicator_output,
-                strict: bool = rule_strict,
-                fallback: bool = True,
-            ) -> pd.Series:
-                avail = list(output.columns)
-                msg = f"{msg}; available: {avail}"
-                if df.shape[1] == 0:
-                    if strict:
-                        raise KeyError(
-                            msg + "; set strict_column=False to allow fallback"
-                        )
-                    warnings.warn(msg + "; using first available column", stacklevel=2)
-                    if output.shape[1] == 0:
-                        raise KeyError(
-                            msg + "; set strict_column=False to allow fallback"
-                        )
-                    return output.iloc[:, 0]
-                if not fallback:
-                    return df.iloc[:, 0]
-                if strict:
-                    raise KeyError(msg + "; set strict_column=False to allow fallback")
-                warnings.warn(msg + "; using first available column", stacklevel=2)
-                return df.iloc[:, 0]
-
-            if col_hint:
-                if col_hint in indicator_output.columns:
-                    target_series = indicator_output[col_hint]
-                else:
-                    df = _df_from_regex(col_hint, re.compile(col_hint))
-                    target_series = choose_first(
-                        df,
-                        f"Requested column '{col_hint}' not found",
-                    )
-            elif "bbands" in indicator_name:
-                band = condition_logic.get("band")
-                if band:
-                    band = band.lower()
-                    if band == "upper":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["bbands"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in BBands output; expected columns like 'BBU_*'",
-                            fallback=False,
-                        )
-                    elif band == "lower":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["bbands"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in BBands output; expected columns like 'BBL_*'",
-                            fallback=False,
-                        )
-                    else:
-                        if band not in {"middle", "mid", "basis"}:
-                            warnings.warn(
-                                f"Unknown band '{band}' for Bollinger Bands; defaulting to middle",
-                                stacklevel=2,
-                            )
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["bbands"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in BBands output; expected columns like 'BBM_*'",
-                            fallback=False,
-                        )
-                else:
-                    if "upper" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["bbands"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in BBands output; expected columns like 'BBU_*'",
-                            fallback=False,
-                        )
-                    elif "lower" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["bbands"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in BBands output; expected columns like 'BBL_*'",
-                            fallback=False,
-                        )
-                    else:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["bbands"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in BBands output; expected columns like 'BBM_*'",
-                            fallback=False,
-                        )
-            elif "keltner" in indicator_name:
-                band = condition_logic.get("band")
-                if band:
-                    band = band.lower()
-                    if band == "upper":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["keltner"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in Keltner output; expected columns like 'KCU_*'",
-                            fallback=False,
-                        )
-                    elif band == "lower":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["keltner"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in Keltner output; expected columns like 'KCL_*'",
-                            fallback=False,
-                        )
-                    else:
-                        if band not in {"middle", "mid", "basis"}:
-                            warnings.warn(
-                                f"Unknown band '{band}' for Keltner Channels; defaulting to middle",
-                                stacklevel=2,
-                            )
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["keltner"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in Keltner output; expected columns like 'KCM_*'",
-                            fallback=False,
-                        )
-                else:
-                    if "upper" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["keltner"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in Keltner output; expected columns like 'KCU_*'",
-                            fallback=False,
-                        )
-                    elif "lower" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["keltner"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in Keltner output; expected columns like 'KCL_*'",
-                            fallback=False,
-                        )
-                    else:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["keltner"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in Keltner output; expected columns like 'KCM_*'",
-                            fallback=False,
-                        )
-            elif "donchian" in indicator_name:
-                band = condition_logic.get("band")
-                if band:
-                    band = band.lower()
-                    if band == "upper":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["donchian"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in Donchian output; expected columns like 'DCU_*'",
-                            fallback=False,
-                        )
-                    elif band == "lower":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["donchian"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in Donchian output; expected columns like 'DCL_*'",
-                            fallback=False,
-                        )
-                    else:
-                        if band not in {"middle", "mid", "basis"}:
-                            warnings.warn(
-                                f"Unknown band '{band}' for Donchian Channels; defaulting to middle",
-                                stacklevel=2,
-                            )
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["donchian"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in Donchian output; expected columns like 'DCM_*'",
-                            fallback=False,
-                        )
-                else:
-                    if "upper" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["donchian"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in Donchian output; expected columns like 'DCU_*'",
-                            fallback=False,
-                        )
-                    elif "lower" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["donchian"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in Donchian output; expected columns like 'DCL_*'",
-                            fallback=False,
-                        )
-                    else:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["donchian"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in Donchian output; expected columns like 'DCM_*'",
-                            fallback=False,
-                        )
-            elif "ma_envelope" in indicator_name:
-                band = condition_logic.get("band")
-                if band:
-                    band = band.lower()
-                    if band == "upper":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in MA Envelope output; expected columns like 'MAE_U_*'",
-                            fallback=False,
-                        )
-                    elif band == "lower":
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in MA Envelope output; expected columns like 'MAE_L_*'",
-                            fallback=False,
-                        )
-                    else:
-                        if band not in {"middle", "mid", "basis"}:
-                            warnings.warn(
-                                f"Unknown band '{band}' for MA Envelope; defaulting to middle",
-                                stacklevel=2,
-                            )
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in MA Envelope output; expected columns like 'MAE_M_*'",
-                            fallback=False,
-                        )
-                else:
-                    if "upper" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["upper"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Upper band not found in MA Envelope output; expected columns like 'MAE_U_*'",
-                            fallback=False,
-                        )
-                    elif "lower" in condition_type:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["lower"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Lower band not found in MA Envelope output; expected columns like 'MAE_L_*'",
-                            fallback=False,
-                        )
-                    else:
-                        df = _df_from_prefix(
-                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["middle"]
-                        )
-                        target_series = choose_first(
-                            df,
-                            "Middle band not found in MA Envelope output; expected columns like 'MAE_M_*'",
-                            fallback=False,
-                        )
-            elif "macd" in indicator_name:
-                if isinstance(indicator_output, pd.Series):
-                    target_series = indicator_output
-                else:
-                    hist = _df_from_regex("macd_hist", MACD_HIST_PATTERN)
-                    if hist.shape[1]:
-                        target_series = hist.iloc[:, 0]
-                    else:
-                        macd_line = _df_from_regex("macd_line", MACD_LINE_PATTERN)
-                        if macd_line.shape[1]:
-                            target_series = macd_line.iloc[:, 0]
-                        elif indicator_output.shape[1]:
-                            target_series = indicator_output.iloc[:, 0]
-                        else:
-                            raise KeyError(
-                                "No MACD columns found; available: "
-                                f"{list(indicator_output.columns)}"
-                            )
-            elif "adx" in indicator_name:
-                col = condition_logic.get("column")
-                if col and col in indicator_output.columns:
-                    target_series = indicator_output[col]
-                else:
-                    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["adx"]["main"])
-                    target_series = choose_first(
-                        df,
-                        "ADX column not found",
-                        fallback=False,
-                    )
-            elif "stoch" in indicator_name:
-                col = condition_logic.get("column")
-                if col and col in indicator_output.columns:
-                    target_series = indicator_output[col]
-                else:
-                    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["stoch"]["k"])
-                    target_series = choose_first(
-                        df,
-                        "%K column not found in Stochastic output; expected columns like 'STOCHk_*'",
-                        fallback=False,
-                    )
-            elif "ichimoku" in indicator_name:
-                col = condition_logic.get("column")
-                if col and col in indicator_output.columns:
-                    target_series = indicator_output[col]
-                else:
-                    df = _df_from_prefix(
-                        INDICATOR_COLUMN_PREFIXES["ichimoku"]["baseline"]
-                    )
-                    target_series = choose_first(
-                        df,
-                        "Baseline column not found in Ichimoku output; expected columns like 'IKS_*'",
-                        fallback=False,
-                    )
-            elif "pivot_points" in indicator_name or "pivots" in indicator_name:
-                col = condition_logic.get("column")
-                if col and col in indicator_output.columns:
-                    target_series = indicator_output[col]
-                else:
-                    if "P" in indicator_output.columns:
-                        target_series = indicator_output["P"]
-                    elif indicator_output.shape[1]:
-                        target_series = indicator_output.iloc[:, 0]
-                    else:
-                        raise KeyError(
-                            "Pivot Points output produced no columns; available: "
-                            f"{list(indicator_output.columns)}"
-                        )
-            elif "trix" in indicator_name and isinstance(
-                indicator_output, pd.DataFrame
-            ):
-                col = condition_logic.get("column")
-                if col and col in indicator_output.columns:
-                    target_series = indicator_output[col]
-                else:
-                    df = _df_from_regex("trix_line", TRIX_LINE_PATTERN)
-                    target_series = choose_first(
-                        df,
-                        "TRIX line not found; expected columns like 'TRIX_*'",
-                        fallback=False,
-                    )
-            else:
-                if isinstance(indicator_output, pd.Series):
-                    target_series = indicator_output
-                elif indicator_output.shape[1]:
-                    target_series = indicator_output.iloc[:, 0]
-                else:
-                    raise KeyError(
-                        "Indicator produced no columns; available: "
-                        f"{list(indicator_output.columns)}"
-                    )
+        target_series = select_indicator_series(
+            indicator_name, indicator_output, condition_logic, strict_column
+        )
 
         individual_signal = pd.Series(False, index=ohlc_data.index)
         if "price" in condition_type:
