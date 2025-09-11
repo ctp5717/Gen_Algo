@@ -26,6 +26,7 @@ import strategy_engine as engine
 import trade_floor
 from deps import ensure_real_vectorbt
 from params_resolver import inject_genes_into_rules
+from portfolio_utils import extract_exit_params
 from run_metadata import merge_run_metadata
 
 RUN_DIR = Path(".")
@@ -229,28 +230,9 @@ def run_champion_analysis(
             return
 
         exit_rules = rules.get("exit_rules", {})
-        sl_rule = exit_rules.get("stop_loss", {})
-        tsl_rule = exit_rules.get("trailing_stop", {})
-        tp_rule = exit_rules.get("take_profit", {})
-
-        sl_stop = (
-            sl_rule.get("params", {}).get("value")
-            if sl_rule.get("is_active", False)
-            else None
+        time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
+            entries, exit_rules, config.MAX_HOLD_PERIOD
         )
-        sl_trail = (
-            tsl_rule.get("params", {}).get("value")
-            if tsl_rule.get("is_active", False)
-            else None
-        )
-        tp_stop = (
-            tp_rule.get("params", {}).get("value")
-            if tp_rule.get("is_active", False)
-            else None
-        )
-
-        time_based_exit = entries.shift(config.MAX_HOLD_PERIOD, fill_value=False)
-        time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
 
         portfolio = vbt.Portfolio.from_signals(
             close=validation_data["Close"],
