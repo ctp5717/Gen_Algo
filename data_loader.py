@@ -317,11 +317,12 @@ def get_group_data(
     union_index = None
     for df in raw_data.values():
         union_index = df.index if union_index is None else union_index.union(df.index)
+    union_len = len(union_index)
 
     # Filter out assets with insufficient data coverage.
     filtered = {}
     for ticker, df in raw_data.items():
-        coverage = len(df.index) / len(union_index)
+        coverage = len(df.index) / union_len
         if coverage >= coverage_threshold:
             filtered[ticker] = df
         else:
