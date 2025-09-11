@@ -2,6 +2,7 @@
 
 """Data loading and caching utilities."""
 
+import functools
 import logging
 import os
 
@@ -302,23 +303,22 @@ def get_group_data(
         )
         return {}
 
-    union_index = None
-    for df in raw_data.values():
-        union_index = df.index if union_index is None else union_index.union(df.index)
+    indices = [df.index for df in raw_data.values()]
+    index_lengths = [len(idx) for idx in indices]
+    union_index = functools.reduce(pd.Index.union, indices)
     union_len = len(union_index)
 
     filtered = {}
-    for ticker, df in raw_data.items():
-        coverage = len(df.index) / union_len
+    for (ticker, df), idx_len in zip(raw_data.items(), index_lengths):
+        coverage = idx_len / union_len
         if coverage >= coverage_threshold:
             filtered[ticker] = df
-        else:
-            if asset_verbose:
-                logger.info(
-                    "Excluding %s due to insufficient coverage (%.0f%%)",
-                    ticker,
-                    coverage * 100,
-                )
+        elif asset_verbose:
+            logger.info(
+                "Excluding %s due to insufficient coverage (%.0f%%)",
+                ticker,
+                coverage * 100,
+            )
 
     if not filtered:
         logger.info(
@@ -326,11 +326,9 @@ def get_group_data(
         )
         return {}
 
-    common_index = None
-    for df in filtered.values():
-        common_index = (
-            df.index if common_index is None else common_index.intersection(df.index)
-        )
+    common_index = functools.reduce(
+        pd.Index.intersection, [df.index for df in filtered.values()]
+    )
 
     aligned = {ticker: df.loc[common_index] for ticker, df in filtered.items()}
 
