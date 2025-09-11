@@ -4,6 +4,7 @@
 Fitness Function for Genetic Algorithm
 (This version uses the correct pandas .shift() method for time-based exits)
 """
+import concurrent.futures as cf
 import copy
 import logging
 import traceback
@@ -238,25 +239,85 @@ class MultiAssetFitnessEvaluator:
             asset_weights_cfg = self.settings.get("asset_weights") or {}
             verbose = bool(self.settings.get("verbose_asset_errors"))
 
-            for ticker in self._sorted_tickers:
-                ohlc = self.group_data[ticker]
-                eval_reason = None
-                reason_detail = None
-                reason_trace = None
-                if ohlc is None or ohlc.empty:
-                    eval_reason = "insufficient_coverage"
-                    stats = {
-                        "sortino": None,
-                        "profit_factor": None,
-                        "max_drawdown": None,
-                        "trades": 0,
-                        "total_return": None,
-                        "equity_curve": pd.Series(dtype=float),
-                        "signal_counts": {},
-                    }
-                else:
+            empty_stats = {
+                "sortino": None,
+                "profit_factor": None,
+                "max_drawdown": None,
+                "trades": 0,
+                "total_return": None,
+                "equity_curve": pd.Series(dtype=float),
+                "signal_counts": {},
+            }
+
+            parallel_cfg = self.settings.get("parallel", {})
+            evaluation_results = {}
+            if parallel_cfg.get("enabled"):
+                backend = parallel_cfg.get("backend", "thread")
+                max_workers = parallel_cfg.get("max_workers")
+                Executor = (
+                    cf.ProcessPoolExecutor
+                    if backend == "process"
+                    else cf.ThreadPoolExecutor
+                )
+                with Executor(max_workers=max_workers) as ex:
+                    future_map = {}
+                    for ticker in self._sorted_tickers:
+                        ohlc = self.group_data[ticker]
+                        if ohlc is None or ohlc.empty:
+                            evaluation_results[ticker] = (
+                                empty_stats.copy(),
+                                "insufficient_coverage",
+                                None,
+                                None,
+                            )
+                        else:
+                            future_map[
+                                ex.submit(self._evaluate_single_asset, ohlc, rules)
+                            ] = ticker
+                    for fut in cf.as_completed(future_map):
+                        ticker = future_map[fut]
+                        try:
+                            stats = fut.result()
+                            evaluation_results[ticker] = (
+                                stats,
+                                None,
+                                None,
+                                None,
+                            )
+                        except Exception as e:
+                            if verbose:
+                                print(f"Error evaluating asset {ticker}: {e}")
+                                tb = traceback.format_exception(
+                                    e.__class__, e, e.__traceback__
+                                )
+                                reason_trace = (tb[0].strip(), tb[-1].strip())
+                            else:
+                                reason_trace = None
+                            evaluation_results[ticker] = (
+                                empty_stats.copy(),
+                                "evaluation_error",
+                                repr(e),
+                                reason_trace,
+                            )
+            else:
+                for ticker in self._sorted_tickers:
+                    ohlc = self.group_data[ticker]
+                    if ohlc is None or ohlc.empty:
+                        evaluation_results[ticker] = (
+                            empty_stats.copy(),
+                            "insufficient_coverage",
+                            None,
+                            None,
+                        )
+                        continue
                     try:
                         stats = self._evaluate_single_asset(ohlc, rules)
+                        evaluation_results[ticker] = (
+                            stats,
+                            None,
+                            None,
+                            None,
+                        )
                     except Exception as e:
                         if verbose:
                             print(f"Error evaluating asset {ticker}: {e}")
@@ -264,18 +325,19 @@ class MultiAssetFitnessEvaluator:
                                 e.__class__, e, e.__traceback__
                             )
                             reason_trace = (tb[0].strip(), tb[-1].strip())
-                        eval_reason = "evaluation_error"
-                        reason_detail = repr(e)
-                        stats = {
-                            "sortino": None,
-                            "profit_factor": None,
-                            "max_drawdown": None,
-                            "trades": 0,
-                            "total_return": None,
-                            "equity_curve": pd.Series(dtype=float),
-                            "signal_counts": {},
-                        }
+                        else:
+                            reason_trace = None
+                        evaluation_results[ticker] = (
+                            empty_stats.copy(),
+                            "evaluation_error",
+                            repr(e),
+                            reason_trace,
+                        )
 
+            for ticker in self._sorted_tickers:
+                stats, eval_reason, reason_detail, reason_trace = evaluation_results[
+                    ticker
+                ]
                 trades = stats.get("trades", 0)
                 total_trades += trades
 

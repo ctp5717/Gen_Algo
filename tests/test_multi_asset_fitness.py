@@ -592,6 +592,69 @@ def test_handles_asset_error_gracefully():
     assert ev.last_details["assets_ignored"] == 1
 
 
+def test_parallel_evaluation_basic():
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+        "C": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+        "min_total_trades_per_year": 0,
+        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
+    }
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+    stats_map = {
+        id(group_data["A"]): {"total_return": 5.0, "trades": 2},
+        id(group_data["B"]): {"total_return": 5.0, "trades": 2},
+        id(group_data["C"]): {"total_return": 5.0, "trades": 2},
+    }
+
+    def fake_eval(self, ohlc, rules):
+        return stats_map[id(ohlc)]
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 5.0)
+    assert ev.last_details["assets_included"] == 3
+
+
+def test_parallel_evaluation_handles_exception():
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+        "min_total_trades_per_year": 0,
+        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
+    }
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    def fake_eval(self, ohlc, rules):
+        if id(ohlc) == id(group_data["B"]):
+            raise ValueError("boom")
+        return {"total_return": 2.0, "trades": 2}
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+    score = ev(None, [], 0)
+    assert np.isclose(score, 2.0)
+    assert not ev.last_details["per_asset"]["B"]["included"]
+    assert ev.last_details["per_asset"]["B"]["reason"] == "evaluation_error"
+
+
 def test_csv_columns_and_sort(monkeypatch, tmp_path):
     monkeypatch.setitem(cfg.MULTI_ASSET, "enabled", True)
     monkeypatch.setattr(cfg, "CHARTS", {"save_pngs": False, "show_distribution": False})
