@@ -23,10 +23,12 @@ Design Philosophy:
 import json
 import logging
 import math
+import re
 import warnings
 from functools import reduce
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
 import indicator_library as ind_lib  # Import our toolbox of indicators
@@ -54,6 +56,22 @@ for alias, target in ALIASES.items():
 
 # Indicators that require a ``Volume`` column
 VOLUME_INDICATORS = {"obv", "mfi", "adl", "cmf"}
+
+# Cached column prefixes for common multi-output indicators to avoid repeated
+# DataFrame.filter calls.
+INDICATOR_COLUMN_PREFIXES = {
+    "bbands": {"upper": "BBU", "middle": "BBM", "lower": "BBL"},
+    "keltner": {"upper": "KCU", "middle": "KCM", "lower": "KCL"},
+    "donchian": {"upper": "DCU", "middle": "DCM", "lower": "DCL"},
+    "ma_envelope": {"upper": "MAE_U", "middle": "MAE_M", "lower": "MAE_L"},
+    "adx": {"main": "ADX"},
+    "stoch": {"k": "STOCHk"},
+    "ichimoku": {"baseline": "IKS"},
+}
+
+MACD_HIST_PATTERN = re.compile(r"(?i)macdh(?:\b|_)|macd[_-]?hist(?:ogram)?")
+MACD_LINE_PATTERN = re.compile(r"(?i)^macd(?:\b|_)(?!h|s)")
+TRIX_LINE_PATTERN = re.compile(r"(?i)^TRIX(?!s)")
 
 
 # Mapping of condition strings to comparison or vectorbt crossover functions
@@ -198,12 +216,20 @@ def _combine_signals(
             "treat_nan_as_false": treat_nan_as_false,
         }
         logger.info(payload)
+
         if treat_nan_as_false:
-            signal_sum = pd.concat(prepared, axis=1).astype(int).sum(axis=1)
-            return signal_sum >= threshold
-        signal_df = pd.concat(prepared, axis=1)
-        signal_sum = signal_df.astype("Int64").sum(axis=1, min_count=M)
-        return signal_sum >= threshold
+            stacked = np.stack(
+                [s.to_numpy(dtype=np.uint8, copy=False) for s in prepared]
+            )
+            signal_sum = np.add.reduce(stacked, axis=0)
+            return pd.Series(signal_sum >= threshold, index=signals[0].index)
+
+        stacked = np.stack([s.to_numpy(dtype=float, copy=False) for s in prepared])
+        nan_mask = np.isnan(stacked).any(axis=0)
+        summed = np.nansum(stacked, axis=0)
+        summed[nan_mask] = np.nan
+        signal_sum = pd.Series(summed, index=signals[0].index, dtype="Float64")
+        return signal_sum.ge(threshold)
 
     raise ValueError(
         f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
@@ -360,6 +386,35 @@ def process_strategy_rules(
             if not isinstance(rule_strict, bool):
                 raise TypeError("strict_column must be a boolean")
 
+            columns = list(indicator_output.columns)
+            prefix_cache: dict[str, str | None] = {}
+            regex_cache: dict[str, str | None] = {}
+
+            def _df_from_prefix(
+                prefix: str,
+                cols=columns,
+                cache=prefix_cache,
+                output: pd.DataFrame = indicator_output,
+            ) -> pd.DataFrame:
+                col = cache.get(prefix)
+                if col is None:
+                    col = next((c for c in cols if c.startswith(prefix)), None)
+                    cache[prefix] = col
+                return output[[col]] if col else output.iloc[:, 0:0]
+
+            def _df_from_regex(
+                name: str,
+                pattern: re.Pattern,
+                cols=columns,
+                cache=regex_cache,
+                output: pd.DataFrame = indicator_output,
+            ) -> pd.DataFrame:
+                col = cache.get(name)
+                if col is None:
+                    col = next((c for c in cols if pattern.search(c)), None)
+                    cache[name] = col
+                return output[[col]] if col else output.iloc[:, 0:0]
+
             def choose_first(
                 df: pd.DataFrame,
                 msg: str,
@@ -391,7 +446,7 @@ def process_strategy_rules(
                 if col_hint in indicator_output.columns:
                     target_series = indicator_output[col_hint]
                 else:
-                    df = indicator_output.filter(regex=col_hint)
+                    df = _df_from_regex(col_hint, re.compile(col_hint))
                     target_series = choose_first(
                         df,
                         f"Requested column '{col_hint}' not found",
@@ -401,14 +456,18 @@ def process_strategy_rules(
                 if band:
                     band = band.lower()
                     if band == "upper":
-                        df = indicator_output.filter(like="BBU")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["bbands"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in BBands output; expected columns like 'BBU_*'",
                             fallback=False,
                         )
                     elif band == "lower":
-                        df = indicator_output.filter(like="BBL")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["bbands"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in BBands output; expected columns like 'BBL_*'",
@@ -420,7 +479,9 @@ def process_strategy_rules(
                                 f"Unknown band '{band}' for Bollinger Bands; defaulting to middle",
                                 stacklevel=2,
                             )
-                        df = indicator_output.filter(like="BBM")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["bbands"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in BBands output; expected columns like 'BBM_*'",
@@ -428,21 +489,27 @@ def process_strategy_rules(
                         )
                 else:
                     if "upper" in condition_type:
-                        df = indicator_output.filter(like="BBU")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["bbands"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in BBands output; expected columns like 'BBU_*'",
                             fallback=False,
                         )
                     elif "lower" in condition_type:
-                        df = indicator_output.filter(like="BBL")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["bbands"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in BBands output; expected columns like 'BBL_*'",
                             fallback=False,
                         )
                     else:
-                        df = indicator_output.filter(like="BBM")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["bbands"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in BBands output; expected columns like 'BBM_*'",
@@ -453,14 +520,18 @@ def process_strategy_rules(
                 if band:
                     band = band.lower()
                     if band == "upper":
-                        df = indicator_output.filter(like="KCU")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["keltner"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in Keltner output; expected columns like 'KCU_*'",
                             fallback=False,
                         )
                     elif band == "lower":
-                        df = indicator_output.filter(like="KCL")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["keltner"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in Keltner output; expected columns like 'KCL_*'",
@@ -472,7 +543,9 @@ def process_strategy_rules(
                                 f"Unknown band '{band}' for Keltner Channels; defaulting to middle",
                                 stacklevel=2,
                             )
-                        df = indicator_output.filter(like="KCM")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["keltner"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in Keltner output; expected columns like 'KCM_*'",
@@ -480,21 +553,27 @@ def process_strategy_rules(
                         )
                 else:
                     if "upper" in condition_type:
-                        df = indicator_output.filter(like="KCU")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["keltner"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in Keltner output; expected columns like 'KCU_*'",
                             fallback=False,
                         )
                     elif "lower" in condition_type:
-                        df = indicator_output.filter(like="KCL")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["keltner"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in Keltner output; expected columns like 'KCL_*'",
                             fallback=False,
                         )
                     else:
-                        df = indicator_output.filter(like="KCM")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["keltner"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in Keltner output; expected columns like 'KCM_*'",
@@ -505,14 +584,18 @@ def process_strategy_rules(
                 if band:
                     band = band.lower()
                     if band == "upper":
-                        df = indicator_output.filter(like="DCU")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["donchian"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in Donchian output; expected columns like 'DCU_*'",
                             fallback=False,
                         )
                     elif band == "lower":
-                        df = indicator_output.filter(like="DCL")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["donchian"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in Donchian output; expected columns like 'DCL_*'",
@@ -524,7 +607,9 @@ def process_strategy_rules(
                                 f"Unknown band '{band}' for Donchian Channels; defaulting to middle",
                                 stacklevel=2,
                             )
-                        df = indicator_output.filter(like="DCM")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["donchian"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in Donchian output; expected columns like 'DCM_*'",
@@ -532,21 +617,27 @@ def process_strategy_rules(
                         )
                 else:
                     if "upper" in condition_type:
-                        df = indicator_output.filter(like="DCU")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["donchian"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in Donchian output; expected columns like 'DCU_*'",
                             fallback=False,
                         )
                     elif "lower" in condition_type:
-                        df = indicator_output.filter(like="DCL")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["donchian"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in Donchian output; expected columns like 'DCL_*'",
                             fallback=False,
                         )
                     else:
-                        df = indicator_output.filter(like="DCM")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["donchian"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in Donchian output; expected columns like 'DCM_*'",
@@ -557,14 +648,18 @@ def process_strategy_rules(
                 if band:
                     band = band.lower()
                     if band == "upper":
-                        df = indicator_output.filter(like="MAE_U")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in MA Envelope output; expected columns like 'MAE_U_*'",
                             fallback=False,
                         )
                     elif band == "lower":
-                        df = indicator_output.filter(like="MAE_L")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in MA Envelope output; expected columns like 'MAE_L_*'",
@@ -576,7 +671,9 @@ def process_strategy_rules(
                                 f"Unknown band '{band}' for MA Envelope; defaulting to middle",
                                 stacklevel=2,
                             )
-                        df = indicator_output.filter(like="MAE_M")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in MA Envelope output; expected columns like 'MAE_M_*'",
@@ -584,21 +681,27 @@ def process_strategy_rules(
                         )
                 else:
                     if "upper" in condition_type:
-                        df = indicator_output.filter(like="MAE_U")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["upper"]
+                        )
                         target_series = choose_first(
                             df,
                             "Upper band not found in MA Envelope output; expected columns like 'MAE_U_*'",
                             fallback=False,
                         )
                     elif "lower" in condition_type:
-                        df = indicator_output.filter(like="MAE_L")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["lower"]
+                        )
                         target_series = choose_first(
                             df,
                             "Lower band not found in MA Envelope output; expected columns like 'MAE_L_*'",
                             fallback=False,
                         )
                     else:
-                        df = indicator_output.filter(like="MAE_M")
+                        df = _df_from_prefix(
+                            INDICATOR_COLUMN_PREFIXES["ma_envelope"]["middle"]
+                        )
                         target_series = choose_first(
                             df,
                             "Middle band not found in MA Envelope output; expected columns like 'MAE_M_*'",
@@ -608,15 +711,11 @@ def process_strategy_rules(
                 if isinstance(indicator_output, pd.Series):
                     target_series = indicator_output
                 else:
-                    hist = indicator_output.filter(
-                        regex=r"(?i)macdh(?:\b|_)|macd[_-]?hist(?:ogram)?"
-                    )
+                    hist = _df_from_regex("macd_hist", MACD_HIST_PATTERN)
                     if hist.shape[1]:
                         target_series = hist.iloc[:, 0]
                     else:
-                        macd_line = indicator_output.filter(
-                            regex=r"(?i)^macd(?:\b|_)(?!h|s)"
-                        )
+                        macd_line = _df_from_regex("macd_line", MACD_LINE_PATTERN)
                         if macd_line.shape[1]:
                             target_series = macd_line.iloc[:, 0]
                         elif indicator_output.shape[1]:
@@ -631,7 +730,7 @@ def process_strategy_rules(
                 if col and col in indicator_output.columns:
                     target_series = indicator_output[col]
                 else:
-                    df = indicator_output.filter(like="ADX")
+                    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["adx"]["main"])
                     target_series = choose_first(
                         df,
                         "ADX column not found",
@@ -642,7 +741,7 @@ def process_strategy_rules(
                 if col and col in indicator_output.columns:
                     target_series = indicator_output[col]
                 else:
-                    df = indicator_output.filter(like="STOCHk")
+                    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["stoch"]["k"])
                     target_series = choose_first(
                         df,
                         "%K column not found in Stochastic output; expected columns like 'STOCHk_*'",
@@ -653,7 +752,9 @@ def process_strategy_rules(
                 if col and col in indicator_output.columns:
                     target_series = indicator_output[col]
                 else:
-                    df = indicator_output.filter(like="IKS")
+                    df = _df_from_prefix(
+                        INDICATOR_COLUMN_PREFIXES["ichimoku"]["baseline"]
+                    )
                     target_series = choose_first(
                         df,
                         "Baseline column not found in Ichimoku output; expected columns like 'IKS_*'",
@@ -680,7 +781,7 @@ def process_strategy_rules(
                 if col and col in indicator_output.columns:
                     target_series = indicator_output[col]
                 else:
-                    df = indicator_output.filter(regex=r"(?i)^TRIX(?!s)")
+                    df = _df_from_regex("trix_line", TRIX_LINE_PATTERN)
                     target_series = choose_first(
                         df,
                         "TRIX line not found; expected columns like 'TRIX_*'",
