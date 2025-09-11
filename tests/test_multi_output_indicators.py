@@ -37,6 +37,7 @@ def _run_rule(df, indicator_name, output_df, condition, entry_extra=None):
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(indicator_library, f"calculate_{indicator_name}", func)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, indicator_name, func)
+    monkeypatch.setitem(indicator_library.INDICATOR_REGISTRY, indicator_name, func)
     rules = {
         "entry_rules": {
             **(entry_extra or {}),
@@ -204,6 +205,88 @@ def test_trix_defaults_to_trix_line():
         {"type": "indicator_is_above_value", "value": 1},
     )
     assert entries.iloc[-1]
+
+
+@pytest.mark.parametrize(
+    "indicator_name,prefixes",
+    [
+        ("bbands", strategy_engine.INDICATOR_COLUMN_PREFIXES["bbands"]),
+        ("keltner", strategy_engine.INDICATOR_COLUMN_PREFIXES["keltner"]),
+        ("donchian", strategy_engine.INDICATOR_COLUMN_PREFIXES["donchian"]),
+    ],
+)
+def test_band_hint_and_strict_column(indicator_name, prefixes):
+    df = pd.DataFrame(
+        {
+            f"{prefixes['upper']}_20": [5, 5, 5, 5],
+            f"{prefixes['middle']}_20": [0, 1, 2, 3],
+            f"{prefixes['lower']}_20": [0, 0, 0, 0],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+    series = strategy_engine.select_indicator_series(
+        indicator_name,
+        df,
+        {"type": "price_is_above_indicator", "band": "lower"},
+        True,
+    )
+    pd.testing.assert_series_equal(series, df[f"{prefixes['lower']}_20"])
+
+    with pytest.raises(KeyError):
+        strategy_engine.select_indicator_series(
+            indicator_name,
+            df.drop(columns=f"{prefixes['upper']}_20"),
+            {"type": "price_is_above_indicator", "band": "upper"},
+            True,
+        )
+
+    with pytest.warns(UserWarning):
+        series_fb = strategy_engine.select_indicator_series(
+            indicator_name,
+            df.drop(columns=f"{prefixes['upper']}_20"),
+            {"type": "price_is_above_indicator", "band": "upper"},
+            False,
+        )
+    pd.testing.assert_series_equal(
+        series_fb, df.drop(columns=f"{prefixes['upper']}_20").iloc[:, 0]
+    )
+
+
+def test_macd_hist_default_and_strict_column():
+    df = pd.DataFrame(
+        {
+            "MACDh_12_26_9": [0, 1, 2, 3],
+            "MACD_12_26_9": [0, 0, 0, 0],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="D"),
+    )
+    series = strategy_engine.select_indicator_series(
+        "macd", df, {"type": "indicator_is_above_value"}, True
+    )
+    pd.testing.assert_series_equal(series, df["MACDh_12_26_9"])
+
+    with pytest.raises(KeyError):
+        strategy_engine.select_indicator_series(
+            "macd",
+            df,
+            {
+                "type": "indicator_is_above_value",
+                "column": "bogus",
+            },
+            True,
+        )
+
+    with pytest.warns(UserWarning):
+        series_fb = strategy_engine.select_indicator_series(
+            "macd",
+            df,
+            {
+                "type": "indicator_is_above_value",
+                "column": "bogus",
+            },
+            False,
+        )
+    pd.testing.assert_series_equal(series_fb, df.iloc[:, 0])
 
 
 def test_strict_column_false_falls_back():
