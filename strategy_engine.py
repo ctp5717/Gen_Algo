@@ -24,6 +24,7 @@ import logging
 import math
 import re
 import warnings
+import weakref
 from typing import Any, Callable
 
 import numpy as np
@@ -73,11 +74,13 @@ TRIX_LINE_PATTERN = re.compile(r"(?i)^TRIX(?!s)")
 
 
 # Global cache for indicator outputs keyed by
-# (indicator_name, params_tuple, data_id, columns)
-_INDICATOR_CACHE: dict[
-    tuple[str, tuple[tuple[str, Any], ...], int, tuple[str, ...]],
-    pd.Series | pd.DataFrame,
-] = {}
+# (indicator_name, params_tuple, data_id, columns). Each cache entry stores a
+# weak reference to the original DataFrame so we can verify that the cached
+# result was produced for the same object even if Python reuses ``id`` values
+# after garbage collection.
+CacheKey = tuple[str, tuple[tuple[str, Any], ...], int, tuple[str, ...]]
+CacheVal = tuple[weakref.ReferenceType[pd.DataFrame], pd.Series | pd.DataFrame]
+_INDICATOR_CACHE: dict[CacheKey, CacheVal] = {}
 
 
 def clear_indicator_cache() -> None:
@@ -633,11 +636,15 @@ def process_strategy_rules(
             id(ohlc_data),  # different data -> different cache bucket
             tuple(ohlc_data.columns),
         )
-        if key in _INDICATOR_CACHE:
-            indicator_output = _INDICATOR_CACHE[key]
+        cache_entry = _INDICATOR_CACHE.get(key)
+        if cache_entry is not None:
+            data_ref, indicator_output = cache_entry
+            if data_ref() is not ohlc_data:
+                indicator_output = indicator_func(ohlc_data, **norm_params)
+                _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
         else:
             indicator_output = indicator_func(ohlc_data, **norm_params)
-            _INDICATOR_CACHE[key] = indicator_output
+            _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
         condition_type = condition_logic.get("type")
 
         target_series = select_indicator_series(
