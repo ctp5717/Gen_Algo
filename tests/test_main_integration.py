@@ -11,7 +11,9 @@ sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
-sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
+sys.modules.setdefault(
+    "vectorbt", types.SimpleNamespace(__version__="0", __file__=__file__)
+)
 
 import main  # noqa: E402
 
@@ -99,7 +101,7 @@ def test_main_runs(monkeypatch):
     )
 
     monkeypatch.setattr(
-        main.config,
+        main,
         "STRATEGY_RULES",
         {"entry_rules": {"combination_logic": "AND", "conditions": []}},
         raising=False,
@@ -137,7 +139,7 @@ def test_main_runs(monkeypatch):
     monkeypatch.setattr(main.config, "TIMEFRAME", "1d", raising=False)
     monkeypatch.setattr(main.config, "AUTO_TUNE_ENABLED", False, raising=False)
     monkeypatch.setattr(
-        main.config,
+        main,
         "STRATEGY_RULES",
         {"entry_rules": {"combination_logic": "AND", "conditions": []}},
         raising=False,

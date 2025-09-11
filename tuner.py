@@ -10,6 +10,7 @@ import fitness
 import strategy_engine as engine
 import trade_floor
 from params_resolver import inject_genes_into_rules
+from strategy_rules import STRATEGY_RULES
 
 
 def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
@@ -71,14 +72,14 @@ def _evaluate_on_validation(solution, gene_map, val_data):
             "Tuner: using trade_floor_policy=soft_penalty (multiplicative) for validation."
         )
         evaluator = fitness.MultiAssetFitnessEvaluator(
-            val_data, config.STRATEGY_RULES, gene_map, settings
+            val_data, STRATEGY_RULES, gene_map, settings
         )
         return evaluator(None, solution, 0)
 
     if val_data is None or val_data.empty:
         return -np.inf
 
-    rules = inject_genes_into_rules(config.STRATEGY_RULES, gene_map, solution)
+    rules = inject_genes_into_rules(STRATEGY_RULES, gene_map, solution)
     entries = engine.process_strategy_rules(val_data, rules)
     if entries.sum() < 1:
         return -np.inf
@@ -139,7 +140,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 settings["trade_floor_policy"] = "soft_penalty"
                 settings["soft_penalty_mode"] = "multiplicative"
                 evaluator = fitness.MultiAssetFitnessEvaluator(
-                    train_data, config.STRATEGY_RULES, gene_map, settings
+                    train_data, STRATEGY_RULES, gene_map, settings
                 )
                 probe = pygad.GA(
                     num_generations=config.MULTI_ASSET.get(
@@ -176,7 +177,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     settings["trade_floor_policy"] = "soft_penalty"
                     settings["soft_penalty_mode"] = "multiplicative"
                     evaluator = fitness.MultiAssetFitnessEvaluator(
-                        train_data, config.STRATEGY_RULES, gene_map, settings
+                        train_data, STRATEGY_RULES, gene_map, settings
                     )
                     mutation_kwargs = {"mutation_num_genes": 0}
                     if mutation_kwargs["mutation_num_genes"] == 0:
@@ -210,7 +211,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 print(f"Selected λ={best_lam}")
 
     fitness_evaluator = fitness.get_fitness_evaluator(
-        train_data, config.STRATEGY_RULES, gene_map
+        train_data, STRATEGY_RULES, gene_map
     )
     fitness_func = fitness_evaluator.__call__
     num_cores = os.cpu_count()
