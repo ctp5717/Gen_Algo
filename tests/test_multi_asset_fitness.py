@@ -23,6 +23,7 @@ import config as cfg  # noqa: E402
 import data_loader  # noqa: E402
 import fitness  # noqa: E402
 import tuner  # noqa: E402
+from utils.math import weighted_mean_std  # noqa: E402
 
 
 def _make_evaluator(settings=None, stats_list=None):
@@ -54,7 +55,7 @@ def _make_evaluator(settings=None, stats_list=None):
 def test_dispersion_math_sanity():
     vals = np.array([1.6, 1.0, 0.4], dtype=float)
     w = np.array([1 / 3, 1 / 3, 1 / 3], dtype=float)
-    mu, sigma = fitness.weighted_mean_std(vals, w)
+    mu, sigma = weighted_mean_std(vals, w)
     assert np.isclose(mu, 1.0, atol=1e-6)
     assert np.isclose(sigma, 0.4898979, atol=1e-6)
     lam = 0.25
@@ -437,7 +438,7 @@ def test_lambda_with_unequal_weights():
     }
     ev = _make_evaluator(settings, stats)
     score = ev(None, [], 0)
-    mu, sigma = fitness.weighted_mean_std([1.5, 1.0, 0.5], [0.6, 0.3, 0.1])
+    mu, sigma = weighted_mean_std([1.5, 1.0, 0.5], [0.6, 0.3, 0.1])
     expected = mu - 0.25 * sigma
     assert np.isclose(score, expected)
 
