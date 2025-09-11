@@ -263,6 +263,12 @@ MULTI_ASSET = {
     "trading_days_per_year": 252,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 50,
+    # Parallel evaluation of per-asset statistics
+    "parallel": {
+        "enabled": False,  # when True uses concurrent.futures
+        "backend": "thread",  # "thread" or "process"
+        "max_workers": None,
+    },
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs
