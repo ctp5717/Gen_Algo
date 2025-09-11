@@ -374,11 +374,12 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
 * **Status:** **In Progress**
 * **Features:**
     * **Portfolio-Level Optimization Engine:** ✅ Complete.
+        * *Uses a multi-asset system that measures fitness across a group of assets, with a goal to avoid over-fitting strategies to a single asset.
     * **Advanced Combination Logic:** ✅ Complete.
         * *`strategy_engine.py` now supports `AND`, `OR`, and `VOTE` (N-of-M) logic for combining indicator conditions, providing more flexible entry signals.*
     * **Strategy Recommendation Engine:** (Planned)
         * *Turns multi-asset backtests and walk-forward validation into a single, production-ready trading strategy recommendation with a confidence score, asset stance, and clear rationale.
-    * **Complete Indicator Library:** (Planned)
+    * **Complete Indicator Library:** ✅ Complete.
         * *This is the process of building out the remaining functions in `indicator_library.py` to include all 25 indicators we originally planned. This gives the AI the widest possible set of tools to build strategies with, increasing the potential for discovering novel patterns.*
 
 ---
