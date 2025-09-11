@@ -191,12 +191,12 @@ WALK_FORWARD_SETTINGS = {
 # Default to discovery-run settings but allow quick-test overrides via env.
 if os.getenv("GA_QUICK_TEST", "").lower() in {"1", "true", "yes"}:
     GA_POPULATION_SIZE = 50
-    GA_NUM_GENERATIONS = 30
+    GA_NUM_GENERATIONS = 25
     GA_PARENTS_MATING = 20
     GA_MUTATION_NUM_GENES = 1
 else:
     GA_POPULATION_SIZE = 200
-    GA_NUM_GENERATIONS = 100
+    GA_NUM_GENERATIONS = 50
     GA_PARENTS_MATING = 50
     GA_MUTATION_NUM_GENES = 3  # Mutate more genes with a more complex strategy
 
@@ -238,7 +238,7 @@ MULTI_ASSET = {
     # Seeds used when re-scoring lambda candidates without mutation
     "lambda_rescore_seeds": [SEED, SEED + 1, SEED + 2],
     # Number of GA generations to run when sweeping or rescoring lambda
-    "lambda_grid_generations": 5,
+    "lambda_grid_generations": 10,
     # Which per-asset metric to aggregate; typically "composite"
     "metric": "composite",  # composite | sortino | profit_factor | return
     # Profit factor cap to avoid outliers
