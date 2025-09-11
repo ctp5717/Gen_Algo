@@ -6,6 +6,12 @@ This project is a sophisticated and highly configurable Python-based framework f
 
 The core philosophy is a modular, "batteries-included" design that separates the strategy logic, data handling, and optimization engine. This allows for rapid experimentation and robust validation of new trading ideas.
 
+### Documentation
+
+- [Getting Started](docs/getting_started.md) – installation and basic usage.
+- [Architecture](docs/architecture.md) – module relationships for developers.
+- [Agents Guide](AGENTS.md) – instructions for automated contributors.
+
 ### Key Features (Current Version 1.2)
 
   * **Genetic Algorithm Core:** Uses the `pygad` library to optimize strategy parameters across a multi-generational process.
