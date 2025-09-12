@@ -9,3 +9,4 @@ pandas-ta>=0.4.67b0
 setuptools>=80
 python-dateutil>=2.9.0.post0
 matplotlib>=3.10
+pydantic>=2,<3

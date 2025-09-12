@@ -30,6 +30,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+import config
 import indicator_library as ind_lib  # Import our toolbox of indicators
 
 logger = logging.getLogger(__name__)
@@ -81,11 +82,20 @@ TRIX_LINE_PATTERN = re.compile(r"(?i)^TRIX(?!s)")
 CacheKey = tuple[str, tuple[tuple[str, Any], ...], int, tuple[str, ...]]
 CacheVal = tuple[weakref.ReferenceType[pd.DataFrame], pd.Series | pd.DataFrame]
 _INDICATOR_CACHE: dict[CacheKey, CacheVal] = {}
+_CACHE_HITS = 0
+_CACHE_MISSES = 0
 
 
 def clear_indicator_cache() -> None:
-    """Clear the indicator output cache."""
+    """Clear the indicator output cache and reset counters."""
     _INDICATOR_CACHE.clear()
+    global _CACHE_HITS, _CACHE_MISSES
+    _CACHE_HITS = 0
+    _CACHE_MISSES = 0
+
+
+def cache_stats() -> dict[str, int]:
+    return {"hits": _CACHE_HITS, "misses": _CACHE_MISSES, "size": len(_INDICATOR_CACHE)}
 
 
 # Mapping of condition strings to comparison or vectorbt crossover functions
@@ -415,7 +425,8 @@ def _combine_signals(
     signals: list[pd.Series],
     combination_logic: str,
     vote_threshold: int | None = None,
-    treat_nan_as_false: bool = True,
+    nan_policy: str = "FALSE",
+    ffill_lookback: int | None = None,
 ) -> pd.Series:
     """Combine individual condition signals into a final entry signal.
 
@@ -428,9 +439,12 @@ def _combine_signals(
     vote_threshold : int, optional
         Minimum number of conditions that must be true when using
         ``combination_logic="VOTE"``.  ``None`` defaults to a majority.
-    treat_nan_as_false : bool, optional
-        Whether to replace NaNs with ``False`` before combining.  Defaults to
-        ``True``; set to ``False`` to allow NaNs to propagate to the result.
+    nan_policy : str, optional
+        "FALSE" replaces NaNs with ``False``; "PROPAGATE" allows NaNs to
+        propagate; "FORWARD_FILL" forward-fills each series (respecting
+        ``ffill_lookback``) then replaces remaining NaNs with ``False``.
+    ffill_lookback : int, optional
+        Maximum bars to forward-fill when ``nan_policy`` is "FORWARD_FILL".
     """
 
     if not signals:
@@ -439,10 +453,23 @@ def _combine_signals(
     idx = signals[0].index
     name = signals[0].name
 
-    if treat_nan_as_false:
+    policy = nan_policy.upper()
+    limit = None if ffill_lookback == 0 else ffill_lookback
+    if policy == "FORWARD_FILL":
+        filled = [s.ffill(limit=limit).fillna(False) for s in signals]
+        arr = np.stack([s.to_numpy(dtype=bool, copy=False) for s in filled])
+        treat_nan_as_false = True
+    elif policy == "FALSE":
         arr = np.stack(
             [s.fillna(False).to_numpy(dtype=bool, copy=False) for s in signals]
         )
+        treat_nan_as_false = True
+    elif policy == "PROPAGATE":
+        arr = np.stack([s.to_numpy(dtype=float, copy=False) for s in signals])
+        treat_nan_as_false = False
+    else:
+        raise ValueError("nan_policy must be FALSE, PROPAGATE, or FORWARD_FILL")
+    if treat_nan_as_false:
         if combination_logic == "AND":
             combined = np.logical_and.reduce(arr, axis=0)
             return pd.Series(combined, index=idx, name=name)
@@ -458,46 +485,32 @@ def _combine_signals(
                 raise ValueError(
                     "vote_threshold must be between 1 and the number of active conditions"
                 )
-            payload = {
-                "logic": "VOTE",
-                "M": M,
-                "k": threshold,
-                "treat_nan_as_false": treat_nan_as_false,
-            }
+            payload = {"logic": "VOTE", "M": M, "k": threshold, "nan_policy": policy}
             logger.info(payload)
             votes = np.sum(arr, axis=0)
             return pd.Series(votes >= threshold, index=idx)
 
-    else:
-        arr = np.stack([s.to_numpy(dtype=float, copy=False) for s in signals])
-        has_nan = np.isnan(arr).any(axis=0)
-        if combination_logic == "AND":
-            has_false = (arr == 0).any(axis=0)
-            combined = np.where(has_false, False, np.where(has_nan, np.nan, True))
-            return pd.Series(combined, index=idx, dtype="boolean", name=name)
-        if combination_logic == "OR":
-            has_true = (arr == 1).any(axis=0)
-            combined = np.where(has_true, True, np.where(has_nan, np.nan, False))
-            return pd.Series(combined, index=idx, dtype="boolean", name=name)
-        if combination_logic == "VOTE":
-            M = arr.shape[0]
-            threshold = (
-                vote_threshold if vote_threshold is not None else math.ceil(M / 2)
+    has_nan = np.isnan(arr).any(axis=0)
+    if combination_logic == "AND":
+        has_false = (arr == 0).any(axis=0)
+        combined = np.where(has_false, False, np.where(has_nan, np.nan, True))
+        return pd.Series(combined, index=idx, dtype="boolean", name=name)
+    if combination_logic == "OR":
+        has_true = (arr == 1).any(axis=0)
+        combined = np.where(has_true, True, np.where(has_nan, np.nan, False))
+        return pd.Series(combined, index=idx, dtype="boolean", name=name)
+    if combination_logic == "VOTE":
+        M = arr.shape[0]
+        threshold = vote_threshold if vote_threshold is not None else math.ceil(M / 2)
+        if threshold < 1 or threshold > M:
+            raise ValueError(
+                "vote_threshold must be between 1 and the number of active conditions"
             )
-            if threshold < 1 or threshold > M:
-                raise ValueError(
-                    "vote_threshold must be between 1 and the number of active conditions"
-                )
-            payload = {
-                "logic": "VOTE",
-                "M": M,
-                "k": threshold,
-                "treat_nan_as_false": treat_nan_as_false,
-            }
-            logger.info(payload)
-            votes = np.sum(arr, axis=0)
-            series = pd.Series(votes, index=idx, dtype="Float64")
-            return series.ge(threshold)
+        payload = {"logic": "VOTE", "M": M, "k": threshold, "nan_policy": policy}
+        logger.info(payload)
+        votes = np.sum(arr, axis=0)
+        series = pd.Series(votes, index=idx, dtype="Float64")
+        return series.ge(threshold)
 
     raise ValueError(
         f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
@@ -523,6 +536,9 @@ def process_strategy_rules(
     pd.Series or (pd.Series, dict)
         Combined entry signals and optionally per-condition counts.
     """
+    global _CACHE_HITS, _CACHE_MISSES
+    if config.CACHE_GUARDRAILS.get("clear_cache_between_assets"):
+        clear_indicator_cache()
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
     combination_logic = entry_rules.get("combination_logic", "AND")
@@ -540,10 +556,19 @@ def process_strategy_rules(
     vote_threshold = entry_rules.get("vote_threshold")
     if isinstance(vote_threshold, dict):
         vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
-    treat_nan_as_false = entry_rules.get("treat_nan_as_false", True)
+    nan_policy = entry_rules.get("nan_policy", config.NAN_POLICY)
+    ffill_lookback = entry_rules.get("ffill_lookback", config.NAN_FFILL_LOOKBACK)
     strict_column = entry_rules.get("strict_column", True)
     if not isinstance(strict_column, bool):
         raise TypeError("strict_column must be a boolean")
+    if not isinstance(nan_policy, str):
+        raise TypeError("nan_policy must be a string")
+    nan_policy_u = nan_policy.upper()
+    if nan_policy_u not in {"FALSE", "PROPAGATE", "FORWARD_FILL"}:
+        raise ValueError("nan_policy must be FALSE, PROPAGATE, or FORWARD_FILL")
+    if not isinstance(ffill_lookback, int):
+        raise TypeError("ffill_lookback must be an integer")
+    ffill_limit = None if ffill_lookback == 0 else ffill_lookback
 
     active_conds = [c for c in conditions if c.get("is_active", True)]
     used_inds = {c.get("indicator", "").lower() for c in active_conds}
@@ -589,8 +614,6 @@ def process_strategy_rules(
 
     if vote_threshold is not None and not isinstance(vote_threshold, int):
         raise TypeError("vote_threshold must be an integer or None")
-    if not isinstance(treat_nan_as_false, bool):
-        raise TypeError("treat_nan_as_false must be a boolean")
 
     if vote_threshold is not None:
         assert (
@@ -638,13 +661,20 @@ def process_strategy_rules(
         )
         cache_entry = _INDICATOR_CACHE.get(key)
         if cache_entry is not None:
+            _CACHE_HITS += 1
             data_ref, indicator_output = cache_entry
             if data_ref() is not ohlc_data:
                 indicator_output = indicator_func(ohlc_data, **norm_params)
                 _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
         else:
+            _CACHE_MISSES += 1
             indicator_output = indicator_func(ohlc_data, **norm_params)
-            _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
+            guard = config.CACHE_GUARDRAILS
+            if (
+                len(_INDICATOR_CACHE) < guard["MAX_CACHE_KEYS"]
+                and len(ohlc_data) <= guard["MAX_CACHE_ROWS"]
+            ):
+                _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
         condition_type = condition_logic.get("type")
 
         target_series = select_indicator_series(
@@ -661,12 +691,18 @@ def process_strategy_rules(
                 target_series, condition_logic
             )
 
-        signals.append(individual_signal)
+        if nan_policy_u == "FORWARD_FILL":
+            individual_signal = individual_signal.ffill(limit=ffill_limit)
+        signals.append(
+            individual_signal.fillna(False)
+            if nan_policy_u == "FALSE" or nan_policy_u == "FORWARD_FILL"
+            else individual_signal.astype("boolean")
+        )
         if collect_counts:
             name = canonical_rule_label(rule)
             val = (
                 individual_signal.fillna(False)
-                if treat_nan_as_false
+                if nan_policy_u != "PROPAGATE"
                 else individual_signal
             )
             counts[name] = int(pd.Series(val, dtype="boolean").sum(skipna=True))
@@ -677,12 +713,15 @@ def process_strategy_rules(
 
     if len(signals) == 1:
         single = signals[0]
-        result = (
-            single.fillna(False) if treat_nan_as_false else single.astype("boolean")
-        )
-        return (result, counts) if collect_counts else result
+        if nan_policy_u == "FORWARD_FILL":
+            single = single.ffill(limit=ffill_limit).fillna(False)
+        elif nan_policy_u == "FALSE":
+            single = single.fillna(False)
+        else:
+            single = single.astype("boolean")
+        return (single, counts) if collect_counts else single
 
     combined = _combine_signals(
-        signals, combination_logic, vote_threshold, treat_nan_as_false
+        signals, combination_logic, vote_threshold, nan_policy_u, ffill_lookback
     )
     return (combined, counts) if collect_counts else combined

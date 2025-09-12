@@ -282,18 +282,24 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
 
     pool = []
     # Discard case
-    pool = walk_forward._update_champion_pool(pool, [0], 0.1, gene_space, settings)
-    assert pool == []
+    pool, status = walk_forward._update_champion_pool(
+        pool, [0], 0.1, gene_space, settings
+    )
+    assert pool == [] and status == "Discarded"
     assert "discarded" in capsys.readouterr().out.lower()
 
     # Keep case
-    pool = walk_forward._update_champion_pool(pool, [0], 0.7, gene_space, settings)
-    assert len(pool) == 1
+    pool, status = walk_forward._update_champion_pool(
+        pool, [0], 0.7, gene_space, settings
+    )
+    assert len(pool) == 1 and status == "Viable"
     assert "kept" in capsys.readouterr().out.lower()
 
     # Clone case
-    pool = walk_forward._update_champion_pool(pool, [1], 1.2, gene_space, settings)
-    assert len(pool) == 1 + 1 + settings["num_clones"]
+    pool, status = walk_forward._update_champion_pool(
+        pool, [1], 1.2, gene_space, settings
+    )
+    assert len(pool) == 1 + 1 + settings["num_clones"] and status == "Elite"
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
 

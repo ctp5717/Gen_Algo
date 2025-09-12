@@ -511,11 +511,18 @@ def main():
                 wf_data = {t: df.loc[wf_start:wf_end] for t, df in all_data.items()}
             else:
                 wf_data = all_data.loc[wf_start:wf_end]
-            walk_forward.run_walk_forward_validation(
+            result = walk_forward.run_walk_forward_validation(
                 run_dir,
                 initial_champions=[best_solution],
                 data=wf_data,
             )
+            if result is not None:
+                try:
+                    import recommendation
+
+                    recommendation.generate_recommendation({"run_dir": run_dir})
+                except Exception as e:
+                    print(f"Recommendation engine failed: {e}")
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")
             traceback.print_exc()
