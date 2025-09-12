@@ -28,12 +28,12 @@ PREFLIGHT_ALL_INDICATORS = False
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"
 
-# Binance API credentials are now loaded from environment variables so the
+# Binance connection settings are loaded from environment variables so the
 # repository never contains sensitive information.  Provide empty-string
 # placeholders if the variables are not set.
+BINANCE_TLD = os.environ.get("BINANCE_TLD", "us")
 API_KEYS = {
     "binance": {
-        "tld": os.environ.get("BINANCE_TLD", "us"),
         "api_key": os.environ.get("BINANCE_API_KEY", ""),
         "api_secret": os.environ.get("BINANCE_API_SECRET", ""),
     }
