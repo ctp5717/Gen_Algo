@@ -5,35 +5,9 @@ from __future__ import annotations
 import copy
 import logging
 
+from indicator_library import INDICATOR_CONSTRAINTS
+
 logger = logging.getLogger(__name__)
-
-MACD_REPAIR_COUNT = 0
-
-
-def _normalize_macd_params(params: dict) -> dict:
-    """Ensure MACD params satisfy fast < slow and 1 <= signal < slow."""
-    fast, slow, signal = (
-        params.get("fast"),
-        params.get("slow"),
-        params.get("signal"),
-    )
-    if fast is None or slow is None or signal is None:
-        raise ValueError("MACD params must be non-null: fast, slow, signal")
-    original = (fast, slow, signal)
-    if slow <= fast:
-        slow = fast + 1
-    if signal < 1:
-        signal = 1
-    if signal >= slow:
-        signal = slow - 1
-    fast, slow, signal = int(fast), int(slow), int(signal)
-    params.update({"fast": fast, "slow": slow, "signal": signal})
-    repaired = (fast, slow, signal)
-    if repaired != original:
-        logger.debug("Repaired MACD params %s -> %s", original, repaired)
-        global MACD_REPAIR_COUNT
-        MACD_REPAIR_COUNT += 1
-    return params
 
 
 def inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
@@ -65,19 +39,20 @@ def inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) ->
             current_level = current_level[key]
         current_level[path[-1]] = gene_value
 
-    def _apply_macd_repair(obj):
+    def _apply_constraints(obj):
         if isinstance(obj, dict):
-            if obj.get("indicator") == "macd":
+            ind = obj.get("indicator")
+            if ind:
                 params = obj.get("params", {})
-                if {"fast", "slow", "signal"} <= params.keys():
-                    _normalize_macd_params(params)
+                for c in INDICATOR_CONSTRAINTS.get(ind.lower(), []):
+                    c.enforce(params)
             for val in obj.values():
-                _apply_macd_repair(val)
+                _apply_constraints(val)
         elif isinstance(obj, list):
             for item in obj:
-                _apply_macd_repair(item)
+                _apply_constraints(item)
 
-    _apply_macd_repair(injected_rules)
+    _apply_constraints(injected_rules)
     return injected_rules
 
 

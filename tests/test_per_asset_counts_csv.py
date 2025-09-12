@@ -14,7 +14,7 @@ def test_per_asset_counts_columns_defaults_and_sorting():
         "asset",
         "combination_logic",
         "vote_threshold",
-        "treat_nan_as_false",
+        "nan_policy",
     ] + [f"count_{s}" for s in slugs]
     assert list(df.columns) == expected_cols
     # Rows should be sorted by asset name
@@ -62,7 +62,7 @@ def test_slug_collision_unique():
         "asset",
         "combination_logic",
         "vote_threshold",
-        "treat_nan_as_false",
+        "nan_policy",
         "count_ema_price_is_above_indicator",
         "count_ema_price_is_above_indicator__1",
     ]

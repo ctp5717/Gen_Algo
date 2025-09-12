@@ -68,8 +68,10 @@
     - Combines conditions by case-insensitive `combination_logic` (`AND`/`OR`/`VOTE`, default `AND`).
       `VOTE` uses a majority threshold when `vote_threshold` is `None`; values
       outside `1..N` raise. With a single condition all modes behave identically.
-      NaNs in signals default to `False`; set `treat_nan_as_false=False` in
-      `entry_rules` to propagate them instead.
+      NaNs in signals default to `False`; configure `nan_policy` to `PROPAGATE` or
+      `FORWARD_FILL` in `entry_rules` to propagate them instead. Forward-fill
+      respects `ffill_lookback` (global `config.NAN_FFILL_LOOKBACK`; `0`
+      means unlimited).
   - Handles **multi-output indicators** (pick the right column).
 
 - `gene_parser.py` – Finds all **active** gene definitions, including top-level

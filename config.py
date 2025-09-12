@@ -290,6 +290,47 @@ CHARTS = {
     "save_csv": True,
 }
 
+# Settings for the Strategy Recommendation Engine.
+RECOMMENDATION = {
+    "MEDIAN_TARGET": 1.5,
+    "TAIL_PENALTY_REF": 2.0,
+    "DOWNSIDE_REF": 1.0,
+    "WEIGHTS": {
+        "median": 0.35,
+        "consistency": 0.35,
+        "tail": 0.15,
+        "downside": 0.15,
+    },
+    "CATEGORY_CUTOFFS": {"high": 80, "medium": 50},
+    "MIN_TRADES_FOR_SAMPLE": 3,
+    "MIN_SAMPLES_FOR_ASSET": 3,
+    "PARAM_COV_UNSTABLE": 0.5,
+    "PARAM_COV_WATCHLIST": 0.35,
+    "USE_RETURN_AS_FITNESS": False,
+    "ASSET_CLASS_THRESHOLDS": {
+        "star": {"performance": 1.0, "consistency": 70},
+        "stalwart": {
+            "performance_low": 0.0,
+            "performance_high": 1.0,
+            "consistency": 60,
+        },
+        "gamble": {"performance": 1.0, "consistency": 50},
+        "drag": {"performance": 0.0, "consistency": 50},
+    },
+}
+
+# Global NaN handling policy for signal combination. Individual rule sets may
+# override ``nan_policy`` and ``ffill_lookback``.
+NAN_POLICY = "FALSE"  # FALSE | PROPAGATE | FORWARD_FILL
+NAN_FFILL_LOOKBACK = 0  # 0 disables the lookback cap
+
+# Simple guardrails for the indicator cache used by ``strategy_engine``.
+CACHE_GUARDRAILS = {
+    "MAX_CACHE_KEYS": 1000,
+    "MAX_CACHE_ROWS": 1_000_000,
+    "clear_cache_between_assets": False,
+}
+
 # Settings controlling how walk-forward champions are kept or discarded
 CHAMPION_SELECTION_SETTINGS = {
     # Minimum validation fitness required for a champion to survive

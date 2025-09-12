@@ -42,10 +42,12 @@ def test_vote_threshold_none_and_casing(monkeypatch, comb_logic, caplog):
     captured = {}
     orig = strategy_engine._combine_signals
 
-    def spy(signals, combination_logic, vote_threshold, treat_nan_as_false):
+    def spy(
+        signals, combination_logic, vote_threshold, nan_policy, ffill_lookback=None
+    ):
         captured["combination_logic"] = combination_logic
         captured["vote_threshold"] = vote_threshold
-        return orig(signals, combination_logic, vote_threshold, treat_nan_as_false)
+        return orig(signals, combination_logic, vote_threshold, nan_policy)
 
     monkeypatch.setattr(strategy_engine, "_combine_signals", spy)
 
@@ -65,7 +67,7 @@ def test_vote_threshold_none_and_casing(monkeypatch, comb_logic, caplog):
         "logic": "VOTE",
         "M": 2,
         "k": 1,
-        "treat_nan_as_false": True,
+        "nan_policy": "FALSE",
     }
 
     # Expect majority threshold (ceil(2/2) == 1) and sanitized logic
@@ -114,10 +116,12 @@ def test_vote_threshold_exceeds_active(monkeypatch, caplog):
     captured = {}
     orig = strategy_engine._combine_signals
 
-    def spy(signals, combination_logic, vote_threshold, treat_nan_as_false):
+    def spy(
+        signals, combination_logic, vote_threshold, nan_policy, ffill_lookback=None
+    ):
         captured["combination_logic"] = combination_logic
         captured["vote_threshold"] = vote_threshold
-        return orig(signals, combination_logic, vote_threshold, treat_nan_as_false)
+        return orig(signals, combination_logic, vote_threshold, nan_policy)
 
     monkeypatch.setattr(strategy_engine, "_combine_signals", spy)
 
@@ -141,7 +145,7 @@ def test_vote_threshold_exceeds_active(monkeypatch, caplog):
         "logic": "VOTE",
         "M": 2,
         "k": 2,
-        "treat_nan_as_false": True,
+        "nan_policy": "FALSE",
     }
 
     assert captured["combination_logic"] == "VOTE"
