@@ -83,9 +83,13 @@ ASSET_GROUP = [
     ("Bitcoin", CRYPTO_UNIVERSE["Bitcoin"]),
     ("Ethereum", CRYPTO_UNIVERSE["Ethereum"]),
     ("Solana", CRYPTO_UNIVERSE["Solana"]),
+    ("XRP", CRYPTO_UNIVERSE["XRP"]),
+    ("Cardano", CRYPTO_UNIVERSE["Cardano"]),
     ("Avalanche", CRYPTO_UNIVERSE["Avalanche"]),
+    ("Dogecoin", CRYPTO_UNIVERSE["Dogecoin"]),
     ("Chainlink", CRYPTO_UNIVERSE["Chainlink"]),
-    ("Polygon", CRYPTO_UNIVERSE["Polygon"]),
+    ("Uniswap", CRYPTO_UNIVERSE["Uniswap"]),
+    ("TRON", CRYPTO_UNIVERSE["TRON"]),
 ]
 
 # --- 2. DYNAMIC DATE & TIMEFRAME SETTINGS ---
@@ -196,7 +200,7 @@ if os.getenv("GA_QUICK_TEST", "").lower() in {"1", "true", "yes"}:
     GA_MUTATION_NUM_GENES = 1
 else:
     GA_POPULATION_SIZE = 200
-    GA_NUM_GENERATIONS = 50
+    GA_NUM_GENERATIONS = 100
     GA_PARENTS_MATING = 50
     GA_MUTATION_NUM_GENES = 3  # Mutate more genes with a more complex strategy
 
@@ -208,7 +212,7 @@ HYPERPARAMETER_SEARCH_SPACE = [
     {"sol_per_pop": 100, "num_parents_mating": 30, "mutation_num_genes": 2},
     {"sol_per_pop": 150, "num_parents_mating": 40, "mutation_num_genes": 3},
     {"sol_per_pop": 200, "num_parents_mating": 50, "mutation_num_genes": 4},
-    {"sol_per_pop": 250, "num_parents_mating": 60, "mutation_num_genes": 4},
+    {"sol_per_pop": 250, "num_parents_mating": 60, "mutation_num_genes": 5},
 ]
 
 # --- 5. COMPOSITE FITNESS FUNCTION WEIGHTS ---
