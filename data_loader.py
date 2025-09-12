@@ -61,7 +61,7 @@ def _get_binance_data(
         logger.info(
             "Loading '%s' data from Binance.%s API...",
             ticker,
-            config.API_KEYS["binance"]["tld"],
+            config.BINANCE_TLD,
         )
 
     from binance.client import Client  # type: ignore
@@ -70,7 +70,7 @@ def _get_binance_data(
     client = Client(
         api_key=config.API_KEYS["binance"]["api_key"],
         api_secret=config.API_KEYS["binance"]["api_secret"],
-        tld=config.API_KEYS["binance"]["tld"],
+        tld=config.BINANCE_TLD,
     )
 
     # Fetch the data
