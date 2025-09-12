@@ -12,6 +12,16 @@ The core philosophy is a modular, "batteries-included" design that separates the
 - [Architecture](docs/architecture.md) – module relationships for developers.
 - [Agents Guide](AGENTS.md) – instructions for automated contributors.
 
+### Environment Variables
+
+Copy `.env.example` to `.env` and populate the values before running the framework:
+
+```bash
+cp .env.example .env
+```
+
+Fill in `GA_SEED`, `BINANCE_TLD`, `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `GA_QUICK_TEST`, and `USE_VBT_STUB` with your own settings.
+
 ### Key Features (Current Version 1.2)
 
   * **Genetic Algorithm Core:** Uses the `pygad` library to optimize strategy parameters across a multi-generational process.
