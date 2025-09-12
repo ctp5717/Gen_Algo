@@ -25,7 +25,8 @@ To Add a New Indicator:
    the function name in the `config.py` file.
 """
 
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -40,6 +41,53 @@ if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
 import pandas_ta as ta
+
+
+@dataclass
+class Constraint:
+    kind: str
+    a: str
+    b: str | float
+
+    def enforce(self, params: Dict[str, float]) -> None:
+        va = params.get(self.a)
+        vb = params.get(self.b) if isinstance(self.b, str) else self.b
+        if va is None or vb is None:
+            raise ValueError(f"Missing params for constraint {self}")
+        if self.kind == "GT" and not va > vb:
+            params[self.a] = int(vb) + 1
+        elif self.kind == "GE" and not va >= vb:
+            params[self.a] = int(vb)
+        elif self.kind == "LT" and not va < vb:
+            params[self.a] = int(vb) - 1
+        elif self.kind == "LE" and not va <= vb:
+            params[self.a] = int(vb)
+
+
+def GT(a: str, b: str | float) -> Constraint:
+    return Constraint("GT", a, b)
+
+
+def GE(a: str, b: str | float) -> Constraint:
+    return Constraint("GE", a, b)
+
+
+def LT(a: str, b: str | float) -> Constraint:
+    return Constraint("LT", a, b)
+
+
+INDICATOR_REGISTRY: Dict[str, Callable] = {}
+INDICATOR_CONSTRAINTS: Dict[str, List[Constraint]] = {}
+
+
+def indicator(name: str, constraints: List[Constraint] | None = None):
+    def decorator(func: Callable) -> Callable:
+        INDICATOR_REGISTRY[name] = func
+        if constraints:
+            INDICATOR_CONSTRAINTS[name] = constraints
+        return func
+
+    return decorator
 
 
 def calculate_ema(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
@@ -109,6 +157,10 @@ def calculate_rsi(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
     return rsi_series
 
 
+@indicator(
+    "macd",
+    constraints=[GT("slow", "fast"), GE("signal", 1), LT("signal", "slow")],
+)
 def calculate_macd(
     ohlc_data: pd.DataFrame, fast: int, slow: int, signal: int
 ) -> pd.DataFrame:
@@ -595,14 +647,15 @@ def calculate_roc(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
 
 
 # -- Auto-registration of indicator functions -------------------------------
-INDICATOR_REGISTRY: dict[str, Callable] = {}
 for name, obj in list(globals().items()):
     if (
         name.startswith("calculate_")
         and callable(obj)
         and getattr(obj, "__module__", None) == __name__
     ):
-        INDICATOR_REGISTRY[name[len("calculate_") :]] = obj
+        key = name[len("calculate_") :]
+        if key not in INDICATOR_REGISTRY:
+            INDICATOR_REGISTRY[key] = obj
 # Backward-compatible alias for standard deviation channel
 if "stdev_channel" in INDICATOR_REGISTRY:
     INDICATOR_REGISTRY["stdev"] = INDICATOR_REGISTRY["stdev_channel"]

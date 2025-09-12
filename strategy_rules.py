@@ -6,7 +6,7 @@ STRATEGY_RULES = {
         #   combination_logic (str): "AND" | "OR" | "VOTE" (default "AND")
         #   vote_threshold (int | None): min signals for "VOTE"; ``None`` uses
         #       ``ceil(N/2)`` and values outside ``1..N`` raise ``ValueError``
-        #   treat_nan_as_false (bool): replace NaNs before combining (default True)
+        #   nan_policy (str): "FALSE" (fill), "PROPAGATE", or "FORWARD_FILL"
         #   strict_column (bool): when False, missing columns/bands fall back
         #       to the first available column with a warning (default True).
         #       Individual conditions may override via
@@ -27,7 +27,6 @@ STRATEGY_RULES = {
             "high": 4,
             "step": 1,
         },
-        "treat_nan_as_false": True,
         "conditions": [
             {
                 "is_active": True,  # This rule is ON

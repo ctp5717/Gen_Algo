@@ -152,7 +152,13 @@ def _normalize_trade_floor_penalty(pen: Optional[Any]) -> Dict[str, Any]:
 
 
 def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
-    """Update champion pool based on validation fitness."""
+    """Update champion pool based on validation fitness.
+
+    Returns
+    -------
+    tuple[list, str]
+        Updated pool and champion status (Elite, Viable, Discarded).
+    """
     survival = settings.get("survival_threshold", 0.0)
     cloning = settings.get("cloning_threshold", float("inf"))
     num_clones = settings.get("num_clones", 0)
@@ -160,7 +166,7 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
 
     if validation_score < survival:
         print("Champion discarded due to poor performance.")
-        return pool
+        return pool, "Discarded"
 
     if validation_score >= cloning:
         print("Elite Champion found. Cloning champion.")
@@ -179,11 +185,13 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
                         val = np.random.uniform(low, high)
                     clone[idx] = type(clone[idx])(val)
             pool.append(clone)
+        status = "Elite"
     else:
         print("Viable Champion found and kept for next fold.")
         pool.append(list(best_solution))
+        status = "Viable"
 
-    return pool
+    return pool, status
 
 
 def _round_floats(obj, ndigits: int = 4):
@@ -531,7 +539,7 @@ def run_walk_forward_validation(
                 for t, s, tr in bottom:
                     print(f"  {t}: score={s:.3f}, trades={tr}")
             champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
-            champion_pool = _update_champion_pool(
+            champion_pool, champ_status = _update_champion_pool(
                 champion_pool,
                 best_solution,
                 validation_score,
@@ -552,6 +560,7 @@ def run_walk_forward_validation(
                     "Assets Traded": details.get("assets_traded"),
                     "Coverage Penalty": cov_pen,
                     "Params": winning_params,
+                    "champion_status": champ_status,
                 }
             )
             continue
@@ -651,7 +660,7 @@ def run_walk_forward_validation(
         val_evaluator = fitness.FitnessEvaluator(test_data, STRATEGY_RULES, gene_map)
         validation_score = val_evaluator(None, best_solution, 0)
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
-        champion_pool = _update_champion_pool(
+        champion_pool, champ_status = _update_champion_pool(
             champion_pool,
             best_solution,
             validation_score,
@@ -678,7 +687,9 @@ def run_walk_forward_validation(
                 "Sharpe Ratio": sharpe,
                 "Sortino Ratio": sortino,
                 "Win Rate [%]": win_rate,
+                "Fitness": validation_score,
                 "Params": winning_params,
+                "champion_status": champ_status,
             }
         )
 
@@ -743,11 +754,25 @@ def run_walk_forward_validation(
             "commit_hash": _get_commit_hash(),
             "run_metadata_file": "walk_forward/run_metadata.json",
         }
-        summary_json = summary.copy()
-        summary_json["folds"] = json.loads(results_df.to_json(orient="records"))
+        # Write schema v1.0 summary for the recommendation engine
+        raw_folds = json.loads(results_df.to_json(orient="records"))
+        sre_folds = [
+            {
+                "fold_id": r.get("Window"),
+                "validation_fitness": r.get("Fitness"),
+                "params": r.get("Params"),
+                "champion_status": r.get("champion_status"),
+            }
+            for r in raw_folds
+        ]
+        meta = {
+            "schema_version": "1.0",
+            "num_folds": len(sre_folds),
+            "asset_universe": sorted({rec["ticker"] for rec in per_asset_records}),
+        }
         summary_path = wf_dir / "walk_forward_summary.json"
         with open(summary_path, "w") as f:
-            json.dump(summary_json, f, indent=2)
+            json.dump({"metadata": meta, "folds": sre_folds}, f, indent=2)
         artifacts = [results_csv, summary_path]
         if per_asset_csv:
             artifacts.append(per_asset_csv)
@@ -782,11 +807,24 @@ def run_walk_forward_validation(
         "commit_hash": _get_commit_hash(),
         "run_metadata_file": "walk_forward/run_metadata.json",
     }
-    summary_json = summary.copy()
-    summary_json["folds"] = json.loads(results_df.to_json(orient="records"))
+    raw_folds = json.loads(results_df.to_json(orient="records"))
+    sre_folds = [
+        {
+            "fold_id": r.get("Window"),
+            "validation_fitness": r.get("Fitness"),
+            "params": r.get("Params"),
+            "champion_status": r.get("champion_status"),
+        }
+        for r in raw_folds
+    ]
+    meta = {
+        "schema_version": "1.0",
+        "num_folds": len(sre_folds),
+        "asset_universe": [config.TICKER],
+    }
     summary_path = wf_dir / "walk_forward_summary.json"
     with open(summary_path, "w") as f:
-        json.dump(summary_json, f, indent=2)
+        json.dump({"metadata": meta, "folds": sre_folds}, f, indent=2)
     artifacts = [results_csv, summary_path]
     if per_asset_csv:
         artifacts.append(per_asset_csv)

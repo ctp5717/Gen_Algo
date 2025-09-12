@@ -175,7 +175,7 @@ def _build_per_asset_counts(per_asset_signal_counts, rules):
     entry = rules.get("entry_rules", {})
     combo = entry.get("combination_logic")
     vt = entry.get("vote_threshold")
-    tnaf = entry.get("treat_nan_as_false", True)
+    nan_policy = entry.get("nan_policy", config.NAN_POLICY)
     rows = []
     for asset in sorted(per_asset_signal_counts):
         counts = per_asset_signal_counts[asset]
@@ -183,7 +183,7 @@ def _build_per_asset_counts(per_asset_signal_counts, rules):
             "asset": asset,
             "combination_logic": combo,
             "vote_threshold": vt,
-            "treat_nan_as_false": tnaf,
+            "nan_policy": nan_policy,
         }
         for slug in slugs:
             row[f"count_{slug}"] = counts.get(mapping[slug], 0)
@@ -192,7 +192,7 @@ def _build_per_asset_counts(per_asset_signal_counts, rules):
         "asset",
         "combination_logic",
         "vote_threshold",
-        "treat_nan_as_false",
+        "nan_policy",
     ] + [f"count_{s}" for s in slugs]
     return pd.DataFrame(rows, columns=columns)
 
@@ -355,7 +355,14 @@ def _run_multi_asset_analysis(
     combined = None
     if frames:
         df = pd.concat(frames, axis=1).sort_index()
-        w = pd.Series(weights_map).reindex(df.columns).fillna(1.0).astype(float)
+        # Cast to float before calling ``fillna`` to avoid pandas object-dtype
+        # ``FutureWarning`` when filling missing values on mixed inputs.
+        w = (
+            pd.Series(weights_map, dtype=float)
+            .reindex(df.columns)
+            .astype(float)
+            .fillna(1.0)
+        )
         w = w / w.sum() if w.sum() else w
 
         mask = df.notna()

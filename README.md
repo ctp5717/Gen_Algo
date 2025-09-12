@@ -158,7 +158,7 @@ This is the core processor that translates your ideas from the config file into 
     # Falls back to ADX line with a warning because `DMX` is missing and `strict_column` is False for this rule
     ```
 
-    * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (case-insensitive, defaults to `"AND"`). NaNs are treated as `False` by default but can be propagated by setting `treat_nan_as_false=False`. For `"VOTE"`, a majority threshold is used when `vote_threshold` is `None`.
+    * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (case-insensitive, defaults to `"AND"`). NaNs are handled according to `nan_policy`: `"FALSE"` fills them, `"PROPAGATE"` preserves them, and `"FORWARD_FILL"` carries forward the last non-NaN value. For `"VOTE"`, a majority threshold is used when `vote_threshold` is `None`.
     * **Output:** It returns a final, single pandas Series of `True`/`False` entry signals to the backtester.
 
 ---
@@ -277,16 +277,19 @@ The `entry_rules` section supports three ways to combine individual indicator co
 
 `combination_logic` is case-insensitive and defaults to `"AND"` when omitted.
 With only one active condition, all combination types behave the same.
-`treat_nan_as_false` (default `True`) controls whether missing indicator values
-are replaced with `False` before combining; set it to `False` to propagate
-NaNs and skip trading when any condition is undefined.
+`nan_policy` controls how missing indicator values are handled before combining:
+`"FALSE"` (default) replaces NaNs with `False`, `"PROPAGATE"` keeps them, and
+`"FORWARD_FILL"` carries forward the last non-NaN value.
 
 Indicators such as moving averages often emit `NaN` values at the start of the
 series (e.g., a 14-period RSI has 13 initial NaNs). With the default
-`treat_nan_as_false=True`, those early `NaN` values become `False` so trading can
+`nan_policy="FALSE"`, those early `NaN` values become `False` so trading can
 begin as soon as other conditions are satisfied. Setting
-`treat_nan_as_false=False` keeps the `NaN`s, and the combined signal will remain
-`NaN` until all indicators have valid data.
+`nan_policy="PROPAGATE"` keeps the `NaN`s, and the combined signal will remain
+`NaN` until all indicators have valid data. `nan_policy="FORWARD_FILL"` allows
+carrying forward the last known value for a limited number of bars. The cap is
+controlled by `ffill_lookback` (default `config.NAN_FFILL_LOOKBACK`); `0` means
+unlimited forward fill.
 
 Example configurations:
 
@@ -299,14 +302,14 @@ Example configurations:
 "entry_rules": {
     "combination_logic": "VOTE",
     "vote_threshold": None,  # defaults to majority
-    "treat_nan_as_false": True,
+    "nan_policy": "FALSE",
     "conditions": [...],
 }
 ```
 ```python
 # Propagate NaNs to avoid trading on incomplete data
 "entry_rules": {
-    "treat_nan_as_false": False,
+    "nan_policy": "PROPAGATE",
     "conditions": [...],
 }
 ```
@@ -377,10 +380,27 @@ Of course. Here is the complete project roadmap, with thorough descriptions for 
         * *Uses a multi-asset system that measures fitness across a group of assets, with a goal to avoid over-fitting strategies to a single asset.
     * **Advanced Combination Logic:** ✅ Complete.
         * *`strategy_engine.py` now supports `AND`, `OR`, and `VOTE` (N-of-M) logic for combining indicator conditions, providing more flexible entry signals.*
-    * **Strategy Recommendation Engine:** (Planned)
-        * *Turns multi-asset backtests and walk-forward validation into a single, production-ready trading strategy recommendation with a confidence score, asset stance, and clear rationale.
+    * **Strategy Recommendation Engine:** ✅ Complete.
+        * *Turns multi-asset backtests and walk-forward validation into a single, production-ready trading strategy recommendation with a confidence score, asset stance, and clear rationale.*
     * **Complete Indicator Library:** ✅ Complete.
         * *This is the process of building out the remaining functions in `indicator_library.py` to include all 25 indicators we originally planned. This gives the AI the widest possible set of tools to build strategies with, increasing the potential for discovering novel patterns.*
+
+---
+### Strategy Recommendation Engine
+
+After walk-forward validation, the framework runs a Strategy Recommendation Engine that writes two artifacts:
+
+* `strategy_recommendation.md` – a human-readable report
+* `run_metadata.json` → `"recommendation"` block for machine consumption
+
+The report includes an **Overall Confidence** score (High/Medium/Low) and an **Asset Performance Matrix** that classifies each asset by median performance and consistency:
+
+* **Stars** – performance ≥1.0 & consistency ≥70%
+* **Stalwarts** – performance between 0.0 and 1.0 & consistency ≥60%
+* **Gambles** – performance ≥1.0 & consistency <50%
+* **Drags** – performance <0.0 & consistency <50%
+
+Assets with too few samples are labeled **Insufficient Data**. The engine also reports parameter stability, flagging genes with high coefficients of variation.
 
 ---
 #### **V3.0: Advanced Framework & Future Vision**

@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
+import config  # noqa: E402
 import indicator_library  # noqa: E402
 import strategy_engine  # noqa: E402
 
@@ -573,7 +574,7 @@ def test_nan_handling_toggle(monkeypatch):
     rules_and_false = {
         "entry_rules": {
             "combination_logic": "AND",
-            "treat_nan_as_false": False,
+            "nan_policy": "PROPAGATE",
             "conditions": [cond_a, cond_b],
         }
     }
@@ -588,7 +589,7 @@ def test_nan_handling_toggle(monkeypatch):
     rules_and_true = {
         "entry_rules": {
             "combination_logic": "AND",
-            "treat_nan_as_false": True,
+            "nan_policy": "FALSE",
             "conditions": [cond_a, cond_b],
         }
     }
@@ -602,7 +603,7 @@ def test_nan_handling_toggle(monkeypatch):
         "entry_rules": {
             "combination_logic": "VOTE",
             "vote_threshold": 2,
-            "treat_nan_as_false": False,
+            "nan_policy": "PROPAGATE",
             "conditions": [cond_a, cond_b, cond_c],
         }
     }
@@ -618,7 +619,7 @@ def test_nan_handling_toggle(monkeypatch):
         "entry_rules": {
             "combination_logic": "VOTE",
             "vote_threshold": 2,
-            "treat_nan_as_false": True,
+            "nan_policy": "FALSE",
             "conditions": [cond_a, cond_b, cond_c],
         }
     }
@@ -665,7 +666,7 @@ def test_vote_nan_propagation(monkeypatch):
     rules = {
         "entry_rules": {
             "combination_logic": "VOTE",
-            "treat_nan_as_false": False,
+            "nan_policy": "PROPAGATE",
             "conditions": conds,
         }
     }
@@ -680,7 +681,7 @@ def test_combine_signals_invalid_vote_threshold(threshold):
     s2 = pd.Series([False, True])
     with pytest.raises(ValueError):
         strategy_engine._combine_signals(
-            [s1, s2], "VOTE", vote_threshold=threshold, treat_nan_as_false=True
+            [s1, s2], "VOTE", vote_threshold=threshold, nan_policy="FALSE"
         )
 
 
@@ -1129,7 +1130,7 @@ def test_parameter_type_validation():
 
     with pytest.raises(TypeError):
         strategy_engine.process_strategy_rules(
-            data, {"entry_rules": {"treat_nan_as_false": "no", "conditions": []}}
+            data, {"entry_rules": {"nan_policy": 123, "conditions": []}}
         )
 
 
@@ -1257,7 +1258,7 @@ def test_signal_counts_name_and_nan_policy(monkeypatch):
 
     rules = {
         "entry_rules": {
-            "treat_nan_as_false": True,
+            "nan_policy": "FALSE",
             "conditions": [
                 {
                     "indicator": "foo",
@@ -1276,7 +1277,7 @@ def test_signal_counts_name_and_nan_policy(monkeypatch):
     )
     assert counts_true == {"foo:indicator_is_above_value": 2}
 
-    rules["entry_rules"]["treat_nan_as_false"] = False
+    rules["entry_rules"]["nan_policy"] = "PROPAGATE"
     res_false, counts_false = strategy_engine.process_strategy_rules(
         data, rules, collect_counts=True
     )
@@ -1355,7 +1356,7 @@ def test_nan_policy(monkeypatch):
 
     rules = {
         "entry_rules": {
-            "treat_nan_as_false": True,
+            "nan_policy": "FALSE",
             "conditions": [
                 {
                     "indicator": "nan_ind",
@@ -1372,9 +1373,94 @@ def test_nan_policy(monkeypatch):
     key = next(iter(counts))
     assert counts[key] == 2
 
-    rules["entry_rules"]["treat_nan_as_false"] = False
+    rules["entry_rules"]["nan_policy"] = "PROPAGATE"
     sig = strategy_engine.process_strategy_rules(data, rules)
     assert sig.isna().any()
+
+    rules["entry_rules"]["nan_policy"] = "FORWARD_FILL"
+    rules["entry_rules"]["ffill_lookback"] = 1
+    sig = strategy_engine.process_strategy_rules(data, rules)
+    expected = pd.Series([True, True, True], index=data.index, dtype="boolean")
+    pd.testing.assert_series_equal(sig.astype("boolean"), expected)
+
+
+def test_nan_policy_parity_no_nans():
+    s = pd.Series([True, False, True])
+    out_false = strategy_engine._combine_signals([s], "AND", nan_policy="FALSE")
+    out_prop = strategy_engine._combine_signals([s], "AND", nan_policy="PROPAGATE")
+    out_ffill = strategy_engine._combine_signals([s], "AND", nan_policy="FORWARD_FILL")
+    pd.testing.assert_series_equal(out_false, out_prop.astype(bool))
+    pd.testing.assert_series_equal(out_false, out_ffill)
+
+
+def test_forward_fill_lookback(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2, 3, 4]})
+
+    def base_ind(df, **p):
+        return pd.Series([0, 0, 0, 0], index=df.index)
+
+    def fake_gen(series, condition):  # noqa: ANN001, ANN201
+        return pd.Series([True, np.nan, np.nan, True], index=series.index)
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "nan_ind", base_ind)
+    monkeypatch.setattr(strategy_engine, "_generate_signal_from_value", fake_gen)
+
+    rules = {
+        "entry_rules": {
+            "nan_policy": "FORWARD_FILL",
+            "conditions": [
+                {
+                    "indicator": "nan_ind",
+                    "params": {},
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ],
+        }
+    }
+    sig = strategy_engine.process_strategy_rules(data, rules)
+    expected_unlim = pd.Series(
+        [True, True, True, True], index=data.index, dtype="boolean"
+    )
+    pd.testing.assert_series_equal(sig.astype("boolean"), expected_unlim)
+    rules["entry_rules"]["ffill_lookback"] = 1
+    sig = strategy_engine.process_strategy_rules(data, rules)
+    expected_cap = pd.Series(
+        [True, True, False, True], index=data.index, dtype="boolean"
+    )
+    pd.testing.assert_series_equal(sig.astype("boolean"), expected_cap)
+
+
+def test_clear_cache_between_assets(monkeypatch):
+    data = pd.DataFrame({"Close": [1, 2]})
+    calls = {"n": 0}
+
+    def foo(df, **p):  # noqa: ANN001
+        calls["n"] += 1
+        return pd.Series([1, 1], index=df.index)
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "foo", foo)
+    monkeypatch.setattr(
+        config,
+        "CACHE_GUARDRAILS",
+        {
+            "MAX_CACHE_KEYS": 1000,
+            "MAX_CACHE_ROWS": 1000,
+            "clear_cache_between_assets": True,
+        },
+    )
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "foo",
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+    strategy_engine.process_strategy_rules(data, rules)
+    strategy_engine.process_strategy_rules(data, rules)
+    assert calls["n"] == 2
 
 
 def test_volume_missing_early_validation(monkeypatch):
