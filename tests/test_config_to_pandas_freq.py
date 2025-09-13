@@ -25,3 +25,12 @@ def test_to_pandas_freq_uses_min_no_future_warning():
         warnings.simplefilter("always", FutureWarning)
         pd.Timedelta(freq)
         assert not any("deprecated" in str(warn.message) for warn in w)
+
+
+def test_to_pandas_freq_hour_uppercase(monkeypatch):
+    sys.modules.pop("config", None)
+    import config
+
+    monkeypatch.setattr(config, "TIMEFRAME", "1h", raising=False)
+    importlib.reload(config)
+    assert config.to_pandas_freq("1h") == "1H"

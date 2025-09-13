@@ -82,6 +82,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     import inspect
 
     import indicator_library
+    import preflight
 
     print("Performing indicator preflight...")
     start = datetime.now(timezone.utc)
@@ -96,6 +97,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
 
     indicator_columns = {}
     results: dict[str, dict] = {}
+    preflight.check_indicator_contracts(sample, rules_pf)
     max_lookback = 0
     max_lookback_source = ""
     for cond in entry.get("conditions", []):
