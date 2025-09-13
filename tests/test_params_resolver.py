@@ -56,3 +56,23 @@ def test_vote_threshold_warning_when_all_inactive(caplog):
         resolved = resolve_effective_rules(rules, gene_map, sol)
     assert resolved["entry_rules"]["vote_threshold"] == 1
     assert any("vote_threshold set to 1" in m for m in caplog.messages)
+
+
+def test_macd_constraints_enforced_deterministically():
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {"fast": 10, "slow": 5, "signal": 0},
+                }
+            ]
+        }
+    }
+    repaired1 = resolve_effective_rules(rules, {}, [])
+    repaired2 = resolve_effective_rules(rules, {}, [])
+    params = repaired1["entry_rules"]["conditions"][0]["params"]
+    assert params["slow"] > params["fast"]
+    assert params["signal"] >= 1
+    assert params["signal"] < params["slow"]
+    assert repaired1 == repaired2
