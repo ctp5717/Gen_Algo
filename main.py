@@ -12,6 +12,7 @@ import traceback
 import types
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt  # For non-blocking plot display
 import pandas as pd
@@ -94,6 +95,24 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
     vt = entry.get("vote_threshold")
     if isinstance(vt, dict):
         entry["vote_threshold"] = vt.get("low", vt.get("high"))
+    # Resolve any gene definitions to concrete sample values before
+    # running indicator preflight. The preflight step executes the
+    # indicator functions and expects plain ``int``/``float`` params,
+    # but strategy rules may contain GA gene dictionaries. We replace
+    # each gene with a deterministic value (typically the ``low`` bound)
+    # while leaving the original ``rules`` object untouched via the
+    # deepcopy above.
+    for cond in entry.get("conditions", []):
+        params_pf: dict[str, Any] = {}
+        for p, val in cond.get("params", {}).items():
+            if isinstance(val, dict) and "gene" in val:
+                if "options" in val:
+                    params_pf[p] = val.get("options", [None])[0]
+                else:
+                    params_pf[p] = val.get("low", val.get("high"))
+            else:
+                params_pf[p] = val
+        cond["params"] = params_pf
 
     indicator_columns = {}
     results: dict[str, dict] = {}
@@ -106,16 +125,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
         func = strategy_engine.INDICATOR_MAPPING.get(ind)
         if func is None:
             continue
-        params_pf = {}
-        for p, val in cond.get("params", {}).items():
-            if isinstance(val, dict) and "gene" in val:
-                if "options" in val:
-                    params_pf[p] = val.get("options", [None])[0]
-                else:
-                    params_pf[p] = val.get("low", val.get("high"))
-            else:
-                params_pf[p] = val
-        cond["params"] = params_pf
+        params_pf = cond.get("params", {})
 
         lb = 0.0
         lb_expr = ""
