@@ -2,11 +2,13 @@ from __future__ import annotations
 
 """Strategy Recommendation Engine."""
 
+import math
 import statistics
 from pathlib import Path
 from typing import Dict, Iterable, List
 
 import numpy as np
+from pydantic import ValidationError
 
 import config
 from run_metadata import merge_run_metadata
@@ -81,10 +83,15 @@ def _build_asset_matrix(
     min_trades = cfg["MIN_TRADES_FOR_SAMPLE"]
     min_samples = cfg["MIN_SAMPLES_FOR_ASSET"]
     thresholds = cfg["ASSET_CLASS_THRESHOLDS"]
-    all_tickers = {r.ticker for r in per_asset.rows if r.included}
+    valid_included = [r for r in per_asset.rows if r.included]
+    all_tickers = {r.ticker for r in valid_included}
     groups: Dict[str, List[PerAssetRow]] = {}
-    for r in per_asset.rows:
-        if not r.included or r.trades < min_trades or r.score is None:
+    for r in valid_included:
+        if (
+            r.trades < min_trades
+            or r.score is None
+            or (isinstance(r.score, float) and np.isnan(r.score))
+        ):
             continue
         groups.setdefault(r.ticker, []).append(r)
 
@@ -149,21 +156,27 @@ def _param_stability(
             if isinstance(v, (int, float)) and not np.isnan(v):
                 values.setdefault(k, []).append(float(v))
     cov: Dict[str, float] = {}
+    cov_raw: Dict[str, float] = {}
     for gene, vals in values.items():
+        if len(set(vals)) <= 1:
+            continue
         mean = float(np.mean(vals))
         std = float(np.std(vals))
-        cov[gene] = float(std / abs(mean)) if mean else float("inf")
+        if std == 0:
+            continue
+        raw = float(std / abs(mean)) if mean else float("inf")
+        cov_raw[gene] = raw
+        cov[gene] = round(raw, 2)
     threshold = config.RECOMMENDATION["PARAM_COV_UNSTABLE"]
     watch_low = config.RECOMMENDATION["PARAM_COV_WATCHLIST"]
-    unstable = sorted(
-        [g for g, c in cov.items() if c >= threshold],
-        key=lambda g: cov[g],
-        reverse=True,
-    )
+
+    def sort_key(g: str) -> tuple[float, str]:
+        return (-cov_raw[g], g)
+
+    unstable = sorted([g for g, c in cov_raw.items() if c >= threshold], key=sort_key)
     watchlist = sorted(
-        [g for g, c in cov.items() if watch_low <= c < threshold],
-        key=lambda g: cov[g],
-        reverse=True,
+        [g for g, c in cov_raw.items() if watch_low <= c < threshold],
+        key=sort_key,
     )
     return cov, unstable, watchlist
 
@@ -206,46 +219,72 @@ def _build_narrative(
 
 
 def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
+    def _fmt_cov(x: float) -> str:
+        return "∞" if not math.isfinite(x) else f"{x:.2f}"
+
     conf = payload["confidence"]
     lines = ["# Strategy Recommendation Report", ""]
     lines.append(f"## Overall Confidence\n{conf['category']} ({conf['score']})\n")
     lines.append(payload["narrative"]["overall"])
     lines.append("")
+    scores = conf["scores"]
+    lines.append("### Confidence Factors")
+    lines.append("| Factor | Score |")
+    lines.append("|---|---|")
+    lines.append(f"| Median Fitness | {scores['median']:.1f} |")
+    lines.append(f"| Consistency | {scores['consistency']:.1f} |")
+    lines.append(f"| Tail (worst fold) | {scores['tail']:.1f} |")
+    lines.append(f"| Downside Deviation | {scores['downside']:.1f} |")
+    lines.append("")
+    lines.append("## Asset Summary")
+    lines.append(payload["narrative"]["assets"])
+    lines.append("")
+    lines.append("## Parameter Summary")
+    lines.append(payload["narrative"]["params"])
+    lines.append("")
     lines.append("## Asset Performance Matrix")
     lines.append("| Ticker | Performance | Consistency | Class | Samples |")
     lines.append("|---|---|---|---|---|")
-    for t, a in sorted(payload["assets"].items()):
+    order = {
+        "Stars": 0,
+        "Stalwarts": 1,
+        "Gambles": 2,
+        "Borderline": 3,
+        "Drags": 4,
+        "Insufficient Data": 5,
+    }
+    for t, a in sorted(
+        payload["assets"].items(),
+        key=lambda kv: (
+            order.get(kv[1]["class"], 99),
+            -kv[1]["performance"],
+            -kv[1]["consistency"],
+            kv[0],
+        ),
+    ):
         lines.append(
             f"| {t} | {a['performance']:.2f} | {a['consistency']:.1f}% | "
             f"{a['class']} | {a['samples']} |"
         )
     lines.append("")
     th = config.RECOMMENDATION["ASSET_CLASS_THRESHOLDS"]
-    lines.append(
-        (
-            "Legend: Stars ≥{star_p} perf & ≥{star_c}% consistency; "
-            "Stalwarts {stal_low}–{stal_high} perf & ≥{stal_c}% consistency; "
-            "Gambles ≥{gamble_p} perf & <{gamble_c}% consistency; "
-            "Drags <{drag_p} perf & <{drag_c}% consistency"
-        ).format(
-            star_p=th["star"]["performance"],
-            star_c=th["star"]["consistency"],
-            stal_low=th["stalwart"]["performance_low"],
-            stal_high=th["stalwart"]["performance_high"],
-            stal_c=th["stalwart"]["consistency"],
-            gamble_p=th["gamble"]["performance"],
-            gamble_c=th["gamble"]["consistency"],
-            drag_p=th["drag"]["performance"],
-            drag_c=th["drag"]["consistency"],
-        )
+    legend = (
+        "Legend: "
+        f"Stars ≥{th['star']['performance']} perf & ≥{th['star']['consistency']}% consistency; "
+        f"Stalwarts {th['stalwart']['performance_low']}–{th['stalwart']['performance_high']} perf "
+        f"& ≥{th['stalwart']['consistency']}% consistency; "
+        f"Gambles ≥{th['gamble']['performance']} perf & "
+        f"<{th['gamble']['consistency']}% consistency; "
+        f"Drags <{th['drag']['performance']} perf & <{th['drag']['consistency']}% consistency"
     )
+    lines.append(legend)
     lines.append("")
     lines.append("## Parameter Stability")
     unstable = payload["param_stability"]["unstable_genes"]
     if unstable:
         for g in unstable:
             c = payload["param_stability"]["cov_by_gene"][g]
-            lines.append(f"- {g}: CoV {c:.2f}")
+            lines.append(f"- {g}: CoV {_fmt_cov(c)}")
     else:
         lines.append("No unstable parameters detected.")
     watchlist = payload["param_stability"].get("watchlist_genes", [])
@@ -253,8 +292,57 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
         lines.append("### Watchlist")
         for g in watchlist:
             c = payload["param_stability"]["cov_by_gene"][g]
-            lines.append(f"- {g}: CoV {c:.2f}")
+            lines.append(f"- {g}: CoV {_fmt_cov(c)}")
+    cfg = config.RECOMMENDATION
+    cuts = cfg["CATEGORY_CUTOFFS"]
+    weights = cfg["WEIGHTS"]
+    lines.append("")
+    lines.append("## SRE Config")
+    lines.append("### Category Cutoffs")
+    lines.append(f"- High: ≥{cuts['high']}")
+    lines.append(f"- Medium: ≥{cuts['medium']}")
+    lines.append("### Weights")
+    for k in ["median", "consistency", "tail", "downside"]:
+        lines.append(f"- {k}: {weights[k]}")
+    lines.append("### Asset Class Thresholds")
+    lines.append(
+        f"- Stars: ≥{th['star']['performance']} perf & ≥{th['star']['consistency']}% consistency"
+    )
+    lines.append(
+        f"- Stalwarts: {th['stalwart']['performance_low']}–"
+        f"{th['stalwart']['performance_high']} perf & ≥"
+        f"{th['stalwart']['consistency']}% consistency"
+    )
+    lines.append(
+        f"- Gambles: ≥{th['gamble']['performance']} perf & <"
+        f"{th['gamble']['consistency']}% consistency"
+    )
+    lines.append(
+        f"- Drags: <{th['drag']['performance']} perf & <"
+        f"{th['drag']['consistency']}% consistency"
+    )
     path.write_text("\n".join(lines))
+
+
+def _schema_error(run_dir: Path, msg: str, details: str) -> Dict[str, object]:
+    error_payload: Dict[str, object] = {
+        "error": "schema_validation_failed",
+        "message": msg,
+        "schema_version": "1.0",
+    }
+    merge_run_metadata(
+        run_dir / "run_metadata.json",
+        {"recommendation": error_payload, "artifacts": ["strategy_recommendation.md"]},
+    )
+    error_md = run_dir / "strategy_recommendation.md"
+    error_md.write_text(
+        "# Strategy Recommendation Report\n\n"
+        + "Schema validation failed.\n\n"
+        + details
+        + "\n"
+    )
+    print(f"Recommendation generation failed: {msg}")
+    return error_payload
 
 
 # ---------------------------------------------------------------------------
@@ -270,19 +358,26 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
     per_asset_path = wf_dir / "walk_forward_per_asset.csv"
     try:
         summary = load_wf_summary(summary_path)
-        per_asset = load_wf_per_asset(per_asset_path)
-    except Exception as e:  # pragma: no cover - exercised in integration
-        msg = f"schema validation failed: {e}"
-        error_payload: Dict[str, object] = {
-            "error": "schema_validation_failed",
-            "message": msg,
-            "schema_version": "1.0",
-        }
-        merge_run_metadata(
-            run_dir / "run_metadata.json", {"recommendation": error_payload}
+    except ValidationError as e:  # pragma: no cover - exercised in integration
+        details = "\n".join(
+            f"- summary.{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
+            for err in e.errors()
         )
-        print(f"Recommendation generation failed: {msg}")
-        return error_payload
+        return _schema_error(run_dir, "schema validation failed (summary)", details)
+    except Exception as e:  # pragma: no cover - exercised in integration
+        msg = f"schema validation failed (summary): {e}"
+        return _schema_error(run_dir, msg, msg)
+    try:
+        per_asset = load_wf_per_asset(per_asset_path)
+    except ValidationError as e:  # pragma: no cover - exercised in integration
+        details = "\n".join(
+            f"- per_asset.{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
+            for err in e.errors()
+        )
+        return _schema_error(run_dir, "schema validation failed (per_asset)", details)
+    except Exception as e:  # pragma: no cover - exercised in integration
+        msg = f"schema validation failed (per_asset): {e}"
+        return _schema_error(run_dir, msg, msg)
 
     conf = _compute_confidence([f.validation_fitness for f in summary.folds])
     assets = _build_asset_matrix(per_asset)
@@ -300,7 +395,10 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
         "schema_version": "1.0",
     }
 
-    merge_run_metadata(run_dir / "run_metadata.json", {"recommendation": payload})
+    merge_run_metadata(
+        run_dir / "run_metadata.json",
+        {"recommendation": payload, "artifacts": ["strategy_recommendation.md"]},
+    )
     _write_markdown(run_dir / "strategy_recommendation.md", payload)
     print(
         f"Recommendation: {conf['category']} ({conf['score']}) - "
