@@ -24,7 +24,7 @@ STRATEGY_RULES = {
         "vote_threshold": {
             "gene": "vote_threshold",
             "low": 2,
-            "high": 4,
+            "high": 5,
             "step": 1,
         },
         "conditions": [
@@ -525,7 +525,7 @@ STRATEGY_RULES = {
                 },
             },
             {
-                "is_active": False,
+                "is_active": True,
                 "rule_name": "Ichimoku_Trend_Filter",
                 "indicator": "ichimoku",
                 "params": {
@@ -616,13 +616,13 @@ STRATEGY_RULES = {
                 "value": {
                     "gene": "stop_loss_pct",
                     "low": 0.02,
-                    "high": 0.10,
+                    "high": 0.12,
                     "step": 0.005,
                 }
             },
         },
         "trailing_stop": {
-            "is_active": True,
+            "is_active": False,
             "type": "percentage",
             "params": {  # Correctly nested
                 "value": {
@@ -639,7 +639,7 @@ STRATEGY_RULES = {
             "params": {  # Correctly nested
                 "value": {
                     "gene": "take_profit_pct",
-                    "low": 0.05,
+                    "low": 0.04,
                     "high": 0.25,
                     "step": 0.01,
                 }
