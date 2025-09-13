@@ -217,7 +217,15 @@ def calculate_bbands(
     if period is None or std_dev is None:
         raise ValueError("BBands 'period' and 'std_dev' parameters cannot be None.")
 
-    bbands_df = ohlc_data.ta.bbands(length=period, std=std_dev)
+    # pandas_ta.bbands uses separate ``lower_std`` and ``upper_std`` parameters
+    # (it does not accept ``std``). Passing ``std`` previously resulted in
+    # pandas_ta defaulting both values to ``2.0`` which yielded column names
+    # like ``BBL_10_2.0_2.0`` regardless of the requested deviation. Our
+    # contract expects the standard deviation to be reflected in the column
+    # names (e.g. ``BBL_10_0.5_0.5``). Use the correct parameter names so the
+    # output aligns with the contract.
+
+    bbands_df = ohlc_data.ta.bbands(length=period, lower_std=std_dev, upper_std=std_dev)
 
     if bbands_df is None:
         raise ConnectionError(
