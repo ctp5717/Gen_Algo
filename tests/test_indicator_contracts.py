@@ -47,3 +47,14 @@ def test_bbands_non_default_std_dev():
     out = lib.calculate_bbands(df, **params)
     expected = contracts.CONTRACTS["bbands"](**params)
     assert list(out.columns) == expected
+
+
+def test_psar_non_default_params():
+    """PSAR should reflect non-default parameters in column names."""
+    df = _sample_df()
+    params = {"acceleration": 0.01, "maximum": 0.1}
+    out = lib.calculate_psar(df, **params)
+    expected = contracts.CONTRACTS["psar"](
+        acc=params["acceleration"], maximum=params["maximum"]
+    )
+    assert list(out.columns) == expected

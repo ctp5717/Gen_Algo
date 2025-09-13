@@ -395,7 +395,7 @@ def calculate_psar(
             raise TypeError(f"PSAR '{name}' must be numeric")
         if val <= 0:
             raise ValueError(f"PSAR '{name}' must be > 0")
-    psar = ohlc_data.ta.psar(acc=acceleration, max=maximum)
+    psar = ohlc_data.ta.psar(af=acceleration, max_af=maximum)
     if psar is None:
         raise ConnectionError("Failed to calculate PSAR")
     return contracts.normalize_output(
