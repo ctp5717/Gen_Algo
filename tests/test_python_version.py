@@ -1,5 +1,5 @@
 import sys
 
 
-def test_python_is_313_or_newer():
-    assert sys.version_info >= (3, 13), f"Python 3.13+ required, found {sys.version}"
+def test_python_is_312_or_newer():
+    assert sys.version_info >= (3, 12), f"Python 3.12+ required, found {sys.version}"

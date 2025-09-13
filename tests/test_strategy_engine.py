@@ -1472,7 +1472,8 @@ def test_clear_cache_between_assets(monkeypatch):
     }
     strategy_engine.process_strategy_rules(data, rules)
     strategy_engine.process_strategy_rules(data, rules)
-    assert calls["n"] == 1
+    # cache should be cleared between calls when guardrail is enabled
+    assert calls["n"] == 2
 
 
 def test_volume_missing_early_validation(monkeypatch):
