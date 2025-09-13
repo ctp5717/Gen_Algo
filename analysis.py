@@ -13,6 +13,7 @@ import subprocess
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
 
 import matplotlib.pyplot as plt  # To display plots without blocking
 import numpy as np
@@ -195,6 +196,13 @@ def _build_per_asset_counts(per_asset_signal_counts, rules):
         "nan_policy",
     ] + [f"count_{s}" for s in slugs]
     return pd.DataFrame(rows, columns=columns)
+
+
+def _coerce_numeric_cols(df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
+    for c in cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
 
 def run_champion_analysis(
@@ -451,7 +459,19 @@ def _run_multi_asset_analysis(
         )
     counts_df = _build_per_asset_counts(per_asset_signal_counts, rules)
     if rows:
-        df = pd.DataFrame(rows).sort_values(
+        df = pd.DataFrame(rows)
+        num_cols = [
+            "asset_weight",
+            "score",
+            "trades",
+            "sortino",
+            "profit_factor_capped",
+            "max_drawdown",
+            "per_asset_min_trades",
+        ]
+        df = _coerce_numeric_cols(df, num_cols)
+        df[num_cols] = df[num_cols].fillna(0.0)
+        df = df.sort_values(
             by=["score"],
             key=lambda s: pd.to_numeric(s, errors="coerce").fillna(-np.inf),
             ascending=False,

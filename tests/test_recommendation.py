@@ -2,6 +2,7 @@ import copy
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -104,7 +105,10 @@ def test_confidence_scoring_categories():
     assert medium["category"] == "Medium"
 
 
-def test_asset_matrix_classification():
+def test_asset_matrix_classification(monkeypatch):
+    overrides = copy.deepcopy(config.RECOMMENDATION["ASSET_CLASS_THRESHOLDS"])
+    overrides["gamble"]["consistency"] = 80
+    monkeypatch.setitem(config.RECOMMENDATION, "ASSET_CLASS_THRESHOLDS", overrides)
     rows = WalkForwardPerAssetV1(
         rows=[
             PerAssetRow(fold=i, ticker="STAR", score=1.2, trades=5, included=True)
@@ -115,6 +119,7 @@ def test_asset_matrix_classification():
             PerAssetRow(fold=i, ticker="STAL", score=0.5, trades=5, included=True)
             for i in range(3)
         ]
+        + [PerAssetRow(fold=3, ticker="STAL", score=np.nan, trades=5, included=True)]
         + [
             PerAssetRow(
                 fold=i, ticker="DRAG", score=-0.5 if i else 0.2, trades=5, included=True
@@ -132,16 +137,40 @@ def test_asset_matrix_classification():
             for i in range(3)
         ]
         + [
+            PerAssetRow(
+                fold=i,
+                ticker="GAMB",
+                score=[1.2, 1.1, -0.5, -0.6, 1.3][i],
+                trades=5,
+                included=True,
+            )
+            for i in range(5)
+        ]
+        + [
             PerAssetRow(fold=i, ticker="INSU", score=1.0, trades=5, included=True)
             for i in range(2)
+        ]
+        + [
+            PerAssetRow(fold=i, ticker="LOWT", score=1.0, trades=2, included=True)
+            for i in range(3)
+        ]
+        + [
+            PerAssetRow(fold=i, ticker="EXCL", score=1.0, trades=5, included=False)
+            for i in range(3)
         ]
     )
     matrix = recommendation._build_asset_matrix(rows)
     assert matrix["STAR"]["class"] == "Stars"
-    assert matrix["STAL"]["class"] == "Stalwarts"
+    assert matrix["STAL"]["class"] == "Stalwarts" and matrix["STAL"]["samples"] == 3
     assert matrix["DRAG"]["class"] == "Drags"
     assert matrix["BORD"]["class"] == "Borderline"
+    assert matrix["GAMB"]["class"] == "Gambles"
     assert matrix["INSU"]["class"] == "Insufficient Data"
+    assert (
+        matrix["LOWT"]["class"] == "Insufficient Data"
+        and matrix["LOWT"]["samples"] == 0
+    )
+    assert "EXCL" not in matrix
 
 
 def test_asset_class_threshold_override(monkeypatch):
@@ -161,19 +190,30 @@ def test_asset_class_threshold_override(monkeypatch):
 def test_param_stability_detection():
     vals_a = [1, 2, 3, 4, 0]
     vals_b = [1.0, 1.5, 0.5, 1.4, 0.6]
+    vals_c = [2, 5, 8, 11, 14]
+    vals_d = [1, 2, 3, 4, 0]
     folds = [
         Fold(
             fold_id=i,
             validation_fitness=1.0,
-            params={"a": vals_a[i], "b": vals_b[i]},
+            params={
+                "a": vals_a[i],
+                "b": vals_b[i],
+                "c": vals_c[i],
+                "d": vals_d[i],
+                "const": 1.0,
+            },
             champion_status=None,
         )
         for i in range(5)
     ]
     cov, unstable, watch = recommendation._param_stability(folds)
-    assert cov["a"] > cov["b"]
-    assert "a" in unstable
-    assert "b" in watch
+    assert cov["a"] == pytest.approx(0.71, abs=0.01)
+    assert cov["c"] == pytest.approx(0.53, abs=0.01)
+    assert cov["d"] == pytest.approx(0.71, abs=0.01)
+    assert "const" not in cov
+    assert unstable == ["a", "d", "c"]
+    assert watch == ["b"]
 
 
 def test_param_stability_champion_only():
@@ -189,7 +229,7 @@ def test_param_stability_champion_only():
         )
     ]
     cov, _, _ = recommendation._param_stability(folds)
-    assert cov["x"] == 0.0
+    assert "x" not in cov
     cov_all, _, _ = recommendation._param_stability(
         [
             Fold(
@@ -204,18 +244,72 @@ def test_param_stability_champion_only():
     assert cov_all["x"] > 1
 
 
-def test_schema_validation_failure(tmp_path):
+def test_param_stability_rounding_boundary():
+    folds = [
+        Fold(
+            fold_id=0,
+            validation_fitness=1.0,
+            params={"e": 2.99},
+            champion_status=None,
+        ),
+        Fold(
+            fold_id=1,
+            validation_fitness=1.0,
+            params={"e": 1.01},
+            champion_status=None,
+        ),
+    ]
+    cov, unstable, watch = recommendation._param_stability(folds)
+    assert cov["e"] == 0.5
+    assert unstable == []
+    assert watch == ["e"]
+
+
+def test_schema_validation_failure_summary(tmp_path):
     wf = tmp_path / "walk_forward"
     wf.mkdir()
-    (wf / "walk_forward_summary.json").write_text("{}")
+    bad_summary = {
+        "metadata": {"schema_version": "1.0", "num_folds": 1, "asset_universe": []},
+        "folds": [{"fold_id": 1}],
+    }
+    (wf / "walk_forward_summary.json").write_text(json.dumps(bad_summary))
     (wf / "walk_forward_per_asset.csv").write_text(
-        "fold,ticker,score,trades,included\n"
+        "fold,ticker,score,trades,included\n1,BTC,1,1,True\n"
     )
     (tmp_path / "run_metadata.json").write_text("{}")
     out = recommendation.generate_recommendation({"run_dir": tmp_path})
     assert out["error"] == "schema_validation_failed"
     meta = json.loads((tmp_path / "run_metadata.json").read_text())
     assert meta["recommendation"]["error"] == "schema_validation_failed"
+    md = (tmp_path / "strategy_recommendation.md").read_text()
+    assert "schema validation failed" in md.lower()
+    assert "summary" in md
+    assert "validation_fitness" in md
+    assert "strategy_recommendation.md" in meta["artifacts"]
+
+
+def test_schema_validation_failure_per_asset(tmp_path):
+    wf = tmp_path / "walk_forward"
+    wf.mkdir()
+    summary = {
+        "metadata": {"schema_version": "1.0", "num_folds": 1, "asset_universe": []},
+        "folds": [
+            {
+                "fold_id": 0,
+                "validation_fitness": 1.0,
+                "params": {},
+            }
+        ],
+    }
+    (wf / "walk_forward_summary.json").write_text(json.dumps(summary))
+    (wf / "walk_forward_per_asset.csv").write_text(
+        "fold,ticker,score,trades,included\n0,AAA,1.0,notint,True\n"
+    )
+    (tmp_path / "run_metadata.json").write_text("{}")
+    out = recommendation.generate_recommendation({"run_dir": tmp_path})
+    assert out["error"] == "schema_validation_failed"
+    md = (tmp_path / "strategy_recommendation.md").read_text()
+    assert "per_asset" in md
 
 
 def test_load_wf_per_asset_bad_column_type(tmp_path):
@@ -232,6 +326,7 @@ def test_generate_recommendation_determinism(tmp_path):
     out1 = recommendation.generate_recommendation({"run_dir": tmp_path})
     md1 = (tmp_path / "strategy_recommendation.md").read_text()
     meta1 = json.loads((tmp_path / "run_metadata.json").read_text())
+    assert "strategy_recommendation.md" in meta1["artifacts"]
     snap = Path(__file__).with_name("snapshots") / "strategy_recommendation.md"
     assert md1.strip() == snap.read_text().strip()
     # fresh directory with same inputs
@@ -244,3 +339,32 @@ def test_generate_recommendation_determinism(tmp_path):
     assert out1 == out2
     assert md1 == md2
     assert meta1["recommendation"] == meta2["recommendation"]
+
+
+def test_markdown_artifact_deduped(tmp_path):
+    _write_sample_files(tmp_path)
+    recommendation.generate_recommendation({"run_dir": tmp_path})
+    recommendation.generate_recommendation({"run_dir": tmp_path})
+    meta = json.loads((tmp_path / "run_metadata.json").read_text())
+    assert meta["artifacts"].count("strategy_recommendation.md") == 1
+
+
+def test_infinite_cov_rendered(tmp_path):
+    payload = {
+        "confidence": {
+            "category": "Low",
+            "score": 0,
+            "scores": {"median": 0, "consistency": 0, "tail": 0, "downside": 0},
+        },
+        "assets": {},
+        "param_stability": {
+            "cov_by_gene": {"x": float("inf")},
+            "unstable_genes": ["x"],
+            "watchlist_genes": [],
+        },
+        "narrative": {"overall": "", "assets": "", "params": ""},
+        "schema_version": "1.0",
+    }
+    md_path = tmp_path / "md.md"
+    recommendation._write_markdown(md_path, payload)
+    assert "∞" in md_path.read_text()

@@ -55,7 +55,14 @@ def merge_run_metadata(path: str | os.PathLike, new_meta: Dict[str, Any]) -> Non
             else:
                 merged[k] = v
 
-        merged["artifacts"] = sorted(set(arts))
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for a in arts:
+            if a in seen:
+                continue
+            seen.add(a)
+            uniq.append(a)
+        merged["artifacts"] = uniq
         merged["metadata_version"] = 1
 
         tmp_fd, tmp_name = tempfile.mkstemp(dir=str(path.parent))

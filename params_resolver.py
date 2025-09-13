@@ -44,7 +44,15 @@ def inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) ->
             ind = obj.get("indicator")
             if ind:
                 params = obj.get("params", {})
-                for c in INDICATOR_CONSTRAINTS.get(ind.lower(), []):
+                constraints = INDICATOR_CONSTRAINTS.get(ind.lower(), [])
+                for c in sorted(
+                    constraints,
+                    key=lambda c: (
+                        getattr(c, "kind", ""),
+                        getattr(c, "a", ""),
+                        str(getattr(c, "b", "")),
+                    ),
+                ):
                     c.enforce(params)
             for val in obj.values():
                 _apply_constraints(val)
