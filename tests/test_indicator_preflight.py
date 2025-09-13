@@ -113,6 +113,41 @@ def test_indicator_preflight_combination_logic_gene_dict(monkeypatch):
     assert trade_counts == [3]
 
 
+def test_indicator_preflight_param_gene_dict(monkeypatch):
+    """Ensure indicator params expressed as gene dicts are resolved before preflight."""
+    data = pd.DataFrame({"Close": [1, 2, 3]})
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "macd",
+                    "params": {
+                        "fast": {"gene": "f", "low": 4, "high": 8, "step": 1},
+                        "slow": {"gene": "s", "low": 15, "high": 26, "step": 1},
+                        "signal": {"gene": "sig", "low": 3, "high": 10, "step": 1},
+                    },
+                    "condition": {"type": "indicator_is_above_value", "value": 0},
+                }
+            ]
+        }
+    }
+
+    monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(
+        main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
+    )
+
+    def fake_macd(df, fast, slow, signal):  # noqa: ANN001
+        cols = contracts._macd_contract(fast=fast, slow=slow, signal=signal)
+        return pd.DataFrame({c: [0, 0, 0] for c in cols})
+
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", fake_macd)
+
+    main.indicator_preflight(data, rules)
+    # Original gene dictionaries should remain untouched in the input rules
+    assert isinstance(rules["entry_rules"]["conditions"][0]["params"]["fast"], dict)
+
+
 def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
     monkeypatch.chdir(tmp_path)
     data = pd.DataFrame({"Close": [1, 2, 3]})

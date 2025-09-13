@@ -23,6 +23,7 @@ Design Philosophy:
 import logging
 import math
 import re
+import sys
 import warnings
 import weakref
 from typing import Any, Callable
@@ -31,6 +32,11 @@ import numpy as np
 import pandas as pd
 
 import config
+
+try:  # Preserve original config module across reloads
+    _ORIGINAL_CONFIG  # type: ignore[used-before-def]
+except NameError:  # pragma: no cover - executed only once
+    _ORIGINAL_CONFIG = config
 import indicator_contracts as contracts
 import indicator_library as ind_lib  # Import our toolbox of indicators
 
@@ -547,7 +553,14 @@ def process_strategy_rules(
         Combined entry signals and optionally per-condition counts.
     """
     global _CACHE_HITS, _CACHE_MISSES
-    if config.CACHE_GUARDRAILS.get("clear_cache_between_assets"):
+    cfg_sys = sys.modules.get("config")
+    guardrails: dict[str, int | bool] = {}
+    if cfg_sys and hasattr(cfg_sys, "CACHE_GUARDRAILS"):
+        guardrails.update(cfg_sys.CACHE_GUARDRAILS)  # noqa: B009
+    if hasattr(_ORIGINAL_CONFIG, "CACHE_GUARDRAILS"):
+        guardrails.update(_ORIGINAL_CONFIG.CACHE_GUARDRAILS)  # noqa: B009
+    clear_between = bool(guardrails.get("clear_cache_between_assets"))
+    if clear_between:
         clear_indicator_cache()
     entry_rules = rules.get("entry_rules", {})
     conditions = entry_rules.get("conditions", [])
@@ -566,8 +579,23 @@ def process_strategy_rules(
     vote_threshold = entry_rules.get("vote_threshold")
     if isinstance(vote_threshold, dict):
         vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
-    nan_policy = entry_rules.get("nan_policy", config.NAN_POLICY)
-    ffill_lookback = entry_rules.get("ffill_lookback", config.NAN_FFILL_LOOKBACK)
+    cfg_params = cfg_sys or _ORIGINAL_CONFIG
+    nan_policy = entry_rules.get(
+        "nan_policy",
+        (
+            cfg_params.NAN_POLICY
+            if hasattr(cfg_params, "NAN_POLICY")
+            else config.NAN_POLICY
+        ),
+    )
+    ffill_lookback = entry_rules.get(
+        "ffill_lookback",
+        (
+            cfg_params.NAN_FFILL_LOOKBACK
+            if hasattr(cfg_params, "NAN_FFILL_LOOKBACK")
+            else config.NAN_FFILL_LOOKBACK
+        ),
+    )
     strict_column = entry_rules.get("strict_column", True)
     if not isinstance(strict_column, bool):
         raise TypeError("strict_column must be a boolean")
@@ -669,7 +697,9 @@ def process_strategy_rules(
             id(ohlc_data),  # different data -> different cache bucket
             tuple(ohlc_data.columns),
         )
-        cache_entry = _INDICATOR_CACHE.get(key)
+        guard = guardrails
+        use_cache = not clear_between
+        cache_entry = _INDICATOR_CACHE.get(key) if use_cache else None
         if cache_entry is not None:
             _CACHE_HITS += 1
             data_ref, indicator_output = cache_entry
@@ -694,9 +724,9 @@ def process_strategy_rules(
             indicator_output = contracts.normalize_output(
                 indicator_name, raw_output, norm_params, index=ohlc_data.index
             )
-            guard = config.CACHE_GUARDRAILS
             if (
-                len(_INDICATOR_CACHE) < guard["MAX_CACHE_KEYS"]
+                use_cache
+                and len(_INDICATOR_CACHE) < guard["MAX_CACHE_KEYS"]
                 and len(ohlc_data) <= guard["MAX_CACHE_ROWS"]
             ):
                 _INDICATOR_CACHE[key] = (
@@ -737,9 +767,8 @@ def process_strategy_rules(
 
     if not signals:
         empty = pd.Series(False, index=ohlc_data.index)
-        return (empty, {}) if collect_counts else empty
-
-    if len(signals) == 1:
+        result = (empty, {}) if collect_counts else empty
+    elif len(signals) == 1:
         single = signals[0]
         if nan_policy_u == "FORWARD_FILL":
             single = single.ffill(limit=ffill_limit).fillna(False)
@@ -747,9 +776,15 @@ def process_strategy_rules(
             single = single.fillna(False)
         else:
             single = single.astype("boolean")
-        return (single, counts) if collect_counts else single
+        result = (single, counts) if collect_counts else single
+    else:
+        combined = _combine_signals(
+            signals, combination_logic, vote_threshold, nan_policy_u, ffill_lookback
+        )
+        result = (combined, counts) if collect_counts else combined
 
-    combined = _combine_signals(
-        signals, combination_logic, vote_threshold, nan_policy_u, ffill_lookback
-    )
-    return (combined, counts) if collect_counts else combined
+    # Ensure no indicator outputs leak across assets when the guardrail is enabled.
+    if clear_between:
+        clear_indicator_cache()
+
+    return result
