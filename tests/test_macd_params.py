@@ -15,6 +15,7 @@ sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import analysis  # noqa: E402
 import fitness  # noqa: E402
+import indicator_contracts as contracts  # noqa: E402
 import indicator_library  # noqa: E402
 import params_resolver  # noqa: E402
 import strategy_engine  # noqa: E402
@@ -60,7 +61,11 @@ def test_fast_equal_slow_flat_histogram(monkeypatch):
     df = _base_data()
 
     def macd_flat(data, fast, slow, signal):
-        return pd.DataFrame({"MACDh_0": [0, 0, 0, 0]}, index=data.index)
+        cols = contracts.CONTRACTS["macd"](fast=fast, slow=slow, signal=signal)
+        return pd.DataFrame(
+            {cols[0]: [0, 0, 0, 0], cols[1]: [0, 0, 0, 0], cols[2]: [0, 0, 0, 0]},
+            index=data.index,
+        )
 
     monkeypatch.setattr(indicator_library, "calculate_macd", macd_flat)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_flat)
@@ -85,7 +90,15 @@ def test_valid_macd_triggers_rule(monkeypatch):
     df = _base_data()
 
     def macd_good(data, fast, slow, signal):
-        return pd.DataFrame({"MACDh_0": [-1, -0.5, 0.5, 1.0]}, index=data.index)
+        cols = contracts.CONTRACTS["macd"](fast=fast, slow=slow, signal=signal)
+        return pd.DataFrame(
+            {
+                cols[1]: [-1, -0.5, 0.5, 1.0],
+                cols[0]: [0, 0, 0, 0],
+                cols[2]: [0, 0, 0, 0],
+            },
+            index=data.index,
+        )
 
     monkeypatch.setattr(indicator_library, "calculate_macd", macd_good)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_good)
@@ -119,7 +132,7 @@ def test_sample_macd_params_always_valid():
         assert 1 <= params["signal"] < params["slow"]
 
 
-def test_macd_fallback_to_line(monkeypatch):
+def test_macd_missing_histogram_errors(monkeypatch):
     df = _base_data()
 
     def macd_line_only(data, fast, slow, signal):
@@ -140,8 +153,8 @@ def test_macd_fallback_to_line(monkeypatch):
         }
     }
 
-    entries = strategy_engine.process_strategy_rules(df, rules)
-    assert entries.iloc[-1]
+    with pytest.raises(contracts.IndicatorContractError):
+        strategy_engine.process_strategy_rules(df, rules)
 
 
 def test_macd_column_override(monkeypatch):
@@ -149,8 +162,13 @@ def test_macd_column_override(monkeypatch):
     df = _base_data()
 
     def macd_hist(data, fast, slow, signal):
+        cols = contracts.CONTRACTS["macd"](fast=fast, slow=slow, signal=signal)
         return pd.DataFrame(
-            {"MACDh_0": [-1, -0.5, 0.5, 1.0], "MACD_line": [0, 0, 0, 0]},
+            {
+                cols[1]: [-1, -0.5, 0.5, 1.0],
+                cols[0]: [0, 0, 0, 0],
+                cols[2]: [0, 0, 0, 0],
+            },
             index=data.index,
         )
 
@@ -166,7 +184,9 @@ def test_macd_column_override(monkeypatch):
                     "condition": {
                         "type": "indicator_is_above_value",
                         "value": 0,
-                        "column": "MACDh_0",
+                        "column": contracts.CONTRACTS["macd"](
+                            fast=5, slow=10, signal=3
+                        )[1],
                     },
                 }
             ]
@@ -181,7 +201,15 @@ def test_macd_column_override_missing(monkeypatch):
     df = _base_data()
 
     def macd_hist(data, fast, slow, signal):
-        return pd.DataFrame({"MACDh_0": [-1, -0.5, 0.5, 1.0]}, index=data.index)
+        cols = contracts.CONTRACTS["macd"](fast=fast, slow=slow, signal=signal)
+        return pd.DataFrame(
+            {
+                cols[1]: [-1, -0.5, 0.5, 1.0],
+                cols[0]: [0, 0, 0, 0],
+                cols[2]: [0, 0, 0, 0],
+            },
+            index=data.index,
+        )
 
     monkeypatch.setattr(indicator_library, "calculate_macd", macd_hist)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_hist)

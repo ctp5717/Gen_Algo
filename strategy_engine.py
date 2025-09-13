@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 import config
+import indicator_contracts as contracts
 import indicator_library as ind_lib  # Import our toolbox of indicators
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ VOLUME_INDICATORS = {"obv", "mfi", "adl", "cmf"}
 # DataFrame.filter calls.
 INDICATOR_COLUMN_PREFIXES = {
     "bbands": {"upper": "BBU", "middle": "BBM", "lower": "BBL"},
-    "keltner": {"upper": "KCU", "middle": "KCM", "lower": "KCL"},
+    "keltner": {"upper": "KCUe", "middle": "KCBe", "lower": "KCLe"},
     "donchian": {"upper": "DCU", "middle": "DCM", "lower": "DCL"},
     "ma_envelope": {"upper": "MAE_U", "middle": "MAE_M", "lower": "MAE_L"},
     "adx": {"main": "ADX"},
@@ -84,6 +85,15 @@ CacheVal = tuple[weakref.ReferenceType[pd.DataFrame], pd.Series | pd.DataFrame]
 _INDICATOR_CACHE: dict[CacheKey, CacheVal] = {}
 _CACHE_HITS = 0
 _CACHE_MISSES = 0
+
+
+class IndicatorCallError(Exception):
+    """Wrapper for errors raised during indicator evaluation."""
+
+    def __init__(self, indicator: str, original: Exception):
+        self.indicator = indicator
+        msg = f"{indicator} call failed: {original.__class__.__name__}: {original}"
+        super().__init__(msg)
 
 
 def clear_indicator_cache() -> None:
@@ -664,17 +674,35 @@ def process_strategy_rules(
             _CACHE_HITS += 1
             data_ref, indicator_output = cache_entry
             if data_ref() is not ohlc_data:
-                indicator_output = indicator_func(ohlc_data, **norm_params)
-                _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
+                try:
+                    raw_output = indicator_func(ohlc_data, **norm_params)
+                except Exception as e:  # pragma: no cover - defensive
+                    raise IndicatorCallError(indicator_name, e) from e
+                indicator_output = contracts.normalize_output(
+                    indicator_name, raw_output, norm_params, index=ohlc_data.index
+                )
+                _INDICATOR_CACHE[key] = (
+                    weakref.ref(ohlc_data),
+                    indicator_output,
+                )
         else:
             _CACHE_MISSES += 1
-            indicator_output = indicator_func(ohlc_data, **norm_params)
+            try:
+                raw_output = indicator_func(ohlc_data, **norm_params)
+            except Exception as e:  # pragma: no cover - defensive
+                raise IndicatorCallError(indicator_name, e) from e
+            indicator_output = contracts.normalize_output(
+                indicator_name, raw_output, norm_params, index=ohlc_data.index
+            )
             guard = config.CACHE_GUARDRAILS
             if (
                 len(_INDICATOR_CACHE) < guard["MAX_CACHE_KEYS"]
                 and len(ohlc_data) <= guard["MAX_CACHE_ROWS"]
             ):
-                _INDICATOR_CACHE[key] = (weakref.ref(ohlc_data), indicator_output)
+                _INDICATOR_CACHE[key] = (
+                    weakref.ref(ohlc_data),
+                    indicator_output,
+                )
         condition_type = condition_logic.get("type")
 
         target_series = select_indicator_series(

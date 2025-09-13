@@ -25,11 +25,14 @@ To Add a New Indicator:
    the function name in the `config.py` file.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, Dict, List
 
 import numpy as np
 import pandas as pd
+
+import indicator_contracts as contracts
 
 # -- Compatibility shim -------------------------------------------------------
 # Some versions of pandas_ta expect ``numpy.NaN`` to be defined, but newer
@@ -41,6 +44,15 @@ if not hasattr(np, "NaN"):
     np.NaN = np.nan
 
 import pandas_ta as ta
+
+logger = logging.getLogger(__name__)
+logger.info(
+    "Indicator backend: pandas-ta %s, pandas %s, numpy %s, TA-Lib %s",
+    getattr(ta, "__version__", "unknown"),
+    pd.__version__,
+    np.__version__,
+    "enabled" if getattr(ta, "USE_TALIB", False) else "disabled",
+)
 
 
 @dataclass
@@ -190,7 +202,7 @@ def calculate_macd(
             "Failed to calculate MACD. Check input data and parameters."
         )
 
-    return macd_df
+    return contracts.normalize_output("macd", macd_df, params, index=ohlc_data.index)
 
 
 def calculate_bbands(
@@ -212,7 +224,12 @@ def calculate_bbands(
             "Failed to calculate BBands. Check input data and parameters."
         )
 
-    return bbands_df
+    return contracts.normalize_output(
+        "bbands",
+        bbands_df,
+        {"period": period, "std_dev": std_dev},
+        index=ohlc_data.index,
+    )
 
 
 def calculate_sma(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
@@ -264,7 +281,7 @@ def calculate_stoch(
     stoch = ohlc_data.ta.stoch(k=k, d=d, smooth_k=smooth_k)
     if stoch is None:
         raise ConnectionError("Failed to calculate Stochastic Oscillator")
-    return stoch
+    return contracts.normalize_output("stoch", stoch, params, index=ohlc_data.index)
 
 
 def calculate_cci(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
@@ -356,12 +373,14 @@ def calculate_adx(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
     adx = ohlc_data.ta.adx(length=period)
     if adx is None:
         raise ConnectionError("Failed to calculate ADX")
-    return adx
+    return contracts.normalize_output(
+        "adx", adx, {"period": period}, index=ohlc_data.index
+    )
 
 
 def calculate_psar(
     ohlc_data: pd.DataFrame, acceleration: float = 0.02, maximum: float = 0.2
-) -> pd.Series:
+) -> pd.DataFrame:
     """Calculate the Parabolic SAR indicator."""
     for name, val in {"acceleration": acceleration, "maximum": maximum}.items():
         if not isinstance(val, (int, float)) or isinstance(val, bool):
@@ -371,7 +390,9 @@ def calculate_psar(
     psar = ohlc_data.ta.psar(acc=acceleration, max=maximum)
     if psar is None:
         raise ConnectionError("Failed to calculate PSAR")
-    return psar
+    return contracts.normalize_output(
+        "psar", psar, {"acc": acceleration, "maximum": maximum}, index=ohlc_data.index
+    )
 
 
 def calculate_keltner(
@@ -397,7 +418,12 @@ def calculate_keltner(
     kc = ohlc_data.ta.kc(length=period, scalar=multiplier)
     if kc is None:
         raise ConnectionError("Failed to calculate Keltner Channels")
-    return kc
+    return contracts.normalize_output(
+        "keltner",
+        kc,
+        {"period": period, "multiplier": multiplier},
+        index=ohlc_data.index,
+    )
 
 
 def calculate_donchian(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
@@ -409,7 +435,9 @@ def calculate_donchian(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
     dc = ohlc_data.ta.donchian(length=period)
     if dc is None:
         raise ConnectionError("Failed to calculate Donchian Channels")
-    return dc
+    return contracts.normalize_output(
+        "donchian", dc, {"period": period}, index=ohlc_data.index
+    )
 
 
 def calculate_stdev_channel(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
@@ -580,9 +608,11 @@ def calculate_ichimoku(
         if val < 1:
             raise ValueError(f"Ichimoku '{name}' must be ≥1")
     ich = ohlc_data.ta.ichimoku(tenkan=tenkan, kijun=kijun, senkou=senkou)
+    if isinstance(ich, tuple):
+        ich = ich[0]
     if ich is None:
         raise ConnectionError("Failed to calculate Ichimoku")
-    return ich
+    return contracts.normalize_output("ichimoku", ich, params, index=ohlc_data.index)
 
 
 def calculate_pivot_points(ohlc_data: pd.DataFrame) -> pd.DataFrame:
@@ -631,7 +661,10 @@ def calculate_trix(
         trix = ohlc_data.ta.trix(length=period)
     if trix is None:
         raise ConnectionError("Failed to calculate TRIX")
-    return trix
+    params = {"period": period}
+    if signal is not None:
+        params["signal"] = signal
+    return contracts.normalize_output("trix", trix, params, index=ohlc_data.index)
 
 
 def calculate_roc(ohlc_data: pd.DataFrame, period: int) -> pd.Series:

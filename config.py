@@ -121,7 +121,9 @@ for _cond in STRATEGY_RULES.get("entry_rules", {}).get("conditions", []):
         ] = max_lookback_period
         break
 if "m" in TIMEFRAME.lower() or "h" in TIMEFRAME.lower():
-    minutes = 60 if TIMEFRAME.endswith("h") else int(TIMEFRAME[:-1])
+    minutes = (
+        60 * int(TIMEFRAME[:-1]) if TIMEFRAME.endswith("h") else int(TIMEFRAME[:-1])
+    )
     bars_per_day = int(24 * 60 / minutes)
     MAX_HOLD_PERIOD = MAX_HOLD_DAYS * bars_per_day
 else:
@@ -166,7 +168,7 @@ def to_pandas_freq(tf: str) -> str:
     if tf.endswith("d"):
         return tf[:-1] + "D"
     if tf.endswith("h"):
-        return tf[:-1] + "h"
+        return tf[:-1] + "H"
     if tf.endswith("m"):
         # Pandas deprecated the 'T' alias for minutes; use 'min' instead
         return tf[:-1] + "min"

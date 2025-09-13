@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 
+import indicator_contracts as contracts  # noqa: E402
 import indicator_library  # noqa: E402
 import strategy_engine  # noqa: E402
 
@@ -39,7 +40,7 @@ INDICATOR_CASES = [
         "calculate_stoch",
         "stoch",
         "df",
-        ["STOCHk_14", "STOCHd_14"],
+        contracts.CONTRACTS["stoch"](k=14, d=3, smooth_k=3),
         {"k": 14, "d": 3, "smooth_k": 3},
     ),
     ("calculate_cci", "cci", "series", None, {"period": 2}),
@@ -56,22 +57,28 @@ INDICATOR_CASES = [
         "calculate_adx",
         "adx",
         "df",
-        ["ADX_14", "DMP_14", "DMN_14"],
+        contracts.CONTRACTS["adx"](period=14),
         {"period": 14},
     ),
-    ("calculate_psar", "psar", "series", None, {}),
+    (
+        "calculate_psar",
+        "psar",
+        "df",
+        contracts.CONTRACTS["psar"](),
+        {},
+    ),
     (
         "calculate_keltner",
         "kc",
         "df",
-        ["KCU_20", "KCM_20", "KCL_20"],
+        contracts.CONTRACTS["keltner"](period=20, multiplier=2.0),
         {"period": 20, "multiplier": 2.0},
     ),
     (
         "calculate_donchian",
         "donchian",
         "df",
-        ["DCU_20", "DCM_20", "DCL_20"],
+        contracts.CONTRACTS["donchian"](period=20),
         {"period": 20},
     ),
     ("calculate_stdev_channel", "stdev", "series", None, {"period": 5}),
@@ -91,7 +98,7 @@ INDICATOR_CASES = [
         "calculate_ichimoku",
         "ichimoku",
         "df",
-        ["ITS_9", "IKS_26", "ISA_9", "ISB_26", "ICS_26"],
+        contracts.CONTRACTS["ichimoku"](tenkan=9, kijun=26, senkou=52),
         {"tenkan": 9, "kijun": 26, "senkou": 52},
     ),
     (

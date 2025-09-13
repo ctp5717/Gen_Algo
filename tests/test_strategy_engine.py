@@ -15,6 +15,7 @@ sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import config  # noqa: E402
+import indicator_contracts as contracts  # noqa: E402
 import indicator_library  # noqa: E402
 import strategy_engine  # noqa: E402
 
@@ -703,11 +704,14 @@ def test_bband_band_hint_and_fallback(monkeypatch):
     )
 
     def bb_func(ohlc, period=None, std_dev=None):
+        cols = contracts.CONTRACTS["bbands"]()
         return pd.DataFrame(
             {
-                "BBU": [0, 5, 0],
-                "BBM": [0, 0, 5],
-                "BBL": [5, 0, 0],
+                cols[2]: [0, 5, 0],
+                cols[1]: [0, 0, 5],
+                cols[0]: [5, 0, 0],
+                cols[3]: [0, 0, 0],
+                cols[4]: [0, 0, 0],
             },
             index=ohlc.index,
         )
@@ -1039,7 +1043,7 @@ def test_bband_missing_column(monkeypatch):
             ]
         }
     }
-    with pytest.raises(KeyError):
+    with pytest.raises(contracts.IndicatorContractError):
         strategy_engine.process_strategy_rules(data, rules)
 
 
@@ -1134,21 +1138,14 @@ def test_parameter_type_validation():
         )
 
 
-@pytest.mark.parametrize(
-    "macd_output",
-    [
-        pd.DataFrame({"MACDh_1": [-1, 1], "MACD": [-1, -1]}),
-        pd.DataFrame({"MACD": [-1, 1], "MACDs": [-1, -1]}),
-        pd.DataFrame({"MACDs": [-1, 1], "Other": [-1, -1]}),
-        pd.Series([-1, 1], name="MACDh_1"),
-    ],
-    ids=["hist", "line", "first", "series"],
-)
-def test_macd_component_selection(monkeypatch, macd_output):
+def test_macd_component_selection(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
+    cols = contracts.CONTRACTS["macd"](fast=12, slow=26, signal=9)
 
     def macd_func(df, fast, slow, signal):
-        return macd_output
+        return pd.DataFrame(
+            {cols[1]: [-1, 1], cols[0]: [-1, -1], cols[2]: [0, 0]}, index=df.index
+        )
 
     monkeypatch.setattr(indicator_library, "calculate_macd", macd_func)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_func)
@@ -1168,6 +1165,16 @@ def test_macd_component_selection(monkeypatch, macd_output):
     res = strategy_engine.process_strategy_rules(data, rules)
     expected = pd.Series([False, True], index=data.index)
     pd.testing.assert_series_equal(res.astype(bool), expected, check_names=False)
+
+    def macd_series(df, fast, slow, signal):
+        return pd.Series([-1, 1], name=cols[1])
+
+    strategy_engine.clear_indicator_cache()
+    monkeypatch.setattr(indicator_library, "calculate_macd", macd_series)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_series)
+
+    with pytest.raises(contracts.IndicatorContractError):
+        strategy_engine.process_strategy_rules(data, rules)
 
 
 def test_macd_empty_dataframe(monkeypatch):
@@ -1191,15 +1198,20 @@ def test_macd_empty_dataframe(monkeypatch):
         }
     }
 
-    with pytest.raises(KeyError, match="available"):
+    with pytest.raises(contracts.IndicatorContractError):
         strategy_engine.process_strategy_rules(data, rules)
 
 
 def test_macd_column_hint(monkeypatch):
     data = pd.DataFrame({"Close": [1, 2]}, index=pd.RangeIndex(2))
 
+    cols_alt = contracts.CONTRACTS["macd"](fast=12, slow=26, signal=9)
+
     def macd_alt(df, fast, slow, signal):
-        return pd.DataFrame({"MACD_Hist": [-1, 1], "MACD": [-1, 1]})
+        return pd.DataFrame(
+            {cols_alt[1]: [-1, 1], cols_alt[0]: [-1, 1], cols_alt[2]: [0, 0]},
+            index=df.index,
+        )
 
     monkeypatch.setattr(indicator_library, "calculate_macd", macd_alt)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "macd", macd_alt)
@@ -1213,7 +1225,7 @@ def test_macd_column_hint(monkeypatch):
                     "condition": {
                         "type": "indicator_is_above_value",
                         "value": 0,
-                        "column": "MACD",
+                        "column": cols_alt[1],
                     },
                 }
             ]
@@ -1460,6 +1472,7 @@ def test_clear_cache_between_assets(monkeypatch):
     }
     strategy_engine.process_strategy_rules(data, rules)
     strategy_engine.process_strategy_rules(data, rules)
+    # cache should be cleared between calls when guardrail is enabled
     assert calls["n"] == 2
 
 

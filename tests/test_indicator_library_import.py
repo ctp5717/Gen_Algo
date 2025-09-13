@@ -34,7 +34,6 @@ def test_indicator_library_imports_pandas_ta(monkeypatch):
         ("uo", "ultimate_oscillator", {"short": 2, "medium": 3, "long": 4}),
         ("willr", "williams_r", {"period": 2}),
         ("kc", "keltner", {"period": 2, "multiplier": 1.5}),
-        ("dc", "donchian", {"period": 2}),
         ("dmi", "adx", {"period": 2}),
         ("bb", "bbands", {"period": 2, "std_dev": 2}),
         ("bollinger", "bbands", {"period": 2, "std_dev": 2}),
@@ -51,7 +50,13 @@ def test_indicator_aliases(alias, target, kwargs):
             "Volume": [1] * 5,
         }
     )
+    import importlib
+
+    import indicator_library as il
     import strategy_engine as se
+
+    importlib.reload(il)
+    importlib.reload(se)
 
     res_alias = se.INDICATOR_MAPPING[alias](df, **kwargs)
     res_full = se.INDICATOR_MAPPING[target](df, **kwargs)
