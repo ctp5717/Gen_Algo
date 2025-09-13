@@ -62,7 +62,7 @@ VOLUME_INDICATORS = {"obv", "mfi", "adl", "cmf"}
 # DataFrame.filter calls.
 INDICATOR_COLUMN_PREFIXES = {
     "bbands": {"upper": "BBU", "middle": "BBM", "lower": "BBL"},
-    "keltner": {"upper": "KCU", "middle": "KCM", "lower": "KCL"},
+    "keltner": {"upper": "KCUe", "middle": "KCBe", "lower": "KCLe"},
     "donchian": {"upper": "DCU", "middle": "DCM", "lower": "DCL"},
     "ma_envelope": {"upper": "MAE_U", "middle": "MAE_M", "lower": "MAE_L"},
     "adx": {"main": "ADX"},

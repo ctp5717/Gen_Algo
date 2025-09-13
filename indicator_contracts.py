@@ -30,22 +30,24 @@ def _fmt(x: float | int) -> str:
     return s if "." in s else s + ".0"
 
 
-def _macd_contract(fast: int, slow: int, signal: int, **_: Any) -> List[str]:
+def _macd_contract(
+    fast: int = 12, slow: int = 26, signal: int = 9, **_: Any
+) -> List[str]:
     base = f"{fast}_{slow}_{signal}"
     return [f"MACD_{base}", f"MACDh_{base}", f"MACDs_{base}"]
 
 
-def _stoch_contract(k: int, d: int, smooth_k: int = 3, **_: Any) -> List[str]:
+def _stoch_contract(k: int = 14, d: int = 3, smooth_k: int = 3, **_: Any) -> List[str]:
     base = f"{k}_{d}_{smooth_k}"
     return [f"STOCHk_{base}", f"STOCHd_{base}", f"STOCHh_{base}"]
 
 
-def _adx_contract(period: int, **_: Any) -> List[str]:
+def _adx_contract(period: int = 14, **_: Any) -> List[str]:
     p = period
     return [f"ADX_{p}", f"ADXR_{p}_2", f"DMP_{p}", f"DMN_{p}"]
 
 
-def _bbands_contract(period: int, std_dev: float, **_: Any) -> List[str]:
+def _bbands_contract(period: int = 20, std_dev: float = 2.0, **_: Any) -> List[str]:
     s = _fmt(std_dev)
     base = f"{period}_{s}_{s}"
     return [
@@ -67,19 +69,21 @@ def _psar_contract(acc: float = 0.02, maximum: float = 0.2, **_: Any) -> List[st
     ]
 
 
-def _keltner_contract(period: int, multiplier: float = 2.0, **_: Any) -> List[str]:
+def _keltner_contract(period: int = 20, multiplier: float = 2.0, **_: Any) -> List[str]:
     base = f"{period}_{_fmt(multiplier)}"
     return [f"KCLe_{base}", f"KCBe_{base}", f"KCUe_{base}"]
 
 
-def _donchian_contract(period: int, offset: int | None = None, **_: Any) -> List[str]:
+def _donchian_contract(
+    period: int = 20, offset: int | None = None, **_: Any
+) -> List[str]:
     off = offset if offset is not None else period
     base = f"{period}_{off}"
     return [f"DCL_{base}", f"DCM_{base}", f"DCU_{base}"]
 
 
 def _trix_contract(
-    period: int, signal: int | None = None, **_: Any
+    period: int = 15, signal: int | None = None, **_: Any
 ) -> List[str] | None:
     if signal is None:
         return None
@@ -87,7 +91,9 @@ def _trix_contract(
     return [f"TRIX_{base}", f"TRIXs_{base}"]
 
 
-def _ichimoku_contract(tenkan: int, kijun: int, senkou: int, **_: Any) -> List[str]:
+def _ichimoku_contract(
+    tenkan: int = 9, kijun: int = 26, senkou: int = 52, **_: Any
+) -> List[str]:
     return [
         f"IKS_{kijun}",
         f"ITS_{tenkan}",

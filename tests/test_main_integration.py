@@ -66,6 +66,7 @@ def test_main_runs(monkeypatch):
     # Patch analysis and fitness evaluator
     monkeypatch.setattr(main.analysis, "run_champion_analysis", lambda *a, **k: None)
     monkeypatch.setattr(main, "ensure_real_vectorbt", lambda *a, **k: None)
+    monkeypatch.setattr(main, "indicator_preflight", lambda *a, **k: None)
     monkeypatch.setattr(
         main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
     )
@@ -257,6 +258,18 @@ def test_main_uses_tuner(monkeypatch):
     monkeypatch.setattr(main.config, "GA_PARENTS_MATING", 1, raising=False)
     monkeypatch.setattr(main.config, "GA_MUTATION_NUM_GENES", 1, raising=False)
     monkeypatch.setattr(main.config, "AUTO_TUNE_ENABLED", True, raising=False)
+    monkeypatch.setattr(
+        main,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main.config,
+        "STRATEGY_RULES",
+        {"entry_rules": {"combination_logic": "AND", "conditions": []}},
+        raising=False,
+    )
     train_period = {"start": "2020-01-01", "end": "2020-01-02"}
     valid_period = {"start": "2020-01-02", "end": "2020-01-03"}
     monkeypatch.setattr(main.config, "TRAINING_PERIOD", train_period, raising=False)
