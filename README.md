@@ -232,7 +232,7 @@ This module's purpose is to provide a final, unbiased report on the performance 
     numpy
     yfinance
     python-binance
-    pandas-ta
+    pandas-ta==0.4.67b0
     setuptools
     python-dateutil
     matplotlib
@@ -243,6 +243,10 @@ This module's purpose is to provide a final, unbiased report on the performance 
     ```bash
     pip install -r requirements.txt
     ```
+
+    On startup the framework logs the detected indicator backend and library
+    versions (``pandas-ta``, ``pandas``, ``numpy`` and whether ``TA-Lib`` is
+    active) so mismatches are easier to diagnose.
 
     Optionally install and run `pre-commit` for linting:
 

@@ -238,6 +238,7 @@ class MultiAssetFitnessEvaluator:
             assets_traded = 0
             asset_weights_cfg = self.settings.get("asset_weights") or {}
             verbose = bool(self.settings.get("verbose_asset_errors"))
+            err_counts = Counter()
 
             empty_stats = {
                 "sortino": None,
@@ -299,6 +300,9 @@ class MultiAssetFitnessEvaluator:
                                 repr(e),
                                 reason_trace,
                             )
+                            ind = getattr(e, "indicator", None)
+                            if ind:
+                                err_counts[ind] += 1
             else:
                 for ticker in self._sorted_tickers:
                     ohlc = self.group_data[ticker]
@@ -333,6 +337,9 @@ class MultiAssetFitnessEvaluator:
                             repr(e),
                             reason_trace,
                         )
+                        ind = getattr(e, "indicator", None)
+                        if ind:
+                            err_counts[ind] += 1
 
             for ticker in self._sorted_tickers:
                 stats, eval_reason, reason_detail, reason_trace = evaluation_results[
@@ -499,6 +506,9 @@ class MultiAssetFitnessEvaluator:
             for t, w in zip(included_assets, weights):
                 per_asset_details[t]["asset_weight"] = w
                 w_map[t] = w
+
+            if err_counts:
+                logger.info("evaluation error counts: %s", dict(err_counts))
 
             m_arr = np.array(per_asset_metrics, dtype=float)
             w_arr = np.array(weights, dtype=float)
