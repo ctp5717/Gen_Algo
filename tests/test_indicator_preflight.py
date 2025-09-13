@@ -14,8 +14,10 @@ sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 import analysis  # noqa: E402
 import config  # noqa: E402
 import fitness  # noqa: E402
+import indicator_contracts as contracts  # noqa: E402
 import indicator_library  # noqa: E402
 import main  # noqa: E402
+import preflight  # noqa: E402
 import strategy_engine  # noqa: E402
 
 
@@ -138,7 +140,8 @@ def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
         return pd.Series([1, 2, 3], name="EMA")
 
     def bb(df, **p):
-        return pd.DataFrame({"u": [1, 1, 1], "l": [0, 0, 0]})
+        cols = contracts.CONTRACTS["bbands"]()
+        return pd.DataFrame({c: [1, 1, 1] for c in cols})
 
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "ema", ema)
     monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "bbands", bb)
@@ -154,10 +157,13 @@ def test_indicator_preflight_logs_and_metadata(monkeypatch, capsys, tmp_path):
     main.indicator_preflight(data, rules)
     out = capsys.readouterr().out
     assert "ema: (Series)" in out
-    assert "bbands: ['u', 'l']" in out
+    cols = contracts.CONTRACTS["bbands"]()
+    for c in cols:
+        assert c in out
     ic = captured["indicator_columns"]
     assert ic["ema"]["type"] == "Series"
     assert ic["bbands"]["type"] == "DataFrame"
+    assert ic["bbands"]["columns"] == cols
     assert captured["preflight_all"] is False
     assert captured["preflight_sample_len"] == 3
     assert "preflight_sufficiency_hint" in captured
@@ -219,7 +225,7 @@ def test_indicator_preflight_all_active_failure_exits(monkeypatch, capsys, tmp_p
         main.analysis, "_write_run_metadata", lambda *a, **k: None, raising=False
     )
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(preflight.PreflightError):
         main.indicator_preflight(
             data,
             {
@@ -239,7 +245,7 @@ def test_indicator_preflight_all_active_failure_exits(monkeypatch, capsys, tmp_p
         )
 
     out = capsys.readouterr().out
-    assert "bad failed" in out
+    assert "Performing indicator preflight" in out
 
 
 def test_indicator_preflight_all_success(monkeypatch, tmp_path):
