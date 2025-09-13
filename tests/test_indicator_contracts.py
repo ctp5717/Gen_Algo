@@ -38,3 +38,12 @@ def test_contract_columns(name, func, params):
     out = func(df, **params)
     expected = contracts.CONTRACTS[name](**params)
     assert list(out.columns) == expected
+
+
+def test_bbands_non_default_std_dev():
+    """BBands should reflect non-default standard deviations in column names."""
+    df = _sample_df()
+    params = {"period": 20, "std_dev": 0.5}
+    out = lib.calculate_bbands(df, **params)
+    expected = contracts.CONTRACTS["bbands"](**params)
+    assert list(out.columns) == expected
