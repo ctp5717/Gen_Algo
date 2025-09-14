@@ -454,7 +454,7 @@ def calculate_donchian(ohlc_data: pd.DataFrame, period: int) -> pd.DataFrame:
         raise TypeError("Donchian 'period' must be int")
     if period < 1:
         raise ValueError("Donchian 'period' must be ≥1")
-    dc = ohlc_data.ta.donchian(length=period)
+    dc = ohlc_data.ta.donchian(lower_length=period, upper_length=period)
     if dc is None:
         raise ConnectionError("Failed to calculate Donchian Channels")
     return contracts.normalize_output(
