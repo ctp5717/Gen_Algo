@@ -59,7 +59,14 @@ def _bbands_contract(period: int = 20, std_dev: float = 2.0, **_: Any) -> List[s
     ]
 
 
-def _psar_contract(acc: float = 0.02, maximum: float = 0.2, **_: Any) -> List[str]:
+def _psar_contract(
+    acc: float = 0.02,
+    maximum: float = 0.2,
+    acceleration: float | None = None,
+    **_: Any,
+) -> List[str]:
+    if acceleration is not None:
+        acc = acceleration
     base = f"{_fmt(acc)}_{_fmt(maximum)}"
     return [
         f"PSARl_{base}",

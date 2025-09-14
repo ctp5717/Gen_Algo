@@ -54,9 +54,7 @@ def test_psar_non_default_params():
     df = _sample_df()
     params = {"acceleration": 0.01, "maximum": 0.1}
     out = lib.calculate_psar(df, **params)
-    expected = contracts.CONTRACTS["psar"](
-        acc=params["acceleration"], maximum=params["maximum"]
-    )
+    expected = contracts.CONTRACTS["psar"](**params)
     assert list(out.columns) == expected
 
 
@@ -65,7 +63,5 @@ def test_psar_float_rounding():
     df = _sample_df()
     params = {"acceleration": 0.02, "maximum": 0.15000000000000002}
     out = lib.calculate_psar(df, **params)
-    expected = contracts.CONTRACTS["psar"](
-        acc=params["acceleration"], maximum=params["maximum"]
-    )
+    expected = contracts.CONTRACTS["psar"](**params)
     assert list(out.columns) == expected
