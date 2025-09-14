@@ -59,3 +59,18 @@ def test_preflight_fails_on_missing_column(monkeypatch):
 
     with pytest.raises(preflight.PreflightError):
         preflight.check_indicator_contracts(_df(), rules)
+
+
+def test_preflight_psar_alias():
+    """PSAR acceleration param should be honored during preflight."""
+    rules = {
+        "entry_rules": {
+            "conditions": [
+                {
+                    "indicator": "psar",
+                    "params": {"acceleration": 0.05, "maximum": 0.1},
+                }
+            ]
+        }
+    }
+    preflight.check_indicator_contracts(_df(), rules)
