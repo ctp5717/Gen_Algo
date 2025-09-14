@@ -27,6 +27,7 @@ To Add a New Indicator:
 
 import logging
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Callable, Dict, List
 
 import numpy as np
@@ -395,6 +396,19 @@ def calculate_psar(
             raise TypeError(f"PSAR '{name}' must be numeric")
         if val <= 0:
             raise ValueError(f"PSAR '{name}' must be > 0")
+
+    # pandas-ta uses the raw float values in column names.  When parameters
+    # include floating point representation noise (e.g. ``0.15000000000000002``)
+    # the resulting column names would not match our contract formatting.  To
+    # keep column names deterministic, quantize inputs to six decimal places
+    # before invoking the underlying indicator.
+    acceleration = float(
+        Decimal(str(acceleration)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    )
+    maximum = float(
+        Decimal(str(maximum)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    )
+
     psar = ohlc_data.ta.psar(af=acceleration, max_af=maximum)
     if psar is None:
         raise ConnectionError("Failed to calculate PSAR")

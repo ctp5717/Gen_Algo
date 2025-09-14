@@ -58,3 +58,14 @@ def test_psar_non_default_params():
         acc=params["acceleration"], maximum=params["maximum"]
     )
     assert list(out.columns) == expected
+
+
+def test_psar_float_rounding():
+    """PSAR handles float representation noise in parameters."""
+    df = _sample_df()
+    params = {"acceleration": 0.02, "maximum": 0.15000000000000002}
+    out = lib.calculate_psar(df, **params)
+    expected = contracts.CONTRACTS["psar"](
+        acc=params["acceleration"], maximum=params["maximum"]
+    )
+    assert list(out.columns) == expected
