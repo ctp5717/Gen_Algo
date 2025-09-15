@@ -473,6 +473,7 @@ class MultiAssetFitnessEvaluator:
                         "trade_floor": reason,
                         "coverage": 0.0,
                         "min_assets": reason,
+                        "stability": 0.0,
                     },
                     "min_total_trades": self.settings.get("min_total_trades", 0),
                     "fitness": poor_score,
@@ -517,6 +518,31 @@ class MultiAssetFitnessEvaluator:
             lam = self.settings.get("lambda_dispersion", 0.0)
             F = mu - lam * sigma
 
+            stability_penalty = 0.0
+            if config.ENABLE_STABILITY_REG:
+                history = self.settings.get("param_history") or []
+                covs = []
+                for g in config.STABILITY_GENES:
+                    vals = [
+                        float(p[g])
+                        for p in history
+                        if isinstance(p.get(g), (int, float))
+                    ]
+                    if len(vals) > 1:
+                        mean = float(np.mean(vals))
+                        if mean != 0:
+                            std = float(
+                                np.std(vals)
+                            )  # population std (ddof=0) matches SRE
+                            if std > 0 and np.isfinite(std):
+                                cov = std / abs(mean)
+                                if np.isfinite(cov):
+                                    covs.append(cov)
+                if covs:
+                    mean_cov = float(np.mean(covs))
+                    stability_penalty = config.STABILITY_ALPHA * mean_cov
+                    F -= stability_penalty
+
             policy = self.settings.get("trade_floor_policy", "hard_floor")
             poor_score = self.settings.get("poor_score", -999.0)
             min_trades = self.settings.get("min_total_trades", 0)
@@ -545,6 +571,7 @@ class MultiAssetFitnessEvaluator:
                             "trade_floor": trade_penalty,
                             "coverage": 0.0,
                             "min_assets": min_assets_penalty,
+                            "stability": stability_penalty,
                         },
                         "min_total_trades": min_trades,
                         "fitness": F,
@@ -575,6 +602,7 @@ class MultiAssetFitnessEvaluator:
                         "trade_floor": trade_penalty,
                         "coverage": 0.0,
                         "min_assets": min_assets_penalty,
+                        "stability": stability_penalty,
                     },
                     "min_total_trades": min_trades,
                     "fitness": F,
@@ -614,6 +642,7 @@ class MultiAssetFitnessEvaluator:
                     "trade_floor": trade_penalty,
                     "coverage": coverage_penalty,
                     "min_assets": min_assets_penalty,
+                    "stability": stability_penalty,
                 },
                 "min_total_trades": min_trades,
                 "fitness": F,
@@ -633,7 +662,12 @@ class MultiAssetFitnessEvaluator:
                 "total_trades": 0,
                 "assets_included": 0,
                 "assets_ignored": len(self.group_data),
-                "penalties": {"trade_floor": None, "coverage": 0.0, "min_assets": None},
+                "penalties": {
+                    "trade_floor": None,
+                    "coverage": 0.0,
+                    "min_assets": None,
+                    "stability": 0.0,
+                },
                 "min_total_trades": self.settings.get("min_total_trades", 0),
                 "fitness": poor,
             }
