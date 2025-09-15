@@ -69,10 +69,11 @@ def test_load_wf_summary_and_per_asset(tmp_path):
     _write_sample_files(tmp_path)
     summary = load_wf_summary(tmp_path / "walk_forward" / "walk_forward_summary.json")
     assert isinstance(summary, WalkForwardSummaryV1)
-    per_asset = load_wf_per_asset(
+    per_asset, unknown = load_wf_per_asset(
         tmp_path / "walk_forward" / "walk_forward_per_asset.csv"
     )
     assert isinstance(per_asset, WalkForwardPerAssetV1)
+    assert unknown == []
 
 
 def test_load_wf_summary_missing_key(tmp_path):
@@ -354,8 +355,24 @@ def test_load_wf_per_asset_header_case_and_whitespace(tmp_path):
     wf.mkdir()
     csv = "Fold ,Ticker ,Score ,Trades ,Included \n0,AAA,1.0,5,True\n"
     (wf / "walk_forward_per_asset.csv").write_text(csv)
-    obj = load_wf_per_asset(wf / "walk_forward_per_asset.csv")
+    obj, unknown = load_wf_per_asset(wf / "walk_forward_per_asset.csv")
     assert obj.rows[0].ticker == "AAA"
+    assert unknown == []
+
+
+def test_unknown_columns_logged_on_success(tmp_path, monkeypatch):
+    _write_sample_files(tmp_path)
+    wf = tmp_path / "walk_forward"
+    df = pd.read_csv(wf / "walk_forward_per_asset.csv")
+    df["foo"] = 1
+    df.to_csv(wf / "walk_forward_per_asset.csv", index=False)
+    monkeypatch.setitem(config.RECOMMENDATION, "LOG_UNKNOWN_COLUMNS_ON_SUCCESS", True)
+    recommendation.generate_recommendation({"run_dir": tmp_path})
+    meta = json.loads((tmp_path / "run_metadata.json").read_text())
+    assert {
+        "source": "walk_forward_per_asset.csv",
+        "unknown_columns": ["foo"],
+    } in meta.get("diagnostics", [])
 
 
 def test_generate_recommendation_determinism(tmp_path):

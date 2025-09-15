@@ -100,8 +100,15 @@ def load_wf_summary(path: str | Path) -> WalkForwardSummaryV1:
     return WalkForwardSummaryV1.model_validate(raw)
 
 
-def load_wf_per_asset(path: str | Path) -> WalkForwardPerAssetV1:
-    """Load and validate ``walk_forward_per_asset.csv``."""
+def load_wf_per_asset(path: str | Path) -> tuple[WalkForwardPerAssetV1, List[str]]:
+    """Load and validate ``walk_forward_per_asset.csv``.
+
+    Returns
+    -------
+    tuple
+        Parsed :class:`WalkForwardPerAssetV1` object and a sorted list of
+        column names from the CSV that were not recognized by the schema.
+    """
     mapping = {
         "Fold": "fold",
         "Ticker": "ticker",
@@ -150,6 +157,7 @@ def load_wf_per_asset(path: str | Path) -> WalkForwardPerAssetV1:
         raise SchemaCsvError("no rows present", unknown_columns)
     adapter = TypeAdapter(WalkForwardPerAssetV1)
     try:
-        return adapter.validate_python({"rows": rows})
+        obj = adapter.validate_python({"rows": rows})
     except Exception as e:
         raise SchemaCsvError(str(e), unknown_columns) from e
+    return obj, unknown_columns
