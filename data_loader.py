@@ -26,6 +26,33 @@ _BINANCE_CLIENT: Any | None = None
 _BINANCE_CLIENT_LOCK = threading.Lock()
 
 
+def build_cache_stem(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    interval: str,
+    *,
+    source: str | None = None,
+    normalize: bool = True,
+) -> str:
+    """Return the canonical cache stem for a dataset request.
+
+    Parameters mirror :func:`get_data` so callers in other modules can build
+    matching file names when hashing or validating cache contents.
+    """
+
+    normalized = _normalize_ticker(ticker) if normalize else ticker
+    if source is None:
+        fallback_source = getattr(config, "DATA_SOURCE", "")
+        if not isinstance(fallback_source, str):
+            fallback_source = ""
+        resolved_source = fallback_source
+    else:
+        resolved_source = source
+    resolved_source = resolved_source.lower()
+    return f"{normalized}_{resolved_source}_{start_date}_{end_date}_{interval}"
+
+
 def set_binance_client(client: Any | None) -> None:
     """Override the cached Binance client (mainly for testing)."""
 
@@ -231,11 +258,19 @@ def get_data(
     """
     logger = logger or logging.getLogger(__name__)
 
-    source = config.DATA_SOURCE.lower()
+    raw_source = getattr(config, "DATA_SOURCE", "")
+    source = raw_source.lower()
     ticker = _normalize_ticker(ticker)
 
     # Include the source in the cache filename to prevent conflicts
-    cache_stem = f"{ticker}_{source}_{start_date}_{end_date}_{interval}"
+    cache_stem = build_cache_stem(
+        ticker,
+        start_date,
+        end_date,
+        interval,
+        source=raw_source,
+        normalize=False,
+    )
     cache_filename = f"{cache_stem}{CACHE_EXTENSION}"
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
     legacy_filepath = os.path.join(CACHE_DIR, f"{cache_stem}{LEGACY_CACHE_EXTENSION}")
