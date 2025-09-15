@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Strategy Recommendation Engine."""
 
+import hashlib
 import json
 import math
+import os
 import statistics
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
@@ -180,18 +182,26 @@ def _param_stability(
     values: Dict[str, List[float]] = {}
     for f in folds_in:
         for k, v in f.params.items():
-            if isinstance(v, (int, float)) and not np.isnan(v):
-                values.setdefault(k, []).append(float(v))
+            if isinstance(v, (int, float)):
+                fv = float(v)
+                if math.isfinite(fv):
+                    values.setdefault(k, []).append(fv)
     cov: Dict[str, float] = {}
     cov_raw: Dict[str, float] = {}
-    for gene, vals in values.items():
-        if len(set(vals)) <= 1:
+    ddof = config.RECOMMENDATION.get("PARAM_COV_DDOF", 0)
+    eps = 1e-12
+    for gene, collected in values.items():
+        vals = [v for v in collected if math.isfinite(v)]
+        if len(vals) < 2 or all(vals[0] == x for x in vals):
             continue
         mean = float(np.mean(vals))
-        std = float(np.std(vals))
-        if std == 0:
+        if not math.isfinite(mean):
             continue
-        raw = float(std / abs(mean)) if mean else float("inf")
+        std = float(np.std(vals, ddof=ddof))
+        if not math.isfinite(std) or std == 0:
+            continue
+        den = abs(mean) if abs(mean) > eps else 0.0
+        raw = float(std / den) if den else float("inf")
         cov_raw[gene] = raw
         cov[gene] = round(raw, 2)
     threshold = config.RECOMMENDATION["PARAM_COV_UNSTABLE"]
@@ -371,27 +381,85 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
     lines.append(f"- Alpha: {getattr(config, 'STABILITY_ALPHA', 0.0)}")
     genes = ", ".join(getattr(config, "STABILITY_GENES", [])) or "—"
     lines.append(f"- Genes: {genes}")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    lines.append("")
+    lines.append("### Logging")
+    env_name = getattr(config, "ENV_NAME", "")
+    lines.append(f"- ENV: {env_name or '—'}")
+    lines.append(f"- IS_PROD: {getattr(config, 'IS_PROD', False)}")
+    log_flag = cfg.get("LOG_UNKNOWN_COLUMNS_ON_SUCCESS", False)
+    env_override = os.environ.get("SRE_LOG_UNKNOWN_COLS")
+    origin = (
+        "env override"
+        if env_override is not None
+        else ("prod default" if getattr(config, "IS_PROD", False) else "dev default")
+    )
+    if env_override is not None:
+        origin += f" ({env_override})"
+    lines.append(f"- LOG_UNKNOWN_COLUMNS_ON_SUCCESS: {log_flag} ({origin})")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _audit_markdown(md_path: Path, text: str | None = None) -> List[str]:
+    """Return any integrity issues discovered in the recommendation markdown."""
+
+    issues: List[str] = []
+    if text is None:
+        text = md_path.read_text(encoding="utf-8")
+
+    headings = [
+        "## Overall Confidence",
+        "### Confidence Factors",
+        "## Asset Summary",
+        "## Parameter Summary",
+        "## Asset Performance Matrix",
+        "## Parameter Stability",
+        "## SRE Config",
+    ]
+    if "..." in text or "…" in text:
+        issues.append('Report contains ellipses ("..." or "…").')
+    anchors = [
+        "Folds: median ",
+        "Legend: Stars",
+        "| Ticker | Performance | Consistency | Class | Samples |",
+    ]
+    for anchor in anchors:
+        if anchor not in text:
+            issues.append(f"Required anchor missing: {anchor!r}")
+    for heading in headings:
+        count = text.count(heading)
+        if count != 1:
+            issues.append(f"Heading missing or duplicated: {heading} (count={count})")
+    return issues
 
 
 def _schema_error(
-    run_dir: Path, msg: str, details: str, diagnostics: str | None = None
+    run_dir: Path,
+    msg: str,
+    details: str,
+    failed: str,
+    diagnostics: str | None = None,
 ) -> Dict[str, object]:
     error_payload: Dict[str, object] = {
         "error": "schema_validation_failed",
         "message": msg,
         "schema_version": "1.0",
+        "failed_file": failed,
     }
     if diagnostics:
         error_payload["diagnostics"] = diagnostics
+    artifacts = ["strategy_recommendation.md"]
     merge_run_metadata(
         run_dir / "run_metadata.json",
-        {"recommendation": error_payload, "artifacts": ["strategy_recommendation.md"]},
+        {
+            "recommendation": error_payload,
+            "artifacts": list(dict.fromkeys(artifacts)),
+        },
     )
     error_md = run_dir / "strategy_recommendation.md"
     body = (
         "# Strategy Recommendation Report\n\n"
         + "Schema validation failed.\n\n"
+        + f"## Failed file: {failed}\n\n"
         + details
     )
     if diagnostics:
@@ -410,6 +478,7 @@ def _schema_error(
 def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]:
     """Create recommendation artifacts from walk-forward outputs."""
     run_dir = Path(run_context.get("run_dir", "."))
+    meta_path = run_dir / "run_metadata.json"
     wf_dir = run_dir / "walk_forward"
     summary_path = wf_dir / "walk_forward_summary.json"
     per_asset_path = wf_dir / "walk_forward_per_asset.csv"
@@ -420,10 +489,12 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
             f"- summary.{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
             for err in e.errors()
         )
-        return _schema_error(run_dir, "schema validation failed (summary)", details)
+        return _schema_error(
+            run_dir, "schema validation failed (summary)", details, failed="summary"
+        )
     except Exception as e:  # pragma: no cover - exercised in integration
         msg = f"schema validation failed (summary): {e}"
-        return _schema_error(run_dir, msg, msg)
+        return _schema_error(run_dir, msg, msg, failed="summary")
     try:
         per_asset, unknown_cols = load_wf_per_asset(per_asset_path)
     except ValidationError as e:  # pragma: no cover - exercised in integration
@@ -431,7 +502,12 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
             f"- per_asset.{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
             for err in e.errors()
         )
-        return _schema_error(run_dir, "schema validation failed (per_asset)", details)
+        return _schema_error(
+            run_dir,
+            "schema validation failed (per_asset)",
+            details,
+            failed="per_asset",
+        )
     except SchemaCsvError as e:  # pragma: no cover - exercised in integration
         diag = None
         if e.unknown_columns:
@@ -443,10 +519,10 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
                 diag += f" (+{extra} more)"
             diag = f"Unknown columns: {diag}"
         msg = f"schema validation failed (per_asset): {e}"
-        return _schema_error(run_dir, msg, msg, diag)
+        return _schema_error(run_dir, msg, msg, failed="per_asset", diagnostics=diag)
     except Exception as e:  # pragma: no cover - exercised in integration
         msg = f"schema validation failed (per_asset): {e}"
-        return _schema_error(run_dir, msg, msg)
+        return _schema_error(run_dir, msg, msg, failed="per_asset")
 
     conf = _compute_confidence([f.validation_fitness for f in summary.folds])
     assets = _build_asset_matrix(per_asset)
@@ -473,7 +549,6 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
             "source": "walk_forward_per_asset.csv",
             "unknown_columns": unknown_cols,
         }
-        meta_path = run_dir / "run_metadata.json"
         try:
             existing_meta = json.loads(meta_path.read_text())
             diag_list = list(existing_meta.get("diagnostics", []))
@@ -482,8 +557,37 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
         diag_list.append(diag_entry)
         meta_update["diagnostics"] = diag_list
 
-    merge_run_metadata(run_dir / "run_metadata.json", meta_update)
-    _write_markdown(run_dir / "strategy_recommendation.md", payload)
+    merge_run_metadata(meta_path, meta_update)
+    md_path = run_dir / "strategy_recommendation.md"
+    _write_markdown(md_path, payload)
+
+    issues: List[str] = []
+    text: str | None = None
+    try:
+        text = md_path.read_text(encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - defensive
+        issues.append(f"Report read failed: {exc}")
+    else:
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        merge_run_metadata(
+            meta_path,
+            {"artifacts_meta": {"strategy_recommendation.md": {"sha256": digest}}},
+        )
+        try:
+            issues = _audit_markdown(md_path, text=text)
+        except Exception as exc:  # pragma: no cover - defensive
+            issues = [f"Report audit failed: {exc}"]
+
+    if issues:
+        try:
+            existing_meta = json.loads(meta_path.read_text())
+            diag_list = list(existing_meta.get("diagnostics", []))
+        except Exception:
+            diag_list = []
+        diag_list.append({"source": "strategy_recommendation.md", "issues": issues})
+        merge_run_metadata(meta_path, {"diagnostics": diag_list})
+        print("[SRE] Warning: " + " | ".join(issues))
+
     print(
         f"Recommendation: {conf['category']} ({conf['score']}) - "
         "see strategy_recommendation.md for details."

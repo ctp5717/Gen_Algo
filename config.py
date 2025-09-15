@@ -13,6 +13,24 @@ from dateutil.relativedelta import relativedelta
 
 from strategy_rules import STRATEGY_RULES
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Return a boolean from environment variables with a sensible default."""
+
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+ENV_NAME = os.environ.get("ENV", "")
+IS_PROD = ENV_NAME.strip().lower() in {"prod", "production"}
+
 # Global random seed for deterministic runs. Can be overridden via the
 # GA_SEED environment variable which acts like a CLI flag.
 SEED = int(os.environ.get("GA_SEED", 42))
@@ -332,8 +350,9 @@ RECOMMENDATION = {
     "MIN_SAMPLES_FOR_ASSET": 3,
     "PARAM_COV_UNSTABLE": 0.5,
     "PARAM_COV_WATCHLIST": 0.35,
+    "PARAM_COV_DDOF": 0,
     "USE_RETURN_AS_FITNESS": False,
-    "LOG_UNKNOWN_COLUMNS_ON_SUCCESS": False,
+    "LOG_UNKNOWN_COLUMNS_ON_SUCCESS": _env_flag("SRE_LOG_UNKNOWN_COLS", not IS_PROD),
     "ASSET_CLASS_THRESHOLDS": {
         "star": {"performance": 1.0, "consistency": 70},
         "stalwart": {
