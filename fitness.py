@@ -43,6 +43,9 @@ from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
 
+CORE_METRICS = ["Sortino Ratio", "Profit Factor", "Max Drawdown [%]"]
+EXTENDED_METRICS = CORE_METRICS + ["Total Return [%]"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,7 +88,7 @@ class FitnessEvaluator:
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )
 
-            stats = portfolio.stats()
+            stats = portfolio.stats(metrics=CORE_METRICS)
             sortino = stats.get("Sortino Ratio")
             profit_factor = stats.get("Profit Factor")
             max_drawdown = stats.get("Max Drawdown [%]")
@@ -214,7 +217,7 @@ class MultiAssetFitnessEvaluator:
             freq=config.to_pandas_freq(config.TIMEFRAME),
         )
 
-        stats = portfolio.stats()
+        stats = portfolio.stats(metrics=EXTENDED_METRICS)
         trades = int(portfolio.trades.count())
         return {
             "sortino": stats.get("Sortino Ratio"),
@@ -253,7 +256,7 @@ class MultiAssetFitnessEvaluator:
             parallel_cfg = self.settings.get("parallel", {})
             evaluation_results = {}
             if parallel_cfg.get("enabled"):
-                backend = parallel_cfg.get("backend", "thread")
+                backend = parallel_cfg.get("backend", "process")
                 max_workers = parallel_cfg.get("max_workers")
                 Executor = (
                     cf.ProcessPoolExecutor
