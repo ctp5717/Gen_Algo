@@ -352,9 +352,7 @@ RECOMMENDATION = {
     "PARAM_COV_WATCHLIST": 0.35,
     "PARAM_COV_DDOF": 0,
     "USE_RETURN_AS_FITNESS": False,
-    "LOG_UNKNOWN_COLUMNS_ON_SUCCESS": _env_flag(
-        "SRE_LOG_UNKNOWN_COLS", not IS_PROD
-    ),
+    "LOG_UNKNOWN_COLUMNS_ON_SUCCESS": _env_flag("SRE_LOG_UNKNOWN_COLS", not IS_PROD),
     "ASSET_CLASS_THRESHOLDS": {
         "star": {"performance": 1.0, "consistency": 70},
         "stalwart": {

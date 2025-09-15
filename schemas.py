@@ -29,17 +29,13 @@ class Fold(BaseModel):
 
     @field_validator("champion_status", mode="before")
     @classmethod
-    def _validate_champion_status(
-        cls, value: Optional[str]
-    ) -> Optional[str]:
+    def _validate_champion_status(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         allowed = ("Elite", "Viable", "Discarded")
         if value not in allowed:
             allowed_str = " | ".join(allowed)
-            raise ValueError(
-                f"Fold.champion_status must be one of: {allowed_str}"
-            )
+            raise ValueError(f"Fold.champion_status must be one of: {allowed_str}")
         return value
 
 

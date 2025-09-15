@@ -105,9 +105,7 @@ def test_load_wf_summary_bad_champion_status(tmp_path):
     with pytest.raises(ValidationError) as exc:
         load_wf_summary(wf / "walk_forward_summary.json")
     msg = str(exc.value)
-    assert (
-        "Fold.champion_status must be one of: Elite | Viable | Discarded" in msg
-    )
+    assert "Fold.champion_status must be one of: Elite | Viable | Discarded" in msg
 
 
 def test_use_return_as_fitness(monkeypatch, tmp_path):
@@ -646,10 +644,7 @@ def test_markdown_asset_summary_includes_drag_stance(tmp_path):
     md_path = tmp_path / "drag.md"
     recommendation._write_markdown(md_path, payload)
     text = md_path.read_text(encoding="utf-8")
-    assert (
-        "Drags should be underweighted or avoided (e.g., AVAXUSDT, BTCUSDT)."
-        in text
-    )
+    assert "Drags should be underweighted or avoided (e.g., AVAXUSDT, BTCUSDT)." in text
 
 
 def test_markdown_matrix_header_even_when_empty(tmp_path):
