@@ -368,7 +368,7 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
     lines.append(f"- Alpha: {getattr(config, 'STABILITY_ALPHA', 0.0)}")
     genes = ", ".join(getattr(config, "STABILITY_GENES", [])) or "—"
     lines.append(f"- Genes: {genes}")
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _schema_error(
@@ -394,7 +394,7 @@ def _schema_error(
     if diagnostics:
         body += f"\n\n## Diagnostics\n{diagnostics}"
     body += "\n"
-    error_md.write_text(body)
+    error_md.write_text(body, encoding="utf-8")
     print(f"Recommendation generation failed: {msg}")
     return error_payload
 
