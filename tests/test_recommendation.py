@@ -295,6 +295,32 @@ def test_param_stability_champion_only():
     assert cov_all["x"] > 1
 
 
+def test_param_stability_all_discarded_uses_all_folds():
+    folds = [
+        Fold(
+            fold_id=i,
+            validation_fitness=1.0,
+            params={"x": v},
+            champion_status="Discarded",
+        )
+        for i, v in enumerate([1.0, 1.0, 100.0])
+    ]
+    cov_discarded, _, _ = recommendation._param_stability(folds)
+    cov_all, _, _ = recommendation._param_stability(
+        [
+            Fold(
+                fold_id=f.fold_id,
+                validation_fitness=f.validation_fitness,
+                params=f.params,
+                champion_status=None,
+            )
+            for f in folds
+        ]
+    )
+    assert cov_discarded == cov_all
+    assert cov_discarded["x"] > 1
+
+
 def test_param_stability_rounding_boundary():
     folds = [
         Fold(
