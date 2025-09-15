@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 import config
 import recommendation
@@ -81,6 +82,28 @@ def test_load_wf_summary_missing_key(tmp_path):
     (wf / "walk_forward_summary.json").write_text(json.dumps(bad))
     with pytest.raises(ValueError):
         load_wf_summary(wf / "walk_forward_summary.json")
+
+
+def test_load_wf_summary_bad_champion_status(tmp_path):
+    wf = tmp_path / "walk_forward"
+    wf.mkdir()
+    summary = {
+        "metadata": {"schema_version": "1.0", "num_folds": 1, "asset_universe": []},
+        "folds": [
+            {
+                "fold_id": 0,
+                "validation_fitness": 1.0,
+                "params": {},
+                "champion_status": "Unknown",
+            }
+        ],
+    }
+    (wf / "walk_forward_summary.json").write_text(json.dumps(summary))
+    with pytest.raises(ValidationError) as exc:
+        load_wf_summary(wf / "walk_forward_summary.json")
+    msg = str(exc.value)
+    assert "champion_status" in msg
+    assert "Elite" in msg and "Viable" in msg and "Discarded" in msg
 
 
 def test_use_return_as_fitness(monkeypatch, tmp_path):
