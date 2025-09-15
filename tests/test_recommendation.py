@@ -525,6 +525,20 @@ def _base_conf():
     }
 
 
+def test_narrative_includes_drag_stance():
+    conf = _base_conf()
+    assets = {
+        "AAA": {
+            "class": "Drags",
+            "performance": -1.0,
+            "consistency": 0.0,
+            "samples": 3,
+        }
+    }
+    out = recommendation._build_narrative(conf, assets, [], [])
+    assert "Drags should be underweighted or avoided" in out["assets"]
+
+
 def test_params_narrative_implication_when_unstable():
     conf = _base_conf()
     out = recommendation._build_narrative(conf, {}, ["x"], [])
