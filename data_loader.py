@@ -225,9 +225,7 @@ def get_data(
     cache_stem = f"{ticker}_{source}_{start_date}_{end_date}_{interval}"
     cache_filename = f"{cache_stem}{CACHE_EXTENSION}"
     cache_filepath = os.path.join(CACHE_DIR, cache_filename)
-    legacy_filepath = os.path.join(
-        CACHE_DIR, f"{cache_stem}{LEGACY_CACHE_EXTENSION}"
-    )
+    legacy_filepath = os.path.join(CACHE_DIR, f"{cache_stem}{LEGACY_CACHE_EXTENSION}")
 
     legacy_data: pd.DataFrame | None = None
 

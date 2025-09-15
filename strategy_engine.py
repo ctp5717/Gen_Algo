@@ -509,7 +509,9 @@ def _combine_signals(
             return pd.Series(combined, index=idx, name=name)
         if combination_logic == "VOTE":
             M = len(prepared)
-            threshold = vote_threshold if vote_threshold is not None else math.ceil(M / 2)
+            threshold = (
+                vote_threshold if vote_threshold is not None else math.ceil(M / 2)
+            )
             if threshold < 1 or threshold > M:
                 raise ValueError(
                     "vote_threshold must be between 1 and the number of active conditions"
