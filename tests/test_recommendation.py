@@ -334,7 +334,8 @@ def test_schema_validation_failure_summary(tmp_path):
     assert meta["recommendation"]["error"] == "schema_validation_failed"
     md = (tmp_path / "strategy_recommendation.md").read_text()
     assert "schema validation failed" in md.lower()
-    assert "summary" in md
+    # Ensure the markdown explicitly labels the failing schema section
+    assert re.search(r"- summary\.", md)
     assert "validation_fitness" in md
     assert "strategy_recommendation.md" in meta["artifacts"]
 
@@ -359,9 +360,12 @@ def test_schema_validation_failure_per_asset(tmp_path):
     (tmp_path / "run_metadata.json").write_text("{}")
     out = recommendation.generate_recommendation({"run_dir": tmp_path})
     assert out["error"] == "schema_validation_failed"
-    assert "foo" in out.get("diagnostics", "")
+    diag = out.get("diagnostics", "")
+    # Diagnostics should report unknown column headers
+    assert diag.startswith("Unknown columns:") and "foo" in diag
     md = (tmp_path / "strategy_recommendation.md").read_text()
-    assert "Diagnostics" in md and "foo" in md
+    assert "schema validation failed (per_asset)" in md
+    assert "Diagnostics" in md and "Unknown columns:" in md and "foo" in md
 
 
 def test_load_wf_per_asset_bad_column_type(tmp_path):
