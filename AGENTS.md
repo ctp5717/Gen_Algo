@@ -57,7 +57,7 @@
     (default [`rsi_period`]) apply an optional penalty for high parameter CoV.
 
 - `data_loader.py` – **Cache + fetch**:
-  - Cache dir: `data_cache/`; csv with flattened columns and restored `DatetimeIndex`.
+  - Cache dir: `data_cache/`; Parquet caches with restored `DatetimeIndex` (legacy CSV still readable).
   - `_normalize_ticker()` converts e.g. `BTC-USD` → `BTCUSDT` for Binance.
   - `get_data(ticker, start, end, interval)` returns `(DataFrame, "cache"|"API")`.
 
@@ -354,7 +354,7 @@ CI expectations:
 ## Do not
 - Hardcode secrets.
 - Remove `.shift()` on time-based exits.
-- Change cache file format.
+- Change the Parquet cache format or drop legacy CSV support without a spec.
 - Bypass seed determinism or replace `config.to_pandas_freq()` with ad-hoc strings.
 
 ---

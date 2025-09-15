@@ -107,7 +107,7 @@ This module's sole responsibility is to fetch, clean, and cache market data.
     * **Data Routing:** Acts as a "router" by checking the `DATA_SOURCE` in the config file and calling the appropriate private function to get data (e.g., `_get_binance_data`).
     * **API Connection:** Contains the specific logic for connecting to different APIs (Binance, yfinance).
     * **Data Standardization:** Cleans the data returned from different APIs into a single, standard format (a pandas DataFrame with a `DatetimeIndex` and capitalized column names: `Open`, `High`, `Low`, `Close`, `Volume`). This includes flattening complex `MultiIndex` columns.
-    * **Caching:** Manages the `data_cache` directory. It saves a local copy of any downloaded data so that subsequent runs are nearly instantaneous, avoiding redundant API calls.
+* **Caching:** Manages the `data_cache` directory. It saves a local Parquet copy of any downloaded data (with seamless legacy CSV reads) so that subsequent runs are nearly instantaneous, avoiding redundant API calls.
 
 ---
 ### `indicator_library.py` - The Toolbox
