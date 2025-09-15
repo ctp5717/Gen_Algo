@@ -359,6 +359,15 @@ def run_walk_forward_validation(
                     "soft_penalty_strength",
                     config.MULTI_ASSET.get("soft_penalty_strength", 1.0),
                 )
+            param_history = [
+                r["Params"]
+                for r in results
+                if r.get("Params") and r.get("champion_status") in {"Elite", "Viable"}
+            ]
+            if not param_history:
+                param_history = [r["Params"] for r in results if r.get("Params")]
+            if param_history:
+                settings_train["param_history"] = param_history
             print(f"Training lambda={settings_train.get('lambda_dispersion')}")
             evaluator = fitness.MultiAssetFitnessEvaluator(
                 train_data, STRATEGY_RULES, gene_map, settings_train
@@ -458,6 +467,15 @@ def run_walk_forward_validation(
                     "soft_penalty_strength",
                     config.MULTI_ASSET.get("soft_penalty_strength", 1.0),
                 )
+            param_history = [
+                r["Params"]
+                for r in results
+                if r.get("Params") and r.get("champion_status") in {"Elite", "Viable"}
+            ]
+            if not param_history:
+                param_history = [r["Params"] for r in results if r.get("Params")]
+            if param_history:
+                settings_val["param_history"] = param_history
             print(f"Validation lambda={settings_val.get('lambda_dispersion')}")
             test_eval = fitness.MultiAssetFitnessEvaluator(
                 test_data, STRATEGY_RULES, gene_map, settings_val

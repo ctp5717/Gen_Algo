@@ -47,7 +47,10 @@ STRATEGY_RULES = {
                 "rule_name": "RSI_Momentum_Filter",
                 "indicator": "rsi",
                 "params": {
-                    "period": {"gene": "rsi_period", "low": 5, "high": 35, "step": 1}
+                    "period": {
+                        "gene": "rsi_period",
+                        "step": 1,
+                    }
                 },
                 "condition": {
                     "type": "indicator_is_above_value",

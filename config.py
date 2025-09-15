@@ -106,6 +106,19 @@ MAX_HOLD_DAYS = 14
 VALIDATION_MONTHS = 3
 DEFAULT_MAX_PERIOD = 200
 ENABLE_WALK_FORWARD_VALIDATION = True
+RSI_PERIOD_BOUNDS = (7, 21)
+
+
+def _apply_rsi_bounds() -> None:
+    low, high = RSI_PERIOD_BOUNDS
+    for _cond in STRATEGY_RULES.get("entry_rules", {}).get("conditions", []):
+        if _cond.get("rule_name") == "RSI_Momentum_Filter":
+            _cond.setdefault("params", {}).setdefault("period", {})
+            _cond["params"]["period"]["low"] = low
+            _cond["params"]["period"]["high"] = high
+            break
+
+
 today = datetime.now()
 if "h" in TIMEFRAME.lower() or "m" in TIMEFRAME.lower():
     VALIDATION_BARS = 91 * (
@@ -120,6 +133,7 @@ for _cond in STRATEGY_RULES.get("entry_rules", {}).get("conditions", []):
             "high"
         ] = max_lookback_period
         break
+_apply_rsi_bounds()
 if "m" in TIMEFRAME.lower() or "h" in TIMEFRAME.lower():
     minutes = (
         60 * int(TIMEFRAME[:-1]) if TIMEFRAME.endswith("h") else int(TIMEFRAME[:-1])
@@ -288,6 +302,11 @@ assert MULTI_ASSET["lambda_dispersion"] >= 0, "lambda_dispersion must be >= 0"
 assert MULTI_ASSET["winsorize_pf_cap"] >= 1, "winsorize_pf_cap must be >= 1"
 assert MULTI_ASSET["soft_penalty_strength"] >= 0, "soft_penalty_strength must be >= 0"
 assert MULTI_ASSET["min_total_trades"] >= 0, "min_total_trades must be >= 0"
+
+# --- Optional stability regularizer for parameter CoV ---
+ENABLE_STABILITY_REG = False
+STABILITY_ALPHA = 0.1
+STABILITY_GENES = ["rsi_period"]
 
 # Basic charting options for the multi-asset analysis overview.
 CHARTS = {
