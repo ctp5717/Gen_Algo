@@ -66,3 +66,95 @@ def test_get_data_raises_when_volume_invalid(monkeypatch):
     monkeypatch.setattr(data_loader.pd, "read_parquet", lambda *a, **k: df)
     with pytest.raises(KeyError):
         data_loader.get_data("TEST", "2020-01-01", "2020-01-02", verbose=False)
+
+
+def test_warn_missing_volume_helper_emits_once(monkeypatch, caplog):
+    engine_stub = types.ModuleType("strategy_engine")
+    engine_stub.VOLUME_INDICATORS = {"mock"}
+    monkeypatch.setitem(sys.modules, "strategy_engine", engine_stub)
+
+    df = pd.DataFrame({"Close": [1, 2]}, index=pd.date_range("2020-01-01", periods=2))
+    logger = logging.getLogger("data_loader_test.warn_helper")
+
+    with caplog.at_level(logging.WARNING):
+        data_loader._warn_missing_volume(df, True, logger)
+        data_loader._warn_missing_volume(df, True, logger)
+
+    assert caplog.text.count("Volume column missing") == 1
+
+
+def test_load_legacy_cache_uses_warning_helper(monkeypatch):
+    df = pd.DataFrame({"Close": [1]}, index=pd.date_range("2020-01-01", periods=1))
+    monkeypatch.setattr(data_loader.pd, "read_csv", lambda *a, **k: df)
+
+    calls: list[tuple[pd.DataFrame, bool]] = []
+
+    def fake_warn(frame, verbose, _logger):
+        calls.append((frame, verbose))
+
+    monkeypatch.setattr(data_loader, "_warn_missing_volume", fake_warn)
+
+    logger = logging.getLogger("data_loader_test.load_legacy")
+    result = data_loader._load_legacy_cache(
+        "legacy.csv",
+        ticker="TEST",
+        cache_filepath="cache.parquet",
+        cache_filename="cache.parquet",
+        verbose=True,
+        logger=logger,
+    )
+
+    assert calls == [(df, True)]
+    assert result is df
+
+
+def test_get_data_calls_warning_helper(monkeypatch):
+    df = pd.DataFrame({"Close": [1]}, index=pd.date_range("2020-01-01", periods=1))
+    monkeypatch.setattr(data_loader.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(data_loader.pd, "read_parquet", lambda *a, **k: df)
+    monkeypatch.setattr(data_loader.config, "DATA_SOURCE", "yfinance")
+
+    calls: list[tuple[pd.DataFrame, bool]] = []
+
+    def fake_warn(frame, verbose, _logger):
+        calls.append((frame, verbose))
+
+    monkeypatch.setattr(data_loader, "_warn_missing_volume", fake_warn)
+
+    result, src = data_loader.get_data("TEST", "2020-01-01", "2020-01-02")
+
+    pd.testing.assert_frame_equal(result, df)
+    assert src == "cache"
+    assert calls == [(df, True)]
+
+
+def test_get_group_data_calls_warning_helper(monkeypatch):
+    df = pd.DataFrame({"Close": [1]}, index=pd.date_range("2020-01-01", periods=1))
+
+    def fake_get_data(*args, **kwargs):
+        return df.copy(), "cache"
+
+    calls: list[tuple[pd.DataFrame, bool]] = []
+
+    def fake_warn(frame, verbose, _logger):
+        calls.append((frame, verbose))
+
+    monkeypatch.setattr(data_loader, "get_data", fake_get_data)
+    monkeypatch.setattr(data_loader, "_warn_missing_volume", fake_warn)
+    monkeypatch.setattr(
+        data_loader.config, "DATA_LOADER_MAX_WORKERS", 1, raising=False
+    )
+
+    result = data_loader.get_group_data(
+        [("Asset", "AAA")],
+        start_date="2020-01-01",
+        end_date="2020-01-02",
+        interval="1d",
+        verbose=True,
+        logger=logging.getLogger("data_loader_test.group"),
+    )
+
+    assert list(result.keys()) == ["AAA"]
+    assert len(calls) == 1
+    pd.testing.assert_frame_equal(calls[0][0], df)
+    assert calls[0][1] is True
