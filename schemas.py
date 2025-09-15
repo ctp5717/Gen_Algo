@@ -6,7 +6,7 @@ import ast
 import csv
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -25,7 +25,7 @@ class Fold(BaseModel):
     fold_id: int
     validation_fitness: float
     params: Dict[str, float]
-    champion_status: Optional[str] = None
+    champion_status: Optional[Literal["Elite", "Viable", "Discarded"]] = None
 
 
 class Metadata(BaseModel):
