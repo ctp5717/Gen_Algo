@@ -127,14 +127,7 @@ def _write_run_metadata(
             existing_artifacts.append(str(resolved))
 
     # Deduplicate while preserving order
-    seen: set[str] = set()
-    unique_artifacts: list[str] = []
-    for a in existing_artifacts:
-        if a in seen:
-            continue
-        seen.add(a)
-        unique_artifacts.append(a)
-    existing_artifacts = unique_artifacts
+    existing_artifacts = list(dict.fromkeys(existing_artifacts))
 
     metadata = {
         "artifact_version": "1.0.0",
