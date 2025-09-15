@@ -263,6 +263,8 @@ def _build_narrative(
     if watchlist:
         param_parts.append("Watchlist: " + ", ".join(watchlist))
     params_text = "; ".join(param_parts) if param_parts else "Parameters appear stable."
+    if param_parts:
+        params_text += f" {PARAM_STABILITY_IMPLICATION}"
     return {"overall": overall, "assets": assets_text, "params": params_text}
 
 

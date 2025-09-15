@@ -19,6 +19,7 @@ from schemas import (
     load_wf_per_asset,
     load_wf_summary,
 )
+from strings import PARAM_STABILITY_IMPLICATION
 
 
 def _write_sample_files(tmp_path: Path) -> None:
@@ -485,6 +486,37 @@ def test_narrative_no_assets_no_sample_line():
     }
     out = recommendation._build_narrative(conf, {}, [], [])
     assert "All assets have" not in out["assets"]
+
+
+def _base_conf():
+    return {
+        "category": "Low",
+        "score": 0,
+        "factors": {
+            "median_fitness": 0,
+            "positive_fold_pct": 0,
+            "worst_fold_fitness": 0,
+            "downside_deviation": 0,
+        },
+    }
+
+
+def test_params_narrative_implication_when_unstable():
+    conf = _base_conf()
+    out = recommendation._build_narrative(conf, {}, ["x"], [])
+    assert PARAM_STABILITY_IMPLICATION in out["params"]
+
+
+def test_params_narrative_implication_when_watchlist():
+    conf = _base_conf()
+    out = recommendation._build_narrative(conf, {}, [], ["y"])
+    assert PARAM_STABILITY_IMPLICATION in out["params"]
+
+
+def test_params_narrative_no_implication_when_stable():
+    conf = _base_conf()
+    out = recommendation._build_narrative(conf, {}, [], [])
+    assert PARAM_STABILITY_IMPLICATION not in out["params"]
 
 
 def test_infinite_cov_rendered(tmp_path):
