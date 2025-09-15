@@ -389,14 +389,14 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
     log_flag = cfg.get("LOG_UNKNOWN_COLUMNS_ON_SUCCESS", False)
     env_override = os.environ.get("SRE_LOG_UNKNOWN_COLS")
     origin = (
-        "env override" if env_override is not None else (
-            "prod default" if getattr(config, "IS_PROD", False) else "dev default"
-        )
+        "env override"
+        if env_override is not None
+        else ("prod default" if getattr(config, "IS_PROD", False) else "dev default")
     )
     if env_override is not None:
         origin += f" ({env_override})"
     lines.append(f"- LOG_UNKNOWN_COLUMNS_ON_SUCCESS: {log_flag} ({origin})")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _audit_markdown(md_path: Path, text: str | None = None) -> List[str]:
@@ -571,11 +571,7 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         merge_run_metadata(
             meta_path,
-            {
-                "artifacts_meta": {
-                    "strategy_recommendation.md": {"sha256": digest}
-                }
-            },
+            {"artifacts_meta": {"strategy_recommendation.md": {"sha256": digest}}},
         )
         try:
             issues = _audit_markdown(md_path, text=text)
