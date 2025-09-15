@@ -132,6 +132,13 @@ def test_confidence_scoring_categories():
     assert medium["category"] == "Medium"
 
 
+def test_confidence_downside_deviation_ddof():
+    single = recommendation._compute_confidence([0.5, -0.5, 1.0])
+    assert single["factors"]["downside_deviation"] == 0.0
+    two_negatives = recommendation._compute_confidence([1.0, -1.0, -2.0])
+    assert two_negatives["factors"]["downside_deviation"] == pytest.approx(np.sqrt(0.5))
+
+
 def test_asset_matrix_classification(monkeypatch):
     overrides = copy.deepcopy(config.RECOMMENDATION["ASSET_CLASS_THRESHOLDS"])
     overrides["gamble"]["consistency"] = 80
