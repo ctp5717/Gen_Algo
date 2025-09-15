@@ -26,6 +26,7 @@ import re
 import sys
 import warnings
 import weakref
+from collections import OrderedDict
 from typing import Any, Callable
 
 import numpy as np
@@ -88,7 +89,7 @@ TRIX_LINE_PATTERN = re.compile(r"(?i)^TRIX(?!s)")
 # after garbage collection.
 CacheKey = tuple[str, tuple[tuple[str, Any], ...], int, tuple[str, ...]]
 CacheVal = tuple[weakref.ReferenceType[pd.DataFrame], pd.Series | pd.DataFrame]
-_INDICATOR_CACHE: dict[CacheKey, CacheVal] = {}
+_INDICATOR_CACHE: OrderedDict[CacheKey, CacheVal] = OrderedDict()
 _CACHE_HITS = 0
 _CACHE_MISSES = 0
 
@@ -471,52 +472,80 @@ def _combine_signals(
 
     policy = nan_policy.upper()
     limit = None if ffill_lookback == 0 else ffill_lookback
+
     if policy == "FORWARD_FILL":
-        filled = [s.ffill(limit=limit).fillna(False) for s in signals]
-        arr = np.stack([s.to_numpy(dtype=bool, copy=False) for s in filled])
+        prepared: list[np.ndarray] = []
+        for series in signals:
+            filled = series.ffill(limit=limit)
+            values = filled.to_numpy(dtype=float, copy=False)
+            if np.isnan(values).any():
+                values = np.nan_to_num(values, nan=0.0)
+            prepared.append(values.astype(bool))
         treat_nan_as_false = True
     elif policy == "FALSE":
-        arr = np.stack(
-            [s.fillna(False).to_numpy(dtype=bool, copy=False) for s in signals]
-        )
+        prepared = []
+        for series in signals:
+            values = series.to_numpy(dtype=float, copy=False)
+            if np.isnan(values).any():
+                values = np.nan_to_num(values, nan=0.0)
+            prepared.append(values.astype(bool))
         treat_nan_as_false = True
     elif policy == "PROPAGATE":
-        arr = np.stack([s.to_numpy(dtype=float, copy=False) for s in signals])
+        prepared = [series.to_numpy(dtype=float, copy=False) for series in signals]
         treat_nan_as_false = False
     else:
         raise ValueError("nan_policy must be FALSE, PROPAGATE, or FORWARD_FILL")
+
     if treat_nan_as_false:
         if combination_logic == "AND":
-            combined = np.logical_and.reduce(arr, axis=0)
+            combined = prepared[0].copy()
+            for arr in prepared[1:]:
+                np.logical_and(combined, arr, out=combined)
             return pd.Series(combined, index=idx, name=name)
         if combination_logic == "OR":
-            combined = np.logical_or.reduce(arr, axis=0)
+            combined = prepared[0].copy()
+            for arr in prepared[1:]:
+                np.logical_or(combined, arr, out=combined)
             return pd.Series(combined, index=idx, name=name)
         if combination_logic == "VOTE":
-            M = arr.shape[0]
-            threshold = (
-                vote_threshold if vote_threshold is not None else math.ceil(M / 2)
-            )
+            M = len(prepared)
+            threshold = vote_threshold if vote_threshold is not None else math.ceil(M / 2)
             if threshold < 1 or threshold > M:
                 raise ValueError(
                     "vote_threshold must be between 1 and the number of active conditions"
                 )
             payload = {"logic": "VOTE", "M": M, "k": threshold, "nan_policy": policy}
             logger.info(payload)
-            votes = np.sum(arr, axis=0)
+            votes = np.zeros(prepared[0].shape, dtype=np.int16)
+            for arr in prepared:
+                votes += arr
             return pd.Series(votes >= threshold, index=idx)
 
-    has_nan = np.isnan(arr).any(axis=0)
+    arrays = prepared
     if combination_logic == "AND":
-        has_false = (arr == 0).any(axis=0)
-        combined = np.where(has_false, False, np.where(has_nan, np.nan, True))
-        return pd.Series(combined, index=idx, dtype="boolean", name=name)
+        has_nan = np.zeros(arrays[0].shape, dtype=bool)
+        has_false = np.zeros_like(has_nan)
+        for arr in arrays:
+            np.logical_or(has_nan, np.isnan(arr), out=has_nan)
+            np.logical_or(has_false, arr <= 0.0, out=has_false)
+        outcome = np.full(arrays[0].shape, True, dtype=object)
+        outcome[has_false] = False
+        nan_mask = ~has_false & has_nan
+        outcome[nan_mask] = pd.NA
+        return pd.Series(pd.array(outcome, dtype="boolean"), index=idx, name=name)
     if combination_logic == "OR":
-        has_true = (arr == 1).any(axis=0)
-        combined = np.where(has_true, True, np.where(has_nan, np.nan, False))
-        return pd.Series(combined, index=idx, dtype="boolean", name=name)
+        has_nan = np.zeros(arrays[0].shape, dtype=bool)
+        has_true = np.zeros_like(has_nan)
+        for arr in arrays:
+            np.logical_or(has_nan, np.isnan(arr), out=has_nan)
+            np.logical_or(has_true, arr > 0.5, out=has_true)
+        outcome = np.full(arrays[0].shape, False, dtype=object)
+        outcome[has_true] = True
+        nan_mask = ~has_true & has_nan
+        outcome[nan_mask] = pd.NA
+        return pd.Series(pd.array(outcome, dtype="boolean"), index=idx, name=name)
     if combination_logic == "VOTE":
-        M = arr.shape[0]
+        M = len(arrays)
         threshold = vote_threshold if vote_threshold is not None else math.ceil(M / 2)
         if threshold < 1 or threshold > M:
             raise ValueError(
@@ -524,7 +553,9 @@ def _combine_signals(
             )
         payload = {"logic": "VOTE", "M": M, "k": threshold, "nan_policy": policy}
         logger.info(payload)
-        votes = np.sum(arr, axis=0)
+        votes = np.zeros(arrays[0].shape, dtype=float)
+        for arr in arrays:
+            votes += arr
         series = pd.Series(votes, index=idx, dtype="Float64")
         return series.ge(threshold)
 
@@ -559,6 +590,8 @@ def process_strategy_rules(
         guardrails.update(cfg_sys.CACHE_GUARDRAILS)  # noqa: B009
     if hasattr(_ORIGINAL_CONFIG, "CACHE_GUARDRAILS"):
         guardrails.update(_ORIGINAL_CONFIG.CACHE_GUARDRAILS)  # noqa: B009
+    max_cache_keys = max(0, int(guardrails.get("MAX_CACHE_KEYS", 0)))
+    max_cache_rows = max(0, int(guardrails.get("MAX_CACHE_ROWS", 0)))
     clear_between = bool(guardrails.get("clear_cache_between_assets"))
     if clear_between:
         clear_indicator_cache()
@@ -697,13 +730,14 @@ def process_strategy_rules(
             id(ohlc_data),  # different data -> different cache bucket
             tuple(ohlc_data.columns),
         )
-        guard = guardrails
-        use_cache = not clear_between
+        use_cache = not clear_between and max_cache_keys > 0
         cache_entry = _INDICATOR_CACHE.get(key) if use_cache else None
         if cache_entry is not None:
             _CACHE_HITS += 1
-            data_ref, indicator_output = cache_entry
-            if data_ref() is not ohlc_data:
+            data_ref, cached_output = cache_entry
+            if data_ref() is ohlc_data:
+                indicator_output = cached_output
+            else:
                 try:
                     raw_output = indicator_func(ohlc_data, **norm_params)
                 except Exception as e:  # pragma: no cover - defensive
@@ -711,10 +745,15 @@ def process_strategy_rules(
                 indicator_output = contracts.normalize_output(
                     indicator_name, raw_output, norm_params, index=ohlc_data.index
                 )
-                _INDICATOR_CACHE[key] = (
-                    weakref.ref(ohlc_data),
-                    indicator_output,
-                )
+                if use_cache and len(ohlc_data) <= max_cache_rows:
+                    _INDICATOR_CACHE[key] = (
+                        weakref.ref(ohlc_data),
+                        indicator_output,
+                    )
+                else:
+                    _INDICATOR_CACHE.pop(key, None)
+            if use_cache:
+                _INDICATOR_CACHE.move_to_end(key)
         else:
             _CACHE_MISSES += 1
             try:
@@ -724,22 +763,21 @@ def process_strategy_rules(
             indicator_output = contracts.normalize_output(
                 indicator_name, raw_output, norm_params, index=ohlc_data.index
             )
-            if (
-                use_cache
-                and len(_INDICATOR_CACHE) < guard["MAX_CACHE_KEYS"]
-                and len(ohlc_data) <= guard["MAX_CACHE_ROWS"]
-            ):
+            if use_cache and len(ohlc_data) <= max_cache_rows:
                 _INDICATOR_CACHE[key] = (
                     weakref.ref(ohlc_data),
                     indicator_output,
                 )
+                _INDICATOR_CACHE.move_to_end(key)
+                if len(_INDICATOR_CACHE) > max_cache_keys:
+                    _INDICATOR_CACHE.popitem(last=False)
         condition_type = condition_logic.get("type")
 
         target_series = select_indicator_series(
             indicator_name, indicator_output, condition_logic, strict_column
         )
 
-        individual_signal = pd.Series(False, index=ohlc_data.index)
+        condition_type = condition_type or ""
         if "price" in condition_type:
             individual_signal = _generate_signal(
                 ohlc_data, target_series, condition_logic
@@ -748,22 +786,19 @@ def process_strategy_rules(
             individual_signal = _generate_signal_from_value(
                 target_series, condition_logic
             )
+        else:
+            individual_signal = pd.Series(False, index=ohlc_data.index)
 
         if nan_policy_u == "FORWARD_FILL":
             individual_signal = individual_signal.ffill(limit=ffill_limit)
-        signals.append(
-            individual_signal.fillna(False)
-            if nan_policy_u == "FALSE" or nan_policy_u == "FORWARD_FILL"
-            else individual_signal.astype("boolean")
-        )
+
+        signals.append(individual_signal)
         if collect_counts:
             name = canonical_rule_label(rule)
-            val = (
-                individual_signal.fillna(False)
-                if nan_policy_u != "PROPAGATE"
-                else individual_signal
-            )
-            counts[name] = int(pd.Series(val, dtype="boolean").sum(skipna=True))
+            values = individual_signal.to_numpy(dtype=float, copy=False)
+            if nan_policy_u != "PROPAGATE":
+                values = np.nan_to_num(values, nan=0.0)
+            counts[name] = int(np.nansum(values))
 
     if not signals:
         empty = pd.Series(False, index=ohlc_data.index)
@@ -771,7 +806,7 @@ def process_strategy_rules(
     elif len(signals) == 1:
         single = signals[0]
         if nan_policy_u == "FORWARD_FILL":
-            single = single.ffill(limit=ffill_limit).fillna(False)
+            single = single.fillna(False)
         elif nan_policy_u == "FALSE":
             single = single.fillna(False)
         else:
