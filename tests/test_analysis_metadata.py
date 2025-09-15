@@ -13,7 +13,40 @@ sys.modules.setdefault("vectorbt", vbt_stub)
 
 import analysis  # noqa: E402
 import config  # noqa: E402
+import data_loader  # noqa: E402
 import fitness  # noqa: E402
+
+
+def test_cache_hashes_use_cache_helper(monkeypatch):
+    monkeypatch.setattr(config, "DATA_SOURCE", "yfinance", raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "1d", raising=False)
+    monkeypatch.setattr(config, "TICKER", "SOL-USD", raising=False)
+    monkeypatch.setattr(
+        config,
+        "TRAINING_PERIOD",
+        {"start": "2024-01-01", "end": "2024-01-10"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        config,
+        "VALIDATION_PERIOD",
+        {"start": "2024-01-11", "end": "2024-01-20"},
+        raising=False,
+    )
+    monkeypatch.setattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False, raising=False)
+    monkeypatch.setattr(config, "WALK_FORWARD_SETTINGS", {}, raising=False)
+    monkeypatch.setitem(config.MULTI_ASSET, "enabled", False)
+
+    hashes = analysis._get_cache_hashes()
+
+    expected_stem = data_loader.build_cache_stem(
+        "SOL-USD", "2024-01-01", "2024-01-20", "1d", source="yfinance"
+    )
+    expected_files = {
+        f"{expected_stem}{data_loader.CACHE_EXTENSION}",
+        f"{expected_stem}{data_loader.LEGACY_CACHE_EXTENSION}",
+    }
+    assert set(hashes) == expected_files
 
 
 def test_write_run_metadata_extra(tmp_path, monkeypatch):
