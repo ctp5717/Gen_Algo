@@ -113,12 +113,10 @@ def _warn_missing_volume(
 
     try:
         from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
-    except Exception:
+    except ImportError:
         VOLUME_INDICATORS = set()
     if VOLUME_INDICATORS:
-        logger.warning(
-            "Volume column missing; volume-based indicators will fail."
-        )
+        logger.warning("Volume column missing; volume-based indicators will fail.")
         df.attrs[_VOLUME_WARNING_ATTR] = True
 
 

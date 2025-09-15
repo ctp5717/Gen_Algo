@@ -141,9 +141,7 @@ def test_get_group_data_calls_warning_helper(monkeypatch):
 
     monkeypatch.setattr(data_loader, "get_data", fake_get_data)
     monkeypatch.setattr(data_loader, "_warn_missing_volume", fake_warn)
-    monkeypatch.setattr(
-        data_loader.config, "DATA_LOADER_MAX_WORKERS", 1, raising=False
-    )
+    monkeypatch.setattr(data_loader.config, "DATA_LOADER_MAX_WORKERS", 1, raising=False)
 
     result = data_loader.get_group_data(
         [("Asset", "AAA")],
