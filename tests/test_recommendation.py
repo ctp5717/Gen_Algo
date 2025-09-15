@@ -221,6 +221,23 @@ def test_asset_class_threshold_override(monkeypatch):
     assert matrix["X"]["class"] == "Stars"
 
 
+def test_asset_sort_key_ordering():
+    assets = {
+        # Stars: same performance and consistency -> ticker asc
+        "AAA": {"class": "Stars", "performance": 2.0, "consistency": 90},
+        "AAB": {"class": "Stars", "performance": 2.0, "consistency": 90},
+        # Lower performance Star
+        "AAC": {"class": "Stars", "performance": 1.5, "consistency": 95},
+        # Stalwarts: tie on performance -> consistency desc
+        "BBA": {"class": "Stalwarts", "performance": 1.0, "consistency": 70},
+        "BBB": {"class": "Stalwarts", "performance": 1.0, "consistency": 60},
+        # Gamble: lower class priority
+        "CCC": {"class": "Gambles", "performance": 1.0, "consistency": 40},
+    }
+    ordered = [t for t, _ in sorted(assets.items(), key=recommendation._asset_sort_key)]
+    assert ordered == ["AAA", "AAB", "AAC", "BBA", "BBB", "CCC"]
+
+
 def test_param_stability_detection():
     vals_a = [1, 2, 3, 4, 0]
     vals_b = [1.0, 1.5, 0.5, 1.4, 0.6]
