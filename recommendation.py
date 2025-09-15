@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import statistics
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 from pydantic import ValidationError
@@ -14,14 +14,38 @@ import config
 from run_metadata import merge_run_metadata
 from schemas import (
     PerAssetRow,
+    SchemaCsvError,
     WalkForwardPerAssetV1,
     load_wf_per_asset,
     load_wf_summary,
 )
+from strings import DRAG_STANCE, PARAM_STABILITY_IMPLICATION
+from utils.format import fmt_num, fmt_pct
 
 # ---------------------------------------------------------------------------
 # Core helpers
 # ---------------------------------------------------------------------------
+
+
+ASSET_CLASS_ORDER = {
+    "Stars": 0,
+    "Stalwarts": 1,
+    "Gambles": 2,
+    "Borderline": 3,
+    "Drags": 4,
+    "Insufficient Data": 5,
+}
+
+
+def _asset_sort_key(kv: Tuple[str, Dict[str, object]]) -> Tuple:
+    ticker, a = kv
+    cls = str(a.get("class", ""))
+    return (
+        ASSET_CLASS_ORDER.get(cls, 99),
+        -float(a.get("performance") or 0.0),
+        -float(a.get("consistency") or 0.0),
+        ticker,
+    )
 
 
 def _compute_confidence(fitness_vals: Iterable[float]) -> Dict[str, object]:
@@ -30,7 +54,9 @@ def _compute_confidence(fitness_vals: Iterable[float]) -> Dict[str, object]:
     positive_fold_pct = 100 * np.mean([v > 0 for v in vals])
     worst_fold_fitness = min(vals)
     downside_vals = [v for v in vals if v < 0]
-    downside_deviation = float(np.std(downside_vals)) if downside_vals else 0.0
+    downside_deviation = (
+        float(np.std(downside_vals, ddof=1)) if len(downside_vals) > 1 else 0.0
+    )  # sample std (ddof=1) to reduce small-n bias; CoV uses ddof=0 elsewhere
 
     cfg = config.RECOMMENDATION
     score_median = max(0.0, min(100.0, 100 * (median_fitness / cfg["MEDIAN_TARGET"])))
@@ -190,25 +216,46 @@ def _build_narrative(
     f = conf["factors"]
     overall = (
         f"Confidence {conf['category']} ({conf['score']}). "
-        f"Median fitness {f['median_fitness']:.2f}, "
-        f"{f['positive_fold_pct']:.1f}% positive folds; "
-        f"worst fold {f['worst_fold_fitness']:.2f} and "
-        f"downside deviation {f['downside_deviation']:.2f}."
+        f"Median fitness {fmt_num(f['median_fitness'])}, "
+        f"{fmt_pct(f['positive_fold_pct'])} positive folds; "
+        f"worst fold {fmt_num(f['worst_fold_fitness'])} and "
+        f"downside deviation {fmt_num(f['downside_deviation'])}."
     )
-    stars = [t for t, a in assets.items() if a["class"] == "Stars"]
-    stalwarts = [t for t, a in assets.items() if a["class"] == "Stalwarts"]
-    drags = [t for t, a in assets.items() if a["class"] == "Drags"]
-    insuff = [t for t, a in assets.items() if a["class"] == "Insufficient Data"]
+
+    def _sorted(cls: str) -> List[str]:
+        return [
+            t
+            for t, _ in sorted(
+                ((t, a) for t, a in assets.items() if a["class"] == cls),
+                key=_asset_sort_key,
+            )
+        ]
+
+    stars = _sorted("Stars")
+    stalwarts = _sorted("Stalwarts")
+    drags = _sorted("Drags")
+    border = _sorted("Borderline")
+    insuff = _sorted("Insufficient Data")
+
     parts: List[str] = []
     if stars:
         parts.append("Stars: " + ", ".join(stars))
     if stalwarts:
         parts.append("Stalwarts: " + ", ".join(stalwarts))
+    if border:
+        parts.append("Borderline: " + ", ".join(border))
     if drags:
         parts.append("Drags: " + ", ".join(drags))
     if insuff:
         parts.append("Insufficient Data: " + ", ".join(insuff))
     assets_text = "; ".join(parts) if parts else "No standout assets."
+    min_samples = config.RECOMMENDATION["MIN_SAMPLES_FOR_ASSET"]
+    if assets and all((a.get("samples", 0) >= min_samples) for a in assets.values()):
+        assets_text += f"; All assets have ≥{min_samples} qualifying fold(s)."
+    if drags:
+        examples = ", ".join(drags[:3])
+        assets_text += " " + DRAG_STANCE.format(examples=examples)
+
     param_parts: List[str] = []
     if unstable:
         param_parts.append("Unstable parameters: " + ", ".join(unstable))
@@ -220,7 +267,7 @@ def _build_narrative(
 
 def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
     def _fmt_cov(x: float) -> str:
-        return "∞" if not math.isfinite(x) else f"{x:.2f}"
+        return "∞" if not math.isfinite(x) else fmt_num(x)
 
     conf = payload["confidence"]
     lines = ["# Strategy Recommendation Report", ""]
@@ -228,13 +275,20 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
     lines.append(payload["narrative"]["overall"])
     lines.append("")
     scores = conf["scores"]
+    fcts = conf["factors"]
     lines.append("### Confidence Factors")
+    lines.append(
+        "Folds: median "
+        f"{fmt_num(fcts['median_fitness'])}, "
+        f"worst {fmt_num(fcts['worst_fold_fitness'])}, "
+        f"positive {fmt_pct(fcts['positive_fold_pct'])}."
+    )
     lines.append("| Factor | Score |")
     lines.append("|---|---|")
-    lines.append(f"| Median Fitness | {scores['median']:.1f} |")
-    lines.append(f"| Consistency | {scores['consistency']:.1f} |")
-    lines.append(f"| Tail (worst fold) | {scores['tail']:.1f} |")
-    lines.append(f"| Downside Deviation | {scores['downside']:.1f} |")
+    lines.append(f"| Median Fitness | {fmt_num(scores['median'], 1)} |")
+    lines.append(f"| Consistency | {fmt_num(scores['consistency'], 1)} |")
+    lines.append(f"| Tail (worst fold) | {fmt_num(scores['tail'], 1)} |")
+    lines.append(f"| Downside Deviation | {fmt_num(scores['downside'], 1)} |")
     lines.append("")
     lines.append("## Asset Summary")
     lines.append(payload["narrative"]["assets"])
@@ -245,25 +299,9 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
     lines.append("## Asset Performance Matrix")
     lines.append("| Ticker | Performance | Consistency | Class | Samples |")
     lines.append("|---|---|---|---|---|")
-    order = {
-        "Stars": 0,
-        "Stalwarts": 1,
-        "Gambles": 2,
-        "Borderline": 3,
-        "Drags": 4,
-        "Insufficient Data": 5,
-    }
-    for t, a in sorted(
-        payload["assets"].items(),
-        key=lambda kv: (
-            order.get(kv[1]["class"], 99),
-            -kv[1]["performance"],
-            -kv[1]["consistency"],
-            kv[0],
-        ),
-    ):
+    for t, a in sorted(payload["assets"].items(), key=_asset_sort_key):
         lines.append(
-            f"| {t} | {a['performance']:.2f} | {a['consistency']:.1f}% | "
+            f"| {t} | {fmt_num(a['performance'])} | {fmt_pct(a['consistency'])} | "
             f"{a['class']} | {a['samples']} |"
         )
     lines.append("")
@@ -293,6 +331,9 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
         for g in watchlist:
             c = payload["param_stability"]["cov_by_gene"][g]
             lines.append(f"- {g}: CoV {_fmt_cov(c)}")
+    if unstable or watchlist:
+        lines.append("")
+        lines.append(PARAM_STABILITY_IMPLICATION)
     cfg = config.RECOMMENDATION
     cuts = cfg["CATEGORY_CUTOFFS"]
     weights = cfg["WEIGHTS"]
@@ -321,26 +362,39 @@ def _write_markdown(path: Path, payload: Dict[str, object]) -> None:
         f"- Drags: <{th['drag']['performance']} perf & <"
         f"{th['drag']['consistency']}% consistency"
     )
+    lines.append("")
+    lines.append("### Stability Regularizer")
+    lines.append(f"- Enabled: {getattr(config, 'ENABLE_STABILITY_REG', False)}")
+    lines.append(f"- Alpha: {getattr(config, 'STABILITY_ALPHA', 0.0)}")
+    genes = ", ".join(getattr(config, "STABILITY_GENES", [])) or "—"
+    lines.append(f"- Genes: {genes}")
     path.write_text("\n".join(lines))
 
 
-def _schema_error(run_dir: Path, msg: str, details: str) -> Dict[str, object]:
+def _schema_error(
+    run_dir: Path, msg: str, details: str, diagnostics: str | None = None
+) -> Dict[str, object]:
     error_payload: Dict[str, object] = {
         "error": "schema_validation_failed",
         "message": msg,
         "schema_version": "1.0",
     }
+    if diagnostics:
+        error_payload["diagnostics"] = diagnostics
     merge_run_metadata(
         run_dir / "run_metadata.json",
         {"recommendation": error_payload, "artifacts": ["strategy_recommendation.md"]},
     )
     error_md = run_dir / "strategy_recommendation.md"
-    error_md.write_text(
+    body = (
         "# Strategy Recommendation Report\n\n"
         + "Schema validation failed.\n\n"
         + details
-        + "\n"
     )
+    if diagnostics:
+        body += f"\n\n## Diagnostics\n{diagnostics}"
+    body += "\n"
+    error_md.write_text(body)
     print(f"Recommendation generation failed: {msg}")
     return error_payload
 
@@ -375,6 +429,18 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
             for err in e.errors()
         )
         return _schema_error(run_dir, "schema validation failed (per_asset)", details)
+    except SchemaCsvError as e:  # pragma: no cover - exercised in integration
+        diag = None
+        if e.unknown_columns:
+            limit = 10
+            cols = e.unknown_columns[:limit]
+            extra = len(e.unknown_columns) - limit
+            diag = ", ".join(cols)
+            if extra > 0:
+                diag += f" (+{extra} more)"
+            diag = f"Unknown columns: {diag}"
+        msg = f"schema validation failed (per_asset): {e}"
+        return _schema_error(run_dir, msg, msg, diag)
     except Exception as e:  # pragma: no cover - exercised in integration
         msg = f"schema validation failed (per_asset): {e}"
         return _schema_error(run_dir, msg, msg)

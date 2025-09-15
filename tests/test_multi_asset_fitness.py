@@ -218,6 +218,48 @@ def test_zero_trade_policy_penalize_vs_ignore():
     assert np.isclose(ev_ign(None, [], 0), 0.9)
 
 
+def test_stability_regularizer_off(monkeypatch):
+    stats = [
+        {"total_return": 1.0, "trades": 5},
+        {"total_return": 2.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 0.0,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "param_history": [{"rsi_period": 7}, {"rsi_period": 21}],
+    }
+    ev = _make_evaluator(settings, stats)
+    monkeypatch.setattr(cfg, "ENABLE_STABILITY_REG", False)
+    monkeypatch.setattr(cfg, "STABILITY_ALPHA", 1.0)
+    monkeypatch.setattr(cfg, "STABILITY_GENES", ["rsi_period"])
+    assert np.isclose(ev(None, [], 0), 1.5)
+
+
+def test_stability_regularizer_penalizes(monkeypatch):
+    stats = [
+        {"total_return": 1.0, "trades": 5},
+        {"total_return": 2.0, "trades": 5},
+    ]
+    settings = {
+        "metric": "return",
+        "lambda_dispersion": 0.0,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "param_history": [{"rsi_period": 7}, {"rsi_period": 21}],
+    }
+    ev = _make_evaluator(settings, stats)
+    monkeypatch.setattr(cfg, "ENABLE_STABILITY_REG", True)
+    monkeypatch.setattr(cfg, "STABILITY_ALPHA", 1.0)
+    monkeypatch.setattr(cfg, "STABILITY_GENES", ["rsi_period"])
+    score = ev(None, [], 0)
+    assert np.isclose(score, 1.0)
+    assert np.isclose(ev.last_details["penalties"]["stability"], 0.5)
+
+
 def test_sentinel_ignores_coverage_penalty():
     stats = [
         {"total_return": 1.0, "trades": 1},

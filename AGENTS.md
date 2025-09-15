@@ -49,8 +49,12 @@
   - Risk: `MAX_HOLD_DAYS` → converted to bars (intraday aware).
   - GA knobs: population, generations, mutation, etc.; optional **auto-tuner** settings.
   - Strategy: `STRATEGY_RULES` (in `strategy_rules.py`) with `is_active` flags and per-param **genes** (`low`, `high`, `step`, `name`).
+    - `RSI_Momentum_Filter` draws its `rsi_period` bounds from `config.RSI_PERIOD_BOUNDS`
+      (default 7–21) to curb instability from overly wide windows.
   - Fitness: `FITNESS_WEIGHTS` for composite score.
   - Multi-asset: `MULTI_ASSET` (lambda dispersion, trade-floor, zero-trade policy, coverage penalty, etc.).
+  - Stability regularizer knobs: `ENABLE_STABILITY_REG`, `STABILITY_ALPHA`, `STABILITY_GENES`
+    (default [`rsi_period`]) apply an optional penalty for high parameter CoV.
 
 - `data_loader.py` – **Cache + fetch**:
   - Cache dir: `data_cache/`; csv with flattened columns and restored `DatetimeIndex`.

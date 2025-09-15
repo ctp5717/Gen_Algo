@@ -13,6 +13,14 @@ from pydantic import BaseModel, TypeAdapter
 import config
 
 
+class SchemaCsvError(ValueError):
+    """Raised when CSV schema validation fails with extra diagnostics."""
+
+    def __init__(self, message: str, unknown_columns: List[str] | None = None):
+        super().__init__(message)
+        self.unknown_columns = unknown_columns or []
+
+
 class Fold(BaseModel):
     fold_id: int
     validation_fitness: float
@@ -101,11 +109,26 @@ def load_wf_per_asset(path: str | Path) -> WalkForwardPerAssetV1:
         "Trades": "trades",
         "Included": "included",
     }
+    mapping_lowers = {k.lower() for k in mapping.keys()}
     rows: List[Dict[str, object]] = []
+    unknown_columns: List[str] = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
+        if reader.fieldnames:
+            unknown_columns = sorted(
+                [
+                    c
+                    for c in reader.fieldnames
+                    if c.strip().lower() not in mapping_lowers
+                ]
+            )
         for row in reader:
-            norm = {mapping.get(k, k): v for k, v in row.items()}
+            norm = {
+                mapping.get(
+                    k.strip(), mapping.get(k.strip().capitalize(), k.strip())
+                ): v
+                for k, v in row.items()
+            }
             try:
                 score = float(norm["score"])
             except (TypeError, ValueError):
@@ -113,7 +136,7 @@ def load_wf_per_asset(path: str | Path) -> WalkForwardPerAssetV1:
             try:
                 trades = int(norm["trades"])
             except (TypeError, ValueError):
-                raise ValueError("invalid trades value")
+                raise SchemaCsvError("invalid trades value", unknown_columns)
             rows.append(
                 {
                     "fold": int(norm["fold"]),
@@ -124,6 +147,9 @@ def load_wf_per_asset(path: str | Path) -> WalkForwardPerAssetV1:
                 }
             )
     if not rows:
-        raise ValueError("no rows present")
+        raise SchemaCsvError("no rows present", unknown_columns)
     adapter = TypeAdapter(WalkForwardPerAssetV1)
-    return adapter.validate_python({"rows": rows})
+    try:
+        return adapter.validate_python({"rows": rows})
+    except Exception as e:
+        raise SchemaCsvError(str(e), unknown_columns) from e
