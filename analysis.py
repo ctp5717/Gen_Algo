@@ -84,6 +84,8 @@ def _get_cache_hashes() -> dict:
         wf_start, wf_end = train_start, val_end
     earliest = min(train_start, val_start, wf_start).strftime("%Y-%m-%d")
     latest = max(train_end, val_end, wf_end).strftime("%Y-%m-%d")
+    source = getattr(config, "DATA_SOURCE", "")
+    interval = getattr(config, "TIMEFRAME", "")
 
     tickers = (
         [t for _, t in getattr(config, "ASSET_GROUP", [])]
@@ -92,8 +94,13 @@ def _get_cache_hashes() -> dict:
     )
     hashes = {}
     for t in tickers:
-        norm = data_loader._normalize_ticker(t)
-        cache_stem = f"{norm}_{config.DATA_SOURCE.lower()}_{earliest}_{latest}_{config.TIMEFRAME}"
+        cache_stem = data_loader.build_cache_stem(
+            t,
+            earliest,
+            latest,
+            interval,
+            source=source,
+        )
         for ext in (
             data_loader.CACHE_EXTENSION,
             data_loader.LEGACY_CACHE_EXTENSION,

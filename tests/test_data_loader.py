@@ -128,6 +128,63 @@ def test_get_data_calls_warning_helper(monkeypatch):
     assert calls == [(df, True)]
 
 
+def test_get_data_builds_paths_with_helper(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "Open": [1],
+            "High": [1],
+            "Low": [1],
+            "Close": [1],
+            "Volume": [1],
+        },
+        index=pd.date_range("2024-01-01", periods=1),
+    )
+
+    called: list[tuple[str, str, str, str, str | None, bool]] = []
+
+    def fake_build_cache_stem(
+        ticker: str,
+        start: str,
+        end: str,
+        interval: str,
+        *,
+        source: str | None = None,
+        normalize: bool = True,
+    ) -> str:
+        called.append((ticker, start, end, interval, source, normalize))
+        return "custom-stem"
+
+    seen_paths: list[str] = []
+
+    def fake_exists(path: str) -> bool:
+        seen_paths.append(path)
+        return False
+
+    monkeypatch.setattr(data_loader, "build_cache_stem", fake_build_cache_stem)
+    monkeypatch.setattr(data_loader.os.path, "exists", fake_exists)
+    monkeypatch.setattr(data_loader.os, "makedirs", lambda *a, **k: None)
+    monkeypatch.setattr(data_loader.pd.DataFrame, "to_parquet", lambda self, path: None)
+    monkeypatch.setattr(data_loader, "_warn_missing_volume", lambda *a, **k: None)
+    monkeypatch.setattr(data_loader.config, "DATA_SOURCE", "yfinance")
+    monkeypatch.setattr(data_loader.yf, "download", lambda *a, **k: df.copy())
+
+    result, src = data_loader.get_data(
+        "ETH-USD", "2024-01-01", "2024-01-20", interval="1d", verbose=False
+    )
+
+    pd.testing.assert_frame_equal(result, df)
+    assert src == "API"
+    assert called == [("ETH-USD", "2024-01-01", "2024-01-20", "1d", "yfinance", False)]
+    expected_cache = data_loader.os.path.join(
+        data_loader.CACHE_DIR, "custom-stem" + data_loader.CACHE_EXTENSION
+    )
+    expected_legacy = data_loader.os.path.join(
+        data_loader.CACHE_DIR, "custom-stem" + data_loader.LEGACY_CACHE_EXTENSION
+    )
+    assert expected_cache in seen_paths
+    assert expected_legacy in seen_paths
+
+
 def test_get_group_data_calls_warning_helper(monkeypatch):
     df = pd.DataFrame({"Close": [1]}, index=pd.date_range("2020-01-01", periods=1))
 
