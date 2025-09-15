@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Strategy Recommendation Engine."""
 
+import json
 import math
 import statistics
 from pathlib import Path
@@ -422,7 +423,7 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
         msg = f"schema validation failed (summary): {e}"
         return _schema_error(run_dir, msg, msg)
     try:
-        per_asset = load_wf_per_asset(per_asset_path)
+        per_asset, unknown_cols = load_wf_per_asset(per_asset_path)
     except ValidationError as e:  # pragma: no cover - exercised in integration
         details = "\n".join(
             f"- per_asset.{'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
@@ -461,10 +462,25 @@ def generate_recommendation(run_context: Dict[str, object]) -> Dict[str, object]
         "schema_version": "1.0",
     }
 
-    merge_run_metadata(
-        run_dir / "run_metadata.json",
-        {"recommendation": payload, "artifacts": ["strategy_recommendation.md"]},
-    )
+    meta_update: Dict[str, object] = {
+        "recommendation": payload,
+        "artifacts": ["strategy_recommendation.md"],
+    }
+    if config.RECOMMENDATION.get("LOG_UNKNOWN_COLUMNS_ON_SUCCESS") and unknown_cols:
+        diag_entry = {
+            "source": "walk_forward_per_asset.csv",
+            "unknown_columns": unknown_cols,
+        }
+        meta_path = run_dir / "run_metadata.json"
+        try:
+            existing_meta = json.loads(meta_path.read_text())
+            diag_list = list(existing_meta.get("diagnostics", []))
+        except Exception:
+            diag_list = []
+        diag_list.append(diag_entry)
+        meta_update["diagnostics"] = diag_list
+
+    merge_run_metadata(run_dir / "run_metadata.json", meta_update)
     _write_markdown(run_dir / "strategy_recommendation.md", payload)
     print(
         f"Recommendation: {conf['category']} ({conf['score']}) - "

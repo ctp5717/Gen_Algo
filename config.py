@@ -333,6 +333,7 @@ RECOMMENDATION = {
     "PARAM_COV_UNSTABLE": 0.5,
     "PARAM_COV_WATCHLIST": 0.35,
     "USE_RETURN_AS_FITNESS": False,
+    "LOG_UNKNOWN_COLUMNS_ON_SUCCESS": False,
     "ASSET_CLASS_THRESHOLDS": {
         "star": {"performance": 1.0, "consistency": 70},
         "stalwart": {
