@@ -42,12 +42,15 @@ def build_cache_stem(
     """
 
     normalized = _normalize_ticker(ticker) if normalize else ticker
-    resolved_source = (source or getattr(config, "DATA_SOURCE", "")).lower()
-    return (
-        f"{normalized}_"
-        f"{resolved_source}_"
-        f"{start_date}_{end_date}_{interval}"
-    )
+    if source is None:
+        fallback_source = getattr(config, "DATA_SOURCE", "")
+        if not isinstance(fallback_source, str):
+            fallback_source = ""
+        resolved_source = fallback_source
+    else:
+        resolved_source = source
+    resolved_source = resolved_source.lower()
+    return f"{normalized}_{resolved_source}_{start_date}_{end_date}_{interval}"
 
 
 def set_binance_client(client: Any | None) -> None:
