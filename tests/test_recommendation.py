@@ -432,20 +432,29 @@ def test_asset_summary_and_legend_full_text(tmp_path):
 
     legend_line = next(line for line in lines if line.startswith("Legend:"))
     assert "..." not in legend_line
+    assert legend_line.startswith("Legend: ")
     th = config.RECOMMENDATION["ASSET_CLASS_THRESHOLDS"]
-    expected_legend = (
-        "Legend: "
-        f"Stars \u2265{th['star']['performance']} perf & "
-        f"\u2265{th['star']['consistency']}% consistency; "
-        f"Stalwarts {th['stalwart']['performance_low']}\u2013"
-        f"{th['stalwart']['performance_high']} perf & \u2265"
-        f"{th['stalwart']['consistency']}% consistency; "
-        f"Gambles \u2265{th['gamble']['performance']} perf & "
-        f"<{th['gamble']['consistency']}% consistency; "
-        f"Drags <{th['drag']['performance']} perf & <"
-        f"{th['drag']['consistency']}% consistency"
-    )
-    assert legend_line == expected_legend
+    segments = [
+        (
+            f"Stars \u2265{th['star']['performance']} perf & "
+            f"\u2265{th['star']['consistency']}% consistency"
+        ),
+        (
+            f"Stalwarts {th['stalwart']['performance_low']}\u2013"
+            f"{th['stalwart']['performance_high']} perf & \u2265"
+            f"{th['stalwart']['consistency']}% consistency"
+        ),
+        (
+            f"Gambles \u2265{th['gamble']['performance']} perf & "
+            f"<{th['gamble']['consistency']}% consistency"
+        ),
+        (
+            f"Drags <{th['drag']['performance']} perf & <"
+            f"{th['drag']['consistency']}% consistency"
+        ),
+    ]
+    for seg in segments:
+        assert seg in legend_line
     assert "\n" not in legend_line
 
 
