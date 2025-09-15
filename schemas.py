@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, field_validator
 
 import config
 
@@ -26,6 +26,21 @@ class Fold(BaseModel):
     validation_fitness: float
     params: Dict[str, float]
     champion_status: Optional[Literal["Elite", "Viable", "Discarded"]] = None
+
+    @field_validator("champion_status", mode="before")
+    @classmethod
+    def _validate_champion_status(
+        cls, value: Optional[str]
+    ) -> Optional[str]:
+        if value is None:
+            return value
+        allowed = ("Elite", "Viable", "Discarded")
+        if value not in allowed:
+            allowed_str = " | ".join(allowed)
+            raise ValueError(
+                f"Fold.champion_status must be one of: {allowed_str}"
+            )
+        return value
 
 
 class Metadata(BaseModel):

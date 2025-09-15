@@ -20,6 +20,7 @@ from schemas import (
     load_wf_summary,
 )
 from strings import PARAM_STABILITY_IMPLICATION
+from utils.format import fmt_num, fmt_pct
 
 
 def _write_sample_files(tmp_path: Path) -> None:
@@ -104,8 +105,9 @@ def test_load_wf_summary_bad_champion_status(tmp_path):
     with pytest.raises(ValidationError) as exc:
         load_wf_summary(wf / "walk_forward_summary.json")
     msg = str(exc.value)
-    assert "champion_status" in msg
-    assert "Elite" in msg and "Viable" in msg and "Discarded" in msg
+    assert (
+        "Fold.champion_status must be one of: Elite | Viable | Discarded" in msg
+    )
 
 
 def test_use_return_as_fitness(monkeypatch, tmp_path):
@@ -223,19 +225,47 @@ def test_asset_class_threshold_override(monkeypatch):
 
 def test_asset_sort_key_ordering():
     assets = {
-        # Stars: same performance and consistency -> ticker asc
-        "AAA": {"class": "Stars", "performance": 2.0, "consistency": 90},
-        "AAB": {"class": "Stars", "performance": 2.0, "consistency": 90},
-        # Lower performance Star
-        "AAC": {"class": "Stars", "performance": 1.5, "consistency": 95},
+        # Stars: ties broken by consistency then ticker
+        "AAA": {"class": "Stars", "performance": 2.0, "consistency": 95},
+        "AAB": {"class": "Stars", "performance": 2.0, "consistency": 95},
+        "AAC": {"class": "Stars", "performance": 1.5, "consistency": 97},
+        "AAD": {"class": "Stars", "performance": 1.5, "consistency": 90},
         # Stalwarts: tie on performance -> consistency desc
         "BBA": {"class": "Stalwarts", "performance": 1.0, "consistency": 70},
         "BBB": {"class": "Stalwarts", "performance": 1.0, "consistency": 60},
-        # Gamble: lower class priority
-        "CCC": {"class": "Gambles", "performance": 1.0, "consistency": 40},
+        "BBC": {"class": "Stalwarts", "performance": 0.8, "consistency": 65},
+        # Gambles and below follow class priority
+        "CCA": {"class": "Gambles", "performance": 1.3, "consistency": 45},
+        "CCB": {"class": "Gambles", "performance": 1.1, "consistency": 40},
+        "DDA": {"class": "Borderline", "performance": 0.2, "consistency": 55},
+        "EEA": {"class": "Drags", "performance": -0.5, "consistency": 30},
+        "FFA": {"class": "Insufficient Data", "performance": 0.0, "consistency": 0},
     }
     ordered = [t for t, _ in sorted(assets.items(), key=recommendation._asset_sort_key)]
-    assert ordered == ["AAA", "AAB", "AAC", "BBA", "BBB", "CCC"]
+    assert ordered == [
+        "AAA",
+        "AAB",
+        "AAC",
+        "AAD",
+        "BBA",
+        "BBB",
+        "BBC",
+        "CCA",
+        "CCB",
+        "DDA",
+        "EEA",
+        "FFA",
+    ]
+
+
+def test_asset_sort_tiebreakers_exact():
+    assets = {
+        "AAA": {"class": "Stars", "performance": 2.0, "consistency": 95},
+        "AAB": {"class": "Stars", "performance": 2.0, "consistency": 94},
+        "AAC": {"class": "Stars", "performance": 1.9, "consistency": 99},
+    }
+    ordered = [t for t, _ in sorted(assets.items(), key=recommendation._asset_sort_key)]
+    assert ordered == ["AAA", "AAB", "AAC"]
 
 
 def test_param_stability_detection():
@@ -342,6 +372,34 @@ def test_param_stability_rounding_boundary():
     assert watch == ["e"]
 
 
+def test_param_stability_ignores_non_finite_values():
+    folds = [
+        Fold(
+            fold_id=0,
+            validation_fitness=1.0,
+            params={"x": 1.0, "y": float("nan")},
+            champion_status=None,
+        ),
+        Fold(
+            fold_id=1,
+            validation_fitness=1.0,
+            params={"x": float("inf"), "y": 2.0},
+            champion_status=None,
+        ),
+        Fold(
+            fold_id=2,
+            validation_fitness=1.0,
+            params={"x": 2.0, "y": float("-inf")},
+            champion_status=None,
+        ),
+    ]
+    cov, unstable, watch = recommendation._param_stability(folds)
+    assert cov["x"] == pytest.approx(0.33, abs=0.01)
+    assert "y" not in cov
+    assert unstable == []
+    assert watch == []
+
+
 def test_schema_validation_failure_summary(tmp_path):
     wf = tmp_path / "walk_forward"
     wf.mkdir()
@@ -356,12 +414,14 @@ def test_schema_validation_failure_summary(tmp_path):
     (tmp_path / "run_metadata.json").write_text("{}")
     out = recommendation.generate_recommendation({"run_dir": tmp_path})
     assert out["error"] == "schema_validation_failed"
+    assert out["failed_file"] == "summary"
     meta = json.loads((tmp_path / "run_metadata.json").read_text())
     assert meta["recommendation"]["error"] == "schema_validation_failed"
+    assert meta["recommendation"]["failed_file"] == "summary"
     md = (tmp_path / "strategy_recommendation.md").read_text()
     assert "schema validation failed" in md.lower()
     # Ensure the markdown explicitly labels the failing schema section
-    assert re.search(r"- summary\.", md)
+    assert "## Failed file: summary" in md
     assert "validation_fitness" in md
     assert "strategy_recommendation.md" in meta["artifacts"]
 
@@ -386,11 +446,13 @@ def test_schema_validation_failure_per_asset(tmp_path):
     (tmp_path / "run_metadata.json").write_text("{}")
     out = recommendation.generate_recommendation({"run_dir": tmp_path})
     assert out["error"] == "schema_validation_failed"
+    assert out["failed_file"] == "per_asset"
     diag = out.get("diagnostics", "")
     # Diagnostics should report unknown column headers
     assert diag.startswith("Unknown columns:") and "foo" in diag
     md = (tmp_path / "strategy_recommendation.md").read_text()
     assert "schema validation failed (per_asset)" in md
+    assert "## Failed file: per_asset" in md
     assert "Diagnostics" in md and "Unknown columns:" in md and "foo" in md
 
 
@@ -430,19 +492,96 @@ def test_unknown_columns_logged_on_success(tmp_path, monkeypatch):
     } in meta.get("diagnostics", [])
 
 
+def test_logging_origin_env_override(tmp_path, monkeypatch):
+    _write_sample_files(tmp_path)
+    wf = tmp_path / "walk_forward"
+    df = pd.read_csv(wf / "walk_forward_per_asset.csv")
+    df["foo"] = 1
+    df.to_csv(wf / "walk_forward_per_asset.csv", index=False)
+    monkeypatch.setattr(config, "IS_PROD", True)
+    monkeypatch.setattr(config, "ENV_NAME", "production")
+    monkeypatch.setenv("SRE_LOG_UNKNOWN_COLS", "1")
+    monkeypatch.setitem(config.RECOMMENDATION, "LOG_UNKNOWN_COLUMNS_ON_SUCCESS", True)
+    recommendation.generate_recommendation({"run_dir": tmp_path})
+    md = (tmp_path / "strategy_recommendation.md").read_text(encoding="utf-8")
+    assert "LOG_UNKNOWN_COLUMNS_ON_SUCCESS: True (env override (1))" in md
+    meta = json.loads((tmp_path / "run_metadata.json").read_text())
+    assert {
+        "source": "walk_forward_per_asset.csv",
+        "unknown_columns": ["foo"],
+    } in meta.get("diagnostics", [])
+
+
 def test_generate_recommendation_determinism(tmp_path):
     _write_sample_files(tmp_path)
     out1 = recommendation.generate_recommendation({"run_dir": tmp_path})
     md1 = (tmp_path / "strategy_recommendation.md").read_text()
     meta1 = json.loads((tmp_path / "run_metadata.json").read_text())
     assert "strategy_recommendation.md" in meta1["artifacts"]
+    digest1 = (
+        meta1.get("artifacts_meta", {})
+        .get("strategy_recommendation.md", {})
+        .get("sha256")
+    )
+    assert isinstance(digest1, str) and len(digest1) == 64
     tmp2 = tmp_path / "b"
     tmp2.mkdir()
     _write_sample_files(tmp2)
     out2 = recommendation.generate_recommendation({"run_dir": tmp2})
     md2 = (tmp2 / "strategy_recommendation.md").read_text()
+    meta2 = json.loads((tmp2 / "run_metadata.json").read_text())
+    digest2 = (
+        meta2.get("artifacts_meta", {})
+        .get("strategy_recommendation.md", {})
+        .get("sha256")
+    )
     assert out1 == out2 and md1 == md2
+    assert digest1 == digest2
     assert re.search(r"Folds: median", md1)
+
+
+def test_markdown_sections_are_complete(tmp_path):
+    _write_sample_files(tmp_path)
+    payload = recommendation.generate_recommendation({"run_dir": tmp_path})
+    md_path = tmp_path / "strategy_recommendation.md"
+    text = md_path.read_text(encoding="utf-8")
+    assert "..." not in text and "…" not in text
+
+    headings = [
+        "## Overall Confidence",
+        "### Confidence Factors",
+        "## Asset Summary",
+        "## Parameter Summary",
+        "## Asset Performance Matrix",
+        "## Parameter Stability",
+        "## SRE Config",
+    ]
+    for heading in headings:
+        assert text.count(heading) == 1
+
+    issues = recommendation._audit_markdown(md_path, text=text)
+    assert issues == []
+
+    lines = text.splitlines()
+    asset_line = lines[lines.index("## Asset Summary") + 1]
+    param_line = lines[lines.index("## Parameter Summary") + 1]
+    assert asset_line.endswith(".")
+    assert param_line.endswith(".")
+
+    header = "| Ticker | Performance | Consistency | Class | Samples |"
+    assert header in text
+    idx = lines.index(header)
+    rows = []
+    for line in lines[idx + 2 :]:
+        if not line.startswith("|"):
+            break
+        rows.append(line)
+    assert len(rows) == len(payload["assets"])
+
+    assert "No unstable parameters detected." in text
+    assert "- ENV: —" in text
+    assert "- IS_PROD: False" in text
+    assert "- LOG_UNKNOWN_COLUMNS_ON_SUCCESS: True (dev default)" in text
 
 
 def test_asset_summary_and_legend_full_text(tmp_path):
@@ -488,12 +627,239 @@ def test_asset_summary_and_legend_full_text(tmp_path):
     assert "\n" not in legend_line
 
 
+def test_markdown_asset_summary_includes_drag_stance(tmp_path):
+    assets = {
+        "AVAXUSDT": {
+            "performance": -0.4,
+            "consistency": 35.0,
+            "class": "Drags",
+            "samples": 3,
+        },
+        "BTCUSDT": {
+            "performance": -0.9,
+            "consistency": 25.0,
+            "class": "Drags",
+            "samples": 3,
+        },
+    }
+    payload = _mk_payload(assets=assets)
+    md_path = tmp_path / "drag.md"
+    recommendation._write_markdown(md_path, payload)
+    text = md_path.read_text(encoding="utf-8")
+    assert (
+        "Drags should be underweighted or avoided (e.g., AVAXUSDT, BTCUSDT)."
+        in text
+    )
+
+
+def test_markdown_matrix_header_even_when_empty(tmp_path):
+    payload = _mk_payload(assets={})
+    md_path = tmp_path / "empty.md"
+    recommendation._write_markdown(md_path, payload)
+    lines = md_path.read_text(encoding="utf-8").splitlines()
+    header = "| Ticker | Performance | Consistency | Class | Samples |"
+    idx = lines.index(header)
+    assert lines[idx + 1] == "|---|---|---|---|---|"
+    assert lines[idx + 2] == ""
+
+
+def test_markdown_parameter_implication_present(tmp_path):
+    assets = {
+        "STAR": {
+            "performance": 1.5,
+            "consistency": 85.0,
+            "class": "Stars",
+            "samples": 3,
+        }
+    }
+    payload = _mk_payload(
+        assets=assets,
+        cov_by_gene={"stop_loss_pct": float("inf"), "cci_period": 0.4},
+        unstable=["stop_loss_pct"],
+        watchlist=["cci_period"],
+    )
+    md_path = tmp_path / "params.md"
+    recommendation._write_markdown(md_path, payload)
+    text = md_path.read_text(encoding="utf-8")
+    assert text.count(PARAM_STABILITY_IMPLICATION) == 2
+    lines = text.splitlines()
+    summary_line = lines[lines.index("## Parameter Summary") + 1]
+    assert PARAM_STABILITY_IMPLICATION in summary_line
+    stability_idx = lines.index("## Parameter Stability")
+    trailing = lines[stability_idx + 1 :]
+    assert any(line == PARAM_STABILITY_IMPLICATION for line in trailing)
+
+
+def test_markdown_confidence_factors_line_format(tmp_path):
+    conf = {
+        "category": "Medium",
+        "score": 55,
+        "scores": {
+            "median": 33.3,
+            "consistency": 66.6,
+            "tail": 45.5,
+            "downside": 88.8,
+        },
+        "factors": {
+            "median_fitness": 1.2345,
+            "positive_fold_pct": 62.345,
+            "worst_fold_fitness": -0.9876,
+            "downside_deviation": 0.0049,
+        },
+    }
+    payload = _mk_payload(confidence=conf)
+    md_path = tmp_path / "confidence.md"
+    recommendation._write_markdown(md_path, payload)
+    lines = md_path.read_text(encoding="utf-8").splitlines()
+    idx = lines.index("### Confidence Factors") + 1
+    assert lines[idx] == "Folds: median 1.23, worst -0.99, positive 62.3%."
+
+
+def test_asset_matrix_markdown_sort_order(tmp_path):
+    payload = {
+        "confidence": {
+            "category": "Low",
+            "score": 0,
+            "scores": {
+                "median": 0,
+                "consistency": 0,
+                "tail": 0,
+                "downside": 0,
+            },
+            "factors": {
+                "median_fitness": 0,
+                "positive_fold_pct": 0,
+                "worst_fold_fitness": 0,
+                "downside_deviation": 0,
+            },
+        },
+        "assets": {
+            "STAA": {
+                "performance": 2.0,
+                "consistency": 95.0,
+                "class": "Stars",
+                "samples": 4,
+            },
+            "STAB": {
+                "performance": 2.0,
+                "consistency": 95.0,
+                "class": "Stars",
+                "samples": 4,
+            },
+            "STAC": {
+                "performance": 1.5,
+                "consistency": 97.0,
+                "class": "Stars",
+                "samples": 4,
+            },
+            "STAD": {
+                "performance": 1.5,
+                "consistency": 90.0,
+                "class": "Stars",
+                "samples": 4,
+            },
+            "STL1": {
+                "performance": 1.0,
+                "consistency": 70.0,
+                "class": "Stalwarts",
+                "samples": 3,
+            },
+            "STL2": {
+                "performance": 1.0,
+                "consistency": 60.0,
+                "class": "Stalwarts",
+                "samples": 3,
+            },
+            "STL3": {
+                "performance": 0.8,
+                "consistency": 65.0,
+                "class": "Stalwarts",
+                "samples": 3,
+            },
+            "GMB1": {
+                "performance": 1.3,
+                "consistency": 45.0,
+                "class": "Gambles",
+                "samples": 5,
+            },
+            "GMB2": {
+                "performance": 1.1,
+                "consistency": 40.0,
+                "class": "Gambles",
+                "samples": 5,
+            },
+            "BRD1": {
+                "performance": 0.2,
+                "consistency": 55.0,
+                "class": "Borderline",
+                "samples": 2,
+            },
+            "DRG1": {
+                "performance": -0.5,
+                "consistency": 30.0,
+                "class": "Drags",
+                "samples": 3,
+            },
+            "INS1": {
+                "performance": 0.0,
+                "consistency": 0.0,
+                "class": "Insufficient Data",
+                "samples": 1,
+            },
+        },
+        "param_stability": {"cov_by_gene": {}, "unstable_genes": []},
+        "narrative": {"overall": "", "assets": "", "params": ""},
+        "schema_version": "1.0",
+    }
+    md_path = tmp_path / "report.md"
+    recommendation._write_markdown(md_path, payload)
+    lines = md_path.read_text(encoding="utf-8").splitlines()
+    header = "| Ticker | Performance | Consistency | Class | Samples |"
+    idx = lines.index(header)
+    rows = []
+    for line in lines[idx + 2 :]:
+        if not line.startswith("|"):
+            break
+        rows.append(line.split("|")[1].strip())
+    assert rows == [
+        "STAA",
+        "STAB",
+        "STAC",
+        "STAD",
+        "STL1",
+        "STL2",
+        "STL3",
+        "GMB1",
+        "GMB2",
+        "BRD1",
+        "DRG1",
+        "INS1",
+    ]
+
+
 def test_markdown_artifact_deduped(tmp_path):
     _write_sample_files(tmp_path)
     recommendation.generate_recommendation({"run_dir": tmp_path})
     recommendation.generate_recommendation({"run_dir": tmp_path})
     meta = json.loads((tmp_path / "run_metadata.json").read_text())
     assert meta["artifacts"].count("strategy_recommendation.md") == 1
+
+
+def test_markdown_snapshot_matches(tmp_path):
+    _write_sample_files(tmp_path)
+    recommendation.generate_recommendation({"run_dir": tmp_path})
+    md_text = (tmp_path / "strategy_recommendation.md").read_text(encoding="utf-8")
+    snapshot_path = Path(__file__).parent / "snapshots" / "strategy_recommendation.md"
+    expected = snapshot_path.read_text(encoding="utf-8")
+    assert md_text == expected
+
+
+def test_audit_markdown_detects_truncation(tmp_path):
+    bad = tmp_path / "bad.md"
+    bad.write_text("## Overall Confidence\n...\n", encoding="utf-8")
+    issues = recommendation._audit_markdown(bad)
+    assert any("ellipses" in issue for issue in issues)
+    assert any("Required anchor missing" in issue for issue in issues)
 
 
 def test_narrative_borderline_and_samples():
@@ -551,16 +917,52 @@ def test_narrative_no_assets_no_sample_line():
     assert "All assets have" not in out["assets"]
 
 
-def _base_conf():
+def _mk_confidence():
     return {
         "category": "Low",
         "score": 0,
+        "scores": {"median": 0, "consistency": 0, "tail": 0, "downside": 0},
         "factors": {
             "median_fitness": 0,
             "positive_fold_pct": 0,
             "worst_fold_fitness": 0,
             "downside_deviation": 0,
         },
+    }
+
+
+def _base_conf():
+    return _mk_confidence()
+
+
+def _mk_payload(
+    *,
+    assets: dict[str, dict[str, object]] | None = None,
+    cov_by_gene: dict[str, float] | None = None,
+    unstable: list[str] | None = None,
+    watchlist: list[str] | None = None,
+    confidence: dict[str, object] | None = None,
+):
+    conf = confidence or _mk_confidence()
+    asset_map = assets or {}
+    unstable_genes = list(unstable or [])
+    watchlist_genes = list(watchlist or [])
+    cov = dict(cov_by_gene or {})
+    for gene in unstable_genes + watchlist_genes:
+        cov.setdefault(gene, 0.0)
+    narrative = recommendation._build_narrative(
+        conf, asset_map, unstable_genes, watchlist_genes
+    )
+    return {
+        "confidence": conf,
+        "assets": asset_map,
+        "param_stability": {
+            "cov_by_gene": cov,
+            "unstable_genes": unstable_genes,
+            "watchlist_genes": watchlist_genes,
+        },
+        "narrative": narrative,
+        "schema_version": "1.0",
     }
 
 
@@ -597,27 +999,7 @@ def test_params_narrative_no_implication_when_stable():
 
 
 def test_infinite_cov_rendered(tmp_path):
-    payload = {
-        "confidence": {
-            "category": "Low",
-            "score": 0,
-            "scores": {"median": 0, "consistency": 0, "tail": 0, "downside": 0},
-            "factors": {
-                "median_fitness": 0,
-                "positive_fold_pct": 0,
-                "worst_fold_fitness": 0,
-                "downside_deviation": 0,
-            },
-        },
-        "assets": {},
-        "param_stability": {
-            "cov_by_gene": {"x": float("inf")},
-            "unstable_genes": ["x"],
-            "watchlist_genes": [],
-        },
-        "narrative": {"overall": "", "assets": "", "params": ""},
-        "schema_version": "1.0",
-    }
+    payload = _mk_payload(cov_by_gene={"x": float("inf")}, unstable=["x"])
     md_path = tmp_path / "md.md"
     recommendation._write_markdown(md_path, payload)
     assert "∞" in md_path.read_text()
@@ -652,3 +1034,8 @@ def test_asset_table_handles_nan_and_none(tmp_path):
     recommendation._write_markdown(md_path, payload)
     text = md_path.read_text()
     assert "| AAA | — | — | Stars | 1 |" in text
+
+
+def test_fmt_helpers_normalize_negative_zero():
+    assert fmt_num(-0.0) == "0.00"
+    assert fmt_pct(-0.0) == "0.0%"
