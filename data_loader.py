@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "data_cache")
 CACHE_EXTENSION = ".parquet"
 LEGACY_CACHE_EXTENSION = ".csv"
+_VOLUME_WARNING_ATTR = "_volume_warning_emitted"
 
 _BINANCE_CLIENT: Any | None = None
 _BINANCE_CLIENT_LOCK = threading.Lock()
@@ -68,15 +69,7 @@ def _load_legacy_cache(
         data = pd.read_csv(legacy_path, index_col=0, parse_dates=True)
         if not isinstance(data.index, pd.DatetimeIndex):
             raise TypeError("Loaded data index is not a DatetimeIndex.")
-        if not _validate_volume(data):
-            try:
-                from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
-            except Exception:
-                VOLUME_INDICATORS = set()
-            if VOLUME_INDICATORS and verbose:
-                logger.warning(
-                    "Volume column missing; volume-based indicators will fail."
-                )
+        _warn_missing_volume(data, verbose, logger)
         if migrate:
             os.makedirs(CACHE_DIR, exist_ok=True)
             data.to_parquet(cache_filepath)
@@ -105,6 +98,28 @@ def _validate_volume(df: pd.DataFrame) -> bool:
     if (vol < 0).any():
         raise KeyError("Volume column contains negative values")
     return True
+
+
+def _warn_missing_volume(
+    df: pd.DataFrame, verbose: bool, logger: logging.Logger
+) -> None:
+    """Emit a warning when volume-dependent indicators may break."""
+
+    if df.attrs.get(_VOLUME_WARNING_ATTR):
+        return
+
+    if _validate_volume(df) or not verbose:
+        return
+
+    try:
+        from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
+    except Exception:
+        VOLUME_INDICATORS = set()
+    if VOLUME_INDICATORS:
+        logger.warning(
+            "Volume column missing; volume-based indicators will fail."
+        )
+        df.attrs[_VOLUME_WARNING_ATTR] = True
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -238,15 +253,7 @@ def get_data(
             data = pd.read_parquet(cache_filepath)
             if not isinstance(data.index, pd.DatetimeIndex):
                 raise TypeError("Loaded data index is not a DatetimeIndex.")
-            if not _validate_volume(data):
-                try:
-                    from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
-                except Exception:
-                    VOLUME_INDICATORS = set()
-                if VOLUME_INDICATORS and verbose:
-                    logger.warning(
-                        "Volume column missing; volume-based indicators will fail."
-                    )
+            _warn_missing_volume(data, verbose, logger)
             if verbose:
                 logger.info("Cache loaded successfully.")
             return data, "cache"
@@ -335,15 +342,7 @@ def get_data(
         }
         data.columns = [rename.get(str(col).lower(), col) for col in data.columns]
 
-        if not _validate_volume(data):
-            try:
-                from strategy_engine import VOLUME_INDICATORS  # noqa: WPS433
-            except Exception:
-                VOLUME_INDICATORS = set()
-            if VOLUME_INDICATORS and verbose:
-                logger.warning(
-                    "Volume column missing; volume-based indicators will fail."
-                )
+        _warn_missing_volume(data, verbose, logger)
 
         # Save the newly fetched data to cache
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -408,6 +407,7 @@ def get_group_data(
                 logger=logger,
             )
             if not df.empty:
+                _warn_missing_volume(df, asset_verbose, logger)
                 raw_data[norm] = df
                 sources[norm] = src
         loaded_norms = [n for n in ordered_norms if n in raw_data]
@@ -435,6 +435,7 @@ def get_group_data(
                         logger.warning("Error loading %s: %s", norm, exc)
                     continue
                 if not df.empty:
+                    _warn_missing_volume(df, asset_verbose, logger)
                     raw_data[norm] = df
                     sources[norm] = src
         loaded_norms = [n for n in ordered_norms if n in raw_data]
