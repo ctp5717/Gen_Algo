@@ -350,6 +350,40 @@ def test_generate_recommendation_determinism(tmp_path):
     assert re.search(r"Folds: median", md1)
 
 
+def test_asset_summary_and_legend_full_text(tmp_path):
+    _write_sample_files(tmp_path)
+    recommendation.generate_recommendation({"run_dir": tmp_path})
+    md_path = tmp_path / "strategy_recommendation.md"
+    lines = md_path.read_text(encoding="utf-8").splitlines()
+
+    asset_idx = lines.index("## Asset Summary") + 1
+    asset_line = lines[asset_idx]
+    assert "..." not in asset_line
+    expected_asset = (
+        "Stars: BBB; Stalwarts: AAA; All assets have \u22653 qualifying fold(s)."
+    )
+    assert asset_line == expected_asset
+    assert "\n" not in asset_line
+
+    legend_line = next(line for line in lines if line.startswith("Legend:"))
+    assert "..." not in legend_line
+    th = config.RECOMMENDATION["ASSET_CLASS_THRESHOLDS"]
+    expected_legend = (
+        "Legend: "
+        f"Stars \u2265{th['star']['performance']} perf & "
+        f"\u2265{th['star']['consistency']}% consistency; "
+        f"Stalwarts {th['stalwart']['performance_low']}\u2013"
+        f"{th['stalwart']['performance_high']} perf & \u2265"
+        f"{th['stalwart']['consistency']}% consistency; "
+        f"Gambles \u2265{th['gamble']['performance']} perf & "
+        f"<{th['gamble']['consistency']}% consistency; "
+        f"Drags <{th['drag']['performance']} perf & <"
+        f"{th['drag']['consistency']}% consistency"
+    )
+    assert legend_line == expected_legend
+    assert "\n" not in legend_line
+
+
 def test_markdown_artifact_deduped(tmp_path):
     _write_sample_files(tmp_path)
     recommendation.generate_recommendation({"run_dir": tmp_path})
