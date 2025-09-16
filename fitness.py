@@ -43,6 +43,8 @@ from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
 
+PenaltyDetail = str | dict[str, float | str] | None
+
 CORE_METRICS = ["Sortino Ratio", "Profit Factor", "Max Drawdown [%]"]
 EXTENDED_METRICS = CORE_METRICS + ["Total Return [%]"]
 
@@ -295,9 +297,9 @@ class MultiAssetFitnessEvaluator:
                             reason="insufficient_coverage"
                         )
                         continue
-                    future_map[
-                        ex.submit(self._evaluate_single_asset, ohlc, rules)
-                    ] = ticker
+                    future_map[ex.submit(self._evaluate_single_asset, ohlc, rules)] = (
+                        ticker
+                    )
                 for fut in cf.as_completed(future_map):
                     ticker = future_map[fut]
                     try:
@@ -334,9 +336,7 @@ class MultiAssetFitnessEvaluator:
                 except Exception as e:
                     if verbose:
                         print(f"Error evaluating asset {ticker}: {e}")
-                        tb = traceback.format_exception(
-                            e.__class__, e, e.__traceback__
-                        )
+                        tb = traceback.format_exception(e.__class__, e, e.__traceback__)
                         trace = (tb[0].strip(), tb[-1].strip())
                     else:
                         trace = None
@@ -558,9 +558,7 @@ class MultiAssetFitnessEvaluator:
             covs = []
             for g in config.STABILITY_GENES:
                 vals = [
-                    float(p[g])
-                    for p in history
-                    if isinstance(p.get(g), (int, float))
+                    float(p[g]) for p in history if isinstance(p.get(g), (int, float))
                 ]
                 if len(vals) > 1:
                     mean = float(np.mean(vals))
@@ -579,8 +577,8 @@ class MultiAssetFitnessEvaluator:
         poor_score = self.settings.get("poor_score", -999.0)
         min_trades = self.settings.get("min_total_trades", 0)
         min_assets = self.settings.get("min_included_assets", 1)
-        trade_penalty = None
-        min_assets_penalty = None
+        trade_penalty: PenaltyDetail = None
+        min_assets_penalty: PenaltyDetail = None
 
         assets_count = len(included_assets)
         if assets_count < min_assets:

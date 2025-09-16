@@ -697,8 +697,6 @@ def test_parallel_evaluation_handles_exception():
     assert ev.last_details["per_asset"]["B"]["reason"] == "evaluation_error"
 
 
-
-
 def test_evaluate_assets_collects_errors():
     group_data = {
         "A": pd.DataFrame({"Close": [1, 2, 3]}),
