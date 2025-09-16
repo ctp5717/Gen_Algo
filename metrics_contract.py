@@ -200,12 +200,16 @@ def resolve_metrics(portfolio: Any) -> tuple[dict[str, Any], dict[str, str | Non
             alias_map, stats_dict = _discover_aliases(portfolio)
         else:
             stats_dict = _normalise_stats(stats_obj)
-            alias_map = {metric: preferred[idx] for idx, metric in enumerate(_CANONICAL_ORDER)}
+            alias_map = {
+                metric: preferred[idx] for idx, metric in enumerate(_CANONICAL_ORDER)
+            }
         _ALIAS_CACHE = alias_map
     else:
         alias_map = dict(_ALIAS_CACHE)
 
-    requested = [alias for alias in (alias_map.get(m) for m in _CANONICAL_ORDER) if alias]
+    requested = [
+        alias for alias in (alias_map.get(m) for m in _CANONICAL_ORDER) if alias
+    ]
     if stats_dict is None:
         stats_obj = portfolio.stats(metrics=requested) if requested else {}
         stats_dict = _normalise_stats(stats_obj)
