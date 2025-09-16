@@ -43,6 +43,12 @@ FEES = 0.001
 # When True, preflight computes all indicators to surface latent errors.
 PREFLIGHT_ALL_INDICATORS = False
 
+# Behaviour when metric aliases are missing in vectorbt stats.
+METRICS_PREFLIGHT = {
+    "mode": "warn",  # "warn" | "fail"
+    "missing_threshold": 0,
+}
+
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"
