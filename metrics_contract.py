@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import threading
 from collections.abc import Mapping
 from typing import Any
 
@@ -27,38 +29,84 @@ __all__ = [
 # Canonical metrics and the aliases exposed by vectorbt/QuantStats across versions.
 METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "sortino": (
-        "Sortino Ratio",
         "sortino",
         "sortino_ratio",
+        "Sortino Ratio",
         "Sortino",
         "QS Sortino Ratio",
     ),
     "profit_factor": (
-        "Profit Factor",
         "profit_factor",
+        "Profit Factor",
         "PF",
         "ProfitFactor",
     ),
     "max_drawdown": (
-        "Max Drawdown [%]",
-        "Max Drawdown",
         "max_drawdown",
+        "Max Drawdown",
+        "Max Drawdown [%]",
         "Max Drawdown %",
         "Max Drawdown ( % )",
     ),
     "total_return": (
-        "Total Return [%]",
-        "Total Return",
-        "Return [%]",
         "total_return",
+        "Total Return",
+        "Total Return [%]",
+        "Return [%]",
         "Cumulative Returns [%]",
     ),
 }
 
+_KEY_SANITISE_RE = re.compile(r"[^0-9a-zA-Z]+")
+
+
+def _key_norm(key: Any) -> str:
+    """Return a normalised representation for safe alias comparison."""
+
+    text = str(key)
+    collapsed = _KEY_SANITISE_RE.sub("_", text.lower())
+    collapsed = re.sub(r"_+", "_", collapsed)
+    return collapsed.strip("_")
+
+
+def _merge_alias_extension() -> None:
+    """Merge user-provided alias patches from :mod:`config`."""
+
+    extra = getattr(config, "METRIC_ALIASES_EXT", None)
+    if not extra:
+        return
+    if isinstance(extra, Mapping):
+        items = extra.items()
+    else:  # pragma: no cover - defensive fallback for bad input
+        try:
+            items = dict(extra).items()
+        except Exception:
+            return
+    for metric, aliases in items:
+        if not aliases:
+            continue
+        existing = list(METRIC_ALIASES.get(metric, ()))
+        values = [aliases] if isinstance(aliases, str) else list(aliases)
+        for alias in values:
+            alias_str = str(alias)
+            if alias_str not in existing:
+                existing.append(alias_str)
+        METRIC_ALIASES[metric] = tuple(existing)
+
+
+_merge_alias_extension()
+
 _PERCENTAGE_METRICS = {"max_drawdown", "total_return"}
 _CANONICAL_ORDER = tuple(METRIC_ALIASES.keys())
 _PREFERRED_ALIASES = {key: METRIC_ALIASES[key][0] for key in _CANONICAL_ORDER}
-_ALIAS_CACHE: dict[str, str | None] | None = None
+# ``_ALIAS_CACHE`` is keyed by a provider signature so that alias discovery is
+# isolated per stats source.  The cache is guarded by ``_ALIAS_CACHE_LOCK`` for
+# thread safety; multiprocessing workers obtain a copy-on-write view which is
+# inherently safe because each process has its own module state.
+_ALIAS_CACHE_LOCK = threading.Lock()
+_ALIAS_CACHE: dict[str, dict[str, str | None]] = {}
+_DISCOVERY_LOGGED: set[str] = set()
+_MAPPING_LOGGED: set[str] = set()
 
 
 class MetricsAliasError(RuntimeError):
@@ -68,26 +116,66 @@ class MetricsAliasError(RuntimeError):
 def reset_cache() -> None:
     """Reset cached alias selections (primarily for unit tests)."""
 
-    global _ALIAS_CACHE
-    _ALIAS_CACHE = None
+    with _ALIAS_CACHE_LOCK:
+        _ALIAS_CACHE.clear()
+        _DISCOVERY_LOGGED.clear()
+        _MAPPING_LOGGED.clear()
 
 
-def _normalise_stats(stats: Any) -> dict[str, Any]:
-    """Convert stats output (Series, dict, DataFrame) into a mapping."""
+def _provider_signature(portfolio: Any) -> str:
+    """Return a simple signature identifying the stats provider."""
 
+    cls = type(portfolio)
+    module = getattr(cls, "__module__", "") or ""
+    name = getattr(cls, "__qualname__", getattr(cls, "__name__", "")) or str(cls)
+    return f"{module}:{name}"
+
+
+def _normalise_stats(stats: Any) -> tuple[dict[str, Any], dict[str, str]]:
+    """Convert stats output into a mapping and a lookup table."""
+
+    raw: dict[str, Any]
     if isinstance(stats, pd.Series):
-        return stats.to_dict()
-    if isinstance(stats, Mapping):
-        return dict(stats)
-    if hasattr(stats, "to_dict"):
+        raw = stats.to_dict()
+    elif isinstance(stats, Mapping):
+        raw = dict(stats)
+    elif hasattr(stats, "to_dict"):
         try:
-            return dict(stats.to_dict())
+            raw = dict(stats.to_dict())
         except Exception:  # pragma: no cover - defensive
-            pass
-    try:
-        return dict(stats)
-    except Exception:  # pragma: no cover - defensive
-        return {}
+            raw = {}
+    else:
+        try:
+            raw = dict(stats)
+        except Exception:  # pragma: no cover - defensive
+            raw = {}
+
+    result: dict[str, Any] = {}
+    lookup: dict[str, str] = {}
+    for key, value in raw.items():
+        key_str = str(key)
+        collapsed = value
+        if isinstance(value, pd.Series):
+            cleaned = value.dropna()
+            if cleaned.size == 1:
+                collapsed = cleaned.iloc[0]
+        elif isinstance(value, Mapping):
+            try:
+                if len(value) == 1:
+                    collapsed = next(iter(value.values()))
+            except TypeError:  # pragma: no cover - defensive
+                pass
+        result[key_str] = collapsed
+        lookup.setdefault(key_str, key_str)
+        norm = _key_norm(key_str)
+        if norm:
+            lookup.setdefault(norm, key_str)
+        if isinstance(key, (tuple, list)):
+            for part in key:
+                part_norm = _key_norm(part)
+                if part_norm:
+                    lookup.setdefault(part_norm, key_str)
+    return result, lookup
 
 
 def _coerce_series(data: Any) -> pd.Series | None:
@@ -177,44 +265,162 @@ def _build_metric_dict(
     return result
 
 
-def _discover_aliases(portfolio: Any) -> tuple[dict[str, str | None], dict[str, Any]]:
-    stats_all = _normalise_stats(portfolio.stats())
+def _discover_aliases(
+    portfolio: Any,
+    signature: str | None = None,
+) -> tuple[dict[str, str | None], dict[str, Any], dict[str, str]]:
+    log_level = None
+    if signature:
+        with _ALIAS_CACHE_LOCK:
+            first_log = signature not in _DISCOVERY_LOGGED
+            if first_log:
+                _DISCOVERY_LOGGED.add(signature)
+        if signature:
+            log_level = logging.INFO if first_log else logging.DEBUG
+            logger.log(
+                log_level,
+                "Discovering metric aliases via full stats() for provider %s",
+                signature,
+            )
+
+    stats_raw = portfolio.stats()
+    stats_all, lookup = _normalise_stats(stats_raw)
     alias_map: dict[str, str | None] = {}
     for metric, aliases in METRIC_ALIASES.items():
-        alias = next((name for name in aliases if name in stats_all), None)
-        alias_map[metric] = alias
-    return alias_map, stats_all
+        resolved = None
+        for candidate in aliases:
+            resolved = lookup.get(_key_norm(candidate))
+            if resolved:
+                break
+        alias_map[metric] = resolved
+    return alias_map, stats_all, lookup
 
 
 def resolve_metrics(portfolio: Any) -> tuple[dict[str, Any], dict[str, str | None]]:
     """Resolve canonical metrics from a portfolio, handling alias drift."""
 
-    global _ALIAS_CACHE
+    signature = _provider_signature(portfolio)
+    with _ALIAS_CACHE_LOCK:
+        alias_map = dict(_ALIAS_CACHE.get(signature, {}))
     stats_dict: dict[str, Any] | None = None
+    stats_lookup: dict[str, str] | None = None
 
-    if _ALIAS_CACHE is None:
+    if not alias_map:
         preferred = [_PREFERRED_ALIASES[m] for m in _CANONICAL_ORDER]
         try:
             stats_obj = portfolio.stats(metrics=preferred)
-        except Exception:
-            alias_map, stats_dict = _discover_aliases(portfolio)
+        except KeyError as exc:
+            logger.debug(
+                "Provider %s reported missing metrics during preferred fetch: %s",
+                signature,
+                exc,
+            )
+            alias_map, stats_dict, stats_lookup = _discover_aliases(
+                portfolio, signature
+            )
+        except Exception as exc:
+            logger.warning(
+                "Provider %s stats(metrics=%s) raised %s; rediscovering aliases",
+                signature,
+                preferred,
+                exc,
+            )
+            alias_map, stats_dict, stats_lookup = _discover_aliases(
+                portfolio, signature
+            )
         else:
-            stats_dict = _normalise_stats(stats_obj)
-            alias_map = {
-                metric: preferred[idx] for idx, metric in enumerate(_CANONICAL_ORDER)
-            }
-        _ALIAS_CACHE = alias_map
-    else:
-        alias_map = dict(_ALIAS_CACHE)
+            stats_dict, stats_lookup = _normalise_stats(stats_obj)
+            if all(alias in stats_lookup for alias in preferred if alias):
+                alias_map = {
+                    metric: stats_lookup[preferred[idx]]
+                    for idx, metric in enumerate(_CANONICAL_ORDER)
+                }
+            else:
+                alias_map, stats_dict, stats_lookup = _discover_aliases(
+                    portfolio, signature
+                )
+        with _ALIAS_CACHE_LOCK:
+            _ALIAS_CACHE[signature] = dict(alias_map)
 
     requested = [
         alias for alias in (alias_map.get(m) for m in _CANONICAL_ORDER) if alias
     ]
-    if stats_dict is None:
-        stats_obj = portfolio.stats(metrics=requested) if requested else {}
-        stats_dict = _normalise_stats(stats_obj)
+
+    if stats_dict is None or stats_lookup is None:
+        stats_dict = {}
+        stats_lookup = {}
+    if requested and not all(alias in stats_lookup for alias in requested):
+        stats_dict, stats_lookup, alias_map = _refresh_stats(
+            portfolio, signature, alias_map, requested
+        )
+
     metrics = _build_metric_dict(alias_map, stats_dict)
     return metrics, dict(alias_map)
+
+
+def _refresh_stats(
+    portfolio: Any,
+    signature: str,
+    alias_map: dict[str, str | None],
+    requested: list[str],
+) -> tuple[dict[str, Any], dict[str, str], dict[str, str | None]]:
+    """Fetch provider stats, re-discovering aliases if required."""
+
+    stats_dict: dict[str, Any] = {}
+    stats_lookup: dict[str, str] = {}
+    current_alias_map = dict(alias_map)
+    current_requested = list(requested)
+    attempts = 0
+
+    while True:
+        attempts += 1
+        discovery_needed = False
+        try:
+            stats_obj = (
+                portfolio.stats(metrics=current_requested) if current_requested else {}
+            )
+        except KeyError as exc:
+            discovery_needed = True
+            logger.debug(
+                "Provider %s reported missing metrics during refresh: %s",
+                signature,
+                exc,
+            )
+        except Exception as exc:
+            discovery_needed = True
+            logger.warning(
+                "Provider %s stats(metrics=%s) raised %s during refresh; rediscovering",
+                signature,
+                current_requested,
+                exc,
+            )
+        else:
+            stats_dict, stats_lookup = _normalise_stats(stats_obj)
+            if all(alias in stats_lookup for alias in current_requested):
+                return stats_dict, stats_lookup, current_alias_map
+            discovery_needed = True
+
+        if attempts >= 2 or not discovery_needed:
+            break
+
+        with _ALIAS_CACHE_LOCK:
+            _ALIAS_CACHE.pop(signature, None)
+        current_alias_map, stats_dict, stats_lookup = _discover_aliases(
+            portfolio, signature
+        )
+        with _ALIAS_CACHE_LOCK:
+            _ALIAS_CACHE[signature] = dict(current_alias_map)
+        current_requested = [
+            alias
+            for alias in (current_alias_map.get(m) for m in _CANONICAL_ORDER)
+            if alias
+        ]
+        if not current_requested:
+            return stats_dict, stats_lookup, current_alias_map
+        if stats_lookup and all(alias in stats_lookup for alias in current_requested):
+            return stats_dict, stats_lookup, current_alias_map
+
+    return stats_dict, stats_lookup, current_alias_map
 
 
 def _needs_metric(stats: Mapping[str, Any], metric: str) -> bool:
@@ -313,29 +519,45 @@ def format_mapping(
 
 
 def assert_metric_aliases(portfolio: Any) -> dict[str, str | None]:
-    """Validate that each canonical metric is obtainable from the portfolio."""
+    """Validate that each canonical metric is obtainable from the portfolio.
 
-    global _ALIAS_CACHE
-    alias_map, _ = _discover_aliases(portfolio)
-    _ALIAS_CACHE = alias_map
+    When ``config.METRICS_PREFLIGHT`` is absent the defaults are
+    ``mode="warn"`` and ``missing_threshold=0``.
+    """
+
+    signature = _provider_signature(portfolio)
+    alias_map, _, _ = _discover_aliases(portfolio, signature)
+    with _ALIAS_CACHE_LOCK:
+        _ALIAS_CACHE[signature] = dict(alias_map)
 
     missing = [metric for metric, alias in alias_map.items() if not alias]
     mapping_summary = format_mapping(
         {metric: alias or "missing" for metric, alias in alias_map.items()}
     )
-    logger.info("Metrics mapping: %s", mapping_summary)
+
+    should_log = False
+    with _ALIAS_CACHE_LOCK:
+        if signature not in _MAPPING_LOGGED:
+            _MAPPING_LOGGED.add(signature)
+            should_log = True
+    if should_log:
+        logger.info("Metrics mapping for %s: %s", signature, mapping_summary)
 
     settings = getattr(config, "METRICS_PREFLIGHT", {})
     mode = str(settings.get("mode", "warn")).lower()
     threshold = int(settings.get("missing_threshold", 0))
 
     if missing and len(missing) > threshold:
-        message = f"Missing metric aliases: {', '.join(missing)}"
+        message = f"Missing metric aliases for {signature}: {', '.join(missing)}"
         if mode == "fail":
             raise MetricsAliasError(message)
         logger.warning(message)
     elif missing:
-        logger.warning("Missing metric aliases: %s", ", ".join(missing))
+        logger.warning(
+            "Missing metric aliases for %s: %s",
+            signature,
+            ", ".join(missing),
+        )
 
     return alias_map
 

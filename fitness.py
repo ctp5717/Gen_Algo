@@ -92,14 +92,35 @@ class FitnessEvaluator:
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )
 
+            signature = metrics_contract._provider_signature(portfolio)
+
             if not self._metrics_preflight_done:
-                metrics_contract.assert_metric_aliases(portfolio)
+                try:
+                    metrics_contract.assert_metric_aliases(portfolio)
+                except Exception as exc:
+                    logger.warning(
+                        "Metric alias preflight failed for %s: %s",
+                        signature,
+                        exc,
+                    )
                 self._metrics_preflight_done = True
 
-            metrics, sources, _ = metrics_contract.evaluate_metrics(portfolio)
+            try:
+                metrics, sources, _ = metrics_contract.evaluate_metrics(portfolio)
+            except Exception as exc:
+                logger.warning(
+                    "Metric evaluation failed for %s: %s",
+                    signature,
+                    exc,
+                )
+                canonical = list(metrics_contract.METRIC_ALIASES)
+                metrics = dict.fromkeys(canonical)
+                sources = dict.fromkeys(canonical, "missing")
             if not self._metric_mapping_logged and sources:
                 logger.info(
-                    "Metrics mapping: %s", metrics_contract.format_mapping(sources)
+                    "Metrics mapping for %s: %s",
+                    signature,
+                    metrics_contract.format_mapping(sources),
                 )
                 self._metric_mapping_logged = True
 
@@ -250,14 +271,18 @@ class MultiAssetFitnessEvaluator:
             return str(trace)
 
     # ------------------------------------------------------------------
-    def _log_metric_mapping(self, metric_sources: Mapping[str, str]) -> None:
+    def _log_metric_mapping(
+        self, metric_sources: Mapping[str, str], signature: str | None = None
+    ) -> None:
         """Log the resolved metric mapping exactly once."""
 
         if self._metric_mapping_logged or not metric_sources:
             return
-        logger.info(
-            "Metrics mapping: %s", metrics_contract.format_mapping(metric_sources)
-        )
+        mapping_summary = metrics_contract.format_mapping(metric_sources)
+        if signature:
+            logger.info("Metrics mapping for %s: %s", signature, mapping_summary)
+        else:
+            logger.info("Metrics mapping: %s", mapping_summary)
         self._metric_mapping_logged = True
 
     # ------------------------------------------------------------------
@@ -268,15 +293,20 @@ class MultiAssetFitnessEvaluator:
 
         record = dict(stats)
         metric_sources = record.get("metric_sources") or {}
+        signature = record.get("metric_provider")
         if isinstance(metric_sources, Mapping):
-            self._log_metric_mapping(metric_sources)
+            self._log_metric_mapping(metric_sources, signature)
         missing_metrics = list(record.get("missing_metrics") or [])
         trades = int(record.get("trades", 0) or 0)
         reason = None
         detail = None
         if missing_metrics and trades > 0:
             reason = "metrics_missing"
-            detail = ", ".join(sorted(missing_metrics))
+            metrics_list = ", ".join(sorted(missing_metrics))
+            if signature:
+                detail = f"{signature}: {metrics_list}"
+            else:
+                detail = metrics_list
         return record, reason, detail
 
     # ------------------------------------------------------------------
@@ -311,11 +341,31 @@ class MultiAssetFitnessEvaluator:
             freq=config.to_pandas_freq(config.TIMEFRAME),
         )
 
+        signature = metrics_contract._provider_signature(portfolio)
+
         if not self._metrics_preflight_done:
-            metrics_contract.assert_metric_aliases(portfolio)
+            try:
+                metrics_contract.assert_metric_aliases(portfolio)
+            except Exception as exc:
+                logger.warning(
+                    "Metric alias preflight failed for %s: %s",
+                    signature,
+                    exc,
+                )
             self._metrics_preflight_done = True
 
-        metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
+        try:
+            metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
+        except Exception as exc:
+            logger.warning(
+                "Metric evaluation failed for %s: %s",
+                signature,
+                exc,
+            )
+            canonical = list(metrics_contract.METRIC_ALIASES)
+            metrics = dict.fromkeys(canonical)
+            sources = dict.fromkeys(canonical, "missing")
+            missing = list(canonical)
         trades = int(portfolio.trades.count())
 
         value_fn = getattr(portfolio, "value", None)
@@ -343,6 +393,7 @@ class MultiAssetFitnessEvaluator:
             "signal_counts": signal_counts,
             "metric_sources": sources,
             "missing_metrics": list(missing),
+            "metric_provider": signature,
         }
 
     # ------------------------------------------------------------------
@@ -448,6 +499,7 @@ class MultiAssetFitnessEvaluator:
         nan_fallback = self.settings.get("nan_fallback", 0.0)
         cap = self.settings.get("winsorize_pf_cap", 5.0)
         sources_recorded = False
+        run_metric_sources: dict[str, str] | None = None
 
         for ticker in self._sorted_tickers:
             stats_raw = evaluation_results.get(ticker, self._empty_stats())
@@ -487,6 +539,8 @@ class MultiAssetFitnessEvaluator:
                     if metric_sources and not sources_recorded:
                         details["metric_sources"] = metric_sources
                         sources_recorded = True
+                        if run_metric_sources is None:
+                            run_metric_sources = dict(metric_sources)
                     per_asset_details[ticker] = details
                 else:
                     reason_str = reason or (
@@ -516,6 +570,8 @@ class MultiAssetFitnessEvaluator:
                     if metric_sources and not sources_recorded:
                         details["metric_sources"] = metric_sources
                         sources_recorded = True
+                        if run_metric_sources is None:
+                            run_metric_sources = dict(metric_sources)
                     per_asset_details[ticker] = details
                 continue
 
@@ -565,6 +621,8 @@ class MultiAssetFitnessEvaluator:
             if metric_sources and not sources_recorded:
                 details["metric_sources"] = metric_sources
                 sources_recorded = True
+                if run_metric_sources is None:
+                    run_metric_sources = dict(metric_sources)
             per_asset_details[ticker] = details
 
         return {
@@ -573,6 +631,7 @@ class MultiAssetFitnessEvaluator:
             "per_asset_details": per_asset_details,
             "total_trades": total_trades,
             "assets_traded": assets_traded,
+            "metric_sources": run_metric_sources or {},
         }
 
     # ------------------------------------------------------------------
@@ -584,6 +643,7 @@ class MultiAssetFitnessEvaluator:
         per_asset_details = summary["per_asset_details"]
         total_trades = summary["total_trades"]
         assets_traded = summary["assets_traded"]
+        metric_sources = summary.get("metric_sources") or {}
 
         if not per_asset_metrics:
             poor_score = self.settings.get("poor_score", -999.0)
@@ -607,6 +667,7 @@ class MultiAssetFitnessEvaluator:
                 "min_total_trades": self.settings.get("min_total_trades", 0),
                 "fitness": poor_score,
                 "asset_weights": {},
+                "metric_sources": metric_sources,
             }
             return poor_score
 
@@ -697,6 +758,7 @@ class MultiAssetFitnessEvaluator:
                     "min_total_trades": min_trades,
                     "fitness": F,
                     "asset_weights": w_map,
+                    "metric_sources": metric_sources,
                 }
                 return F
             else:
@@ -728,6 +790,7 @@ class MultiAssetFitnessEvaluator:
                 "min_total_trades": min_trades,
                 "fitness": F,
                 "asset_weights": w_map,
+                "metric_sources": metric_sources,
             }
             return F
         elif policy == "soft_penalty" and total_trades < min_trades:
@@ -767,6 +830,7 @@ class MultiAssetFitnessEvaluator:
             "min_total_trades": min_trades,
             "fitness": F,
             "asset_weights": w_map,
+            "metric_sources": metric_sources,
         }
 
         return F
