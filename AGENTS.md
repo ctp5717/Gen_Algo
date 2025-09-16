@@ -121,7 +121,7 @@ Metric mappings are logged once per run (e.g. `sortino→sortino_ratio`) and the
   - `.pre-commit-config.yaml` (black, isort, flake8, mypy relaxed),
   - `.flake8` per-file ignores,
   - `requirements.txt`, `requirements-dev.txt`.
-  - Tests run on a matrix covering `vectorbt==0.28.3` with QuantStats and floating `vectorbt>=0.28.1` environments (with/without QuantStats) to surface alias drift.
+  - Tests run on a matrix covering `vectorbt==0.28.1` with QuantStats and floating `vectorbt>=0.28.1` environments (with/without QuantStats) to surface alias drift.
 
 ---
 

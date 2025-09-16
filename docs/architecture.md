@@ -49,4 +49,4 @@ Each module is designed for deterministic behaviour and should be accompanied by
 
 Before large runs, `assert_metric_aliases` verifies that at least one alias per metric exists. Its behaviour is controlled via `config.METRICS_PREFLIGHT` (`mode`: `"warn"|"fail"`, `missing_threshold`: tolerated missing aliases). During evaluation the resolved mapping is logged once (e.g. `sortino→sortino_ratio`) and the first asset records `metric_sources` in `MultiAssetFitnessEvaluator.last_details`. When trades execute but metrics remain unavailable the evaluator surfaces `evaluation_reason="metrics_missing"` for that asset.
 
-Continuous integration runs the test suite across a pinned environment (`vectorbt==0.28.3`, `quantstats>=0.0.62`) and floating environments with and without QuantStats to catch alias drift early.
+Continuous integration runs the test suite across a pinned environment (`vectorbt==0.28.1`, `quantstats>=0.0.62`) and floating environments with and without QuantStats to catch alias drift early.

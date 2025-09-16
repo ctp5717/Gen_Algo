@@ -45,7 +45,7 @@ jobs:
         include:
           - name: pinned
             python-version: "3.12"
-            vectorbt: "vectorbt==0.28.3"
+            vectorbt: "vectorbt==0.28.1"
             quantstats: "quantstats>=0.0.62"
             use_stub: "0"
           - name: floating-with-quantstats
