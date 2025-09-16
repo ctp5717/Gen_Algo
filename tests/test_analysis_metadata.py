@@ -16,6 +16,8 @@ import config  # noqa: E402
 import data_loader  # noqa: E402
 import fitness  # noqa: E402
 
+config.initialize_config()
+
 
 def test_cache_hashes_use_cache_helper(monkeypatch):
     monkeypatch.setattr(config, "DATA_SOURCE", "yfinance", raising=False)

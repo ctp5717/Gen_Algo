@@ -35,6 +35,7 @@ def sample_macd_params(rng: np.random.Generator | None = None) -> dict:
 
 def _evaluate_on_validation(solution, gene_map, val_data):
     """Evaluate solution on preloaded validation data and return the score."""
+    config.initialize_config()
     # Skip evaluation gracefully if optional heavy dependencies are missing.
     if not hasattr(pd.DataFrame(), "ta") or not hasattr(vbt, "Portfolio"):
         return -np.inf
@@ -125,6 +126,7 @@ def _evaluate_on_validation(solution, gene_map, val_data):
 
 def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_data):
     """Run short GA optimisations using preloaded data."""
+    config.initialize_config()
     print("\n--- Express Hyperparameter Tuning ---")
     np.random.seed(config.SEED)
 

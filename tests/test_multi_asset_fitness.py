@@ -25,6 +25,8 @@ import fitness  # noqa: E402
 import tuner  # noqa: E402
 from utils.math import weighted_mean_std  # noqa: E402
 
+cfg.initialize_config()
+
 
 def _make_evaluator(settings=None, stats_list=None):
     """Utility to construct a MultiAssetFitnessEvaluator with patched stats."""

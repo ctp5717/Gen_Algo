@@ -18,6 +18,7 @@ def test_hold_period_converts_days_to_bars(monkeypatch):
 
     monkeypatch.setattr(config, "TIMEFRAME", "15m", raising=False)
     importlib.reload(config)
+    config.initialize_config()
     assert config.MAX_HOLD_PERIOD == 14 * 96
 
 
@@ -27,4 +28,5 @@ def test_hold_period_hour_timeframe(monkeypatch):
 
     monkeypatch.setattr(config, "TIMEFRAME", "4h", raising=False)
     importlib.reload(config)
+    config.initialize_config()
     assert config.MAX_HOLD_PERIOD == 14 * 6

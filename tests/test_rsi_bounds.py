@@ -13,6 +13,8 @@ sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 import config  # noqa: E402
 import strategy_rules  # noqa: E402
 
+config.initialize_config()
+
 
 def _rsi_cond():
     return next(
