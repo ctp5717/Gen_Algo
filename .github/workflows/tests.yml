@@ -41,12 +41,30 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      matrix:
+        include:
+          - name: pinned
+            python-version: "3.12"
+            vectorbt: "vectorbt==0.28.3"
+            quantstats: "quantstats>=0.0.62"
+            use_stub: "0"
+          - name: floating-with-quantstats
+            python-version: "3.12"
+            vectorbt: "vectorbt>=0.28.1"
+            quantstats: "quantstats>=0.0.62"
+            use_stub: "0"
+          - name: floating-minimal
+            python-version: "3.12"
+            vectorbt: "vectorbt>=0.28.1"
+            quantstats: ""
+            use_stub: "0"
+    name: tests (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
           cache-dependency-path: |
             requirements.txt
@@ -55,15 +73,19 @@ jobs:
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
           pip install pytest-xdist pytest-cov
+          pip install "${{ matrix.vectorbt }}"
+          if [ -n "${{ matrix.quantstats }}" ]; then
+            pip install "${{ matrix.quantstats }}"
+          fi
       - name: Run tests
         env:
-          USE_VBT_STUB: "1"
+          USE_VBT_STUB: "${{ matrix.use_stub }}"
         run: |
           make test
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-python-version
+          name: test-results-${{ matrix.name }}
           path: |
             pytest-junit.xml
             coverage.xml
