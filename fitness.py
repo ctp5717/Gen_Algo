@@ -43,6 +43,8 @@ from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
 
+PenaltyDetail = str | dict[str, float | str] | None
+
 CORE_METRICS = ["Sortino Ratio", "Profit Factor", "Max Drawdown [%]"]
 EXTENDED_METRICS = CORE_METRICS + ["Total Return [%]"]
 
@@ -178,6 +180,54 @@ class MultiAssetFitnessEvaluator:
                 )
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _empty_stats() -> dict:
+        """Return a copy-safe container for assets without valid results."""
+
+        return {
+            "sortino": None,
+            "profit_factor": None,
+            "max_drawdown": None,
+            "trades": 0,
+            "total_return": None,
+            "equity_curve": pd.Series(dtype=float),
+            "signal_counts": {},
+        }
+
+    # ------------------------------------------------------------------
+    def _build_evaluation_record(
+        self,
+        stats: dict | None = None,
+        reason: str | None = None,
+        detail: str | None = None,
+        trace: tuple | str | None = None,
+    ) -> dict:
+        """Normalise evaluation output into a consistent mapping."""
+
+        record = dict(stats) if stats is not None else self._empty_stats()
+        if reason is not None:
+            record["evaluation_reason"] = reason
+        if detail is not None:
+            record["reason_detail"] = detail
+        if trace:
+            record["reason_trace"] = trace
+        return record
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _normalise_reason_trace(trace: tuple | str | None) -> str | None:
+        """Convert verbose trace tuples into a printable string."""
+
+        if not trace:
+            return None
+        if isinstance(trace, str):
+            return trace
+        try:
+            return " | ".join(str(part) for part in trace)
+        except TypeError:
+            return str(trace)
+
+    # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
         # Empty or very short dataframes can cause downstream libraries to
@@ -186,15 +236,7 @@ class MultiAssetFitnessEvaluator:
         # this case early and return a stub result that indicates zero trades
         # so that the caller can decide whether to ignore or penalise it.
         if ohlc is None or ohlc.empty:
-            return {
-                "sortino": None,
-                "profit_factor": None,
-                "max_drawdown": None,
-                "trades": 0,
-                "total_return": None,
-                "equity_curve": pd.Series(dtype=float),
-                "signal_counts": {},
-            }
+            return self._empty_stats()
 
         entries, signal_counts = engine.process_strategy_rules(
             ohlc, rules, collect_counts=True
@@ -230,216 +272,121 @@ class MultiAssetFitnessEvaluator:
         }
 
     # ------------------------------------------------------------------
-    def __call__(self, ga_instance, solution, sol_idx):
-        try:
-            rules = inject_genes_into_rules(self.base_rules, self.gene_map, solution)
+    def _evaluate_assets(self, rules: dict) -> tuple[dict[str, dict], Counter]:
+        """Evaluate every asset and return their raw statistics."""
 
-            per_asset_metrics = []
-            included_assets = []
-            per_asset_details = {}
-            total_trades = 0
-            assets_traded = 0
-            asset_weights_cfg = self.settings.get("asset_weights") or {}
-            verbose = bool(self.settings.get("verbose_asset_errors"))
-            err_counts = Counter()
+        results: dict[str, dict] = {}
+        err_counts: Counter = Counter()
+        parallel_cfg = self.settings.get("parallel", {})
+        verbose = bool(self.settings.get("verbose_asset_errors"))
 
-            empty_stats = {
-                "sortino": None,
-                "profit_factor": None,
-                "max_drawdown": None,
-                "trades": 0,
-                "total_return": None,
-                "equity_curve": pd.Series(dtype=float),
-                "signal_counts": {},
-            }
-
-            parallel_cfg = self.settings.get("parallel", {})
-            evaluation_results = {}
-            if parallel_cfg.get("enabled"):
-                backend = parallel_cfg.get("backend", "process")
-                max_workers = parallel_cfg.get("max_workers")
-                Executor = (
-                    cf.ProcessPoolExecutor
-                    if backend == "process"
-                    else cf.ThreadPoolExecutor
-                )
-                with Executor(max_workers=max_workers) as ex:
-                    future_map = {}
-                    for ticker in self._sorted_tickers:
-                        ohlc = self.group_data[ticker]
-                        if ohlc is None or ohlc.empty:
-                            evaluation_results[ticker] = (
-                                empty_stats.copy(),
-                                "insufficient_coverage",
-                                None,
-                                None,
-                            )
-                        else:
-                            future_map[
-                                ex.submit(self._evaluate_single_asset, ohlc, rules)
-                            ] = ticker
-                    for fut in cf.as_completed(future_map):
-                        ticker = future_map[fut]
-                        try:
-                            stats = fut.result()
-                            evaluation_results[ticker] = (
-                                stats,
-                                None,
-                                None,
-                                None,
-                            )
-                        except Exception as e:
-                            if verbose:
-                                print(f"Error evaluating asset {ticker}: {e}")
-                                tb = traceback.format_exception(
-                                    e.__class__, e, e.__traceback__
-                                )
-                                reason_trace = (tb[0].strip(), tb[-1].strip())
-                            else:
-                                reason_trace = None
-                            evaluation_results[ticker] = (
-                                empty_stats.copy(),
-                                "evaluation_error",
-                                repr(e),
-                                reason_trace,
-                            )
-                            ind = getattr(e, "indicator", None)
-                            if ind:
-                                err_counts[ind] += 1
-            else:
+        if parallel_cfg.get("enabled"):
+            backend = parallel_cfg.get("backend", "process")
+            max_workers = parallel_cfg.get("max_workers")
+            Executor = (
+                cf.ProcessPoolExecutor
+                if backend == "process"
+                else cf.ThreadPoolExecutor
+            )
+            with Executor(max_workers=max_workers) as ex:
+                future_map = {}
                 for ticker in self._sorted_tickers:
                     ohlc = self.group_data[ticker]
                     if ohlc is None or ohlc.empty:
-                        evaluation_results[ticker] = (
-                            empty_stats.copy(),
-                            "insufficient_coverage",
-                            None,
-                            None,
+                        results[ticker] = self._build_evaluation_record(
+                            reason="insufficient_coverage"
                         )
                         continue
+                    future_map[ex.submit(self._evaluate_single_asset, ohlc, rules)] = (
+                        ticker
+                    )
+                for fut in cf.as_completed(future_map):
+                    ticker = future_map[fut]
                     try:
-                        stats = self._evaluate_single_asset(ohlc, rules)
-                        evaluation_results[ticker] = (
-                            stats,
-                            None,
-                            None,
-                            None,
-                        )
+                        stats = fut.result()
+                        results[ticker] = self._build_evaluation_record(stats)
                     except Exception as e:
                         if verbose:
                             print(f"Error evaluating asset {ticker}: {e}")
                             tb = traceback.format_exception(
                                 e.__class__, e, e.__traceback__
                             )
-                            reason_trace = (tb[0].strip(), tb[-1].strip())
+                            trace = (tb[0].strip(), tb[-1].strip())
                         else:
-                            reason_trace = None
-                        evaluation_results[ticker] = (
-                            empty_stats.copy(),
-                            "evaluation_error",
-                            repr(e),
-                            reason_trace,
+                            trace = None
+                        results[ticker] = self._build_evaluation_record(
+                            reason="evaluation_error",
+                            detail=repr(e),
+                            trace=trace,
                         )
                         ind = getattr(e, "indicator", None)
                         if ind:
                             err_counts[ind] += 1
-
+        else:
             for ticker in self._sorted_tickers:
-                stats, eval_reason, reason_detail, reason_trace = evaluation_results[
-                    ticker
-                ]
-                trades = stats.get("trades", 0)
-                total_trades += trades
-
-                weight = asset_weights_cfg.get(ticker, 1.0)
-                pf_raw = stats.get("profit_factor")
-                cap = self.settings.get("winsorize_pf_cap", 5.0)
-                if pf_raw is None or np.isnan(pf_raw):
-                    pf_capped = self.settings.get("nan_fallback", 0.0)
-                else:
-                    pf_capped = min(cap, pf_raw) if not np.isinf(pf_raw) else cap
-
-                if trades < self.settings.get("per_asset_min_trades", 1):
-                    if self.settings.get("zero_trade_policy") == "penalize":
-                        val = self.settings.get("zero_trade_penalty", -1.0)
-                        per_asset_metrics.append(val)
-                        included_assets.append(ticker)
-                        if trades > 0:
-                            assets_traded += 1
-                        details = {
-                            **stats,
-                            "score": val,
-                            "included": True,
-                            "asset_weight": weight,
-                            "profit_factor_capped": pf_capped,
-                        }
-                        if reason_detail:
-                            details["reason_detail"] = reason_detail
-                        if reason_trace:
-                            details["reason_trace"] = " | ".join(
-                                str(x) for x in reason_trace
-                            )
-                        per_asset_details[ticker] = details
+                ohlc = self.group_data[ticker]
+                if ohlc is None or ohlc.empty:
+                    results[ticker] = self._build_evaluation_record(
+                        reason="insufficient_coverage"
+                    )
+                    continue
+                try:
+                    stats = self._evaluate_single_asset(ohlc, rules)
+                    results[ticker] = self._build_evaluation_record(stats)
+                except Exception as e:
+                    if verbose:
+                        print(f"Error evaluating asset {ticker}: {e}")
+                        tb = traceback.format_exception(e.__class__, e, e.__traceback__)
+                        trace = (tb[0].strip(), tb[-1].strip())
                     else:
-                        reason = eval_reason or (
-                            "ignored_zero_trades"
-                            if trades == 0
-                            else "below_per_asset_min_trades"
-                        )
-                        info = self.settings.get("per_asset_floor_info")
-                        if info:
-                            reason += (
-                                "; Per-asset floor: base="
-                                f"{info['base_floor']} → scaled={info['ceil']} "
-                                f"(window={info['window_days']}d, base={info['trading_days_per_year']}d)"
-                            )
-                        details = {
-                            **stats,
-                            "score": None,
-                            "included": False,
-                            "asset_weight": weight,
-                            "profit_factor_capped": pf_capped,
-                            "reason": reason,
-                        }
-                        if reason_detail:
-                            details["reason_detail"] = reason_detail
-                        if reason_trace:
-                            details["reason_trace"] = " | ".join(
-                                str(x) for x in reason_trace
-                            )
-                        per_asset_details[ticker] = details
-                        continue
-                else:
-                    metric_type = self.settings.get("metric", "composite")
-                    if metric_type == "sortino":
-                        val = stats.get(
-                            "sortino", self.settings.get("nan_fallback", 0.0)
-                        )
-                    elif metric_type == "profit_factor":
-                        val = pf_capped
-                    elif metric_type == "return":
-                        val = stats.get(
-                            "total_return", self.settings.get("nan_fallback", 0.0)
-                        )
-                    else:  # composite metric
-                        sortino = stats.get("sortino")
-                        pf = pf_capped
-                        dd = stats.get("max_drawdown")
+                        trace = None
+                    results[ticker] = self._build_evaluation_record(
+                        reason="evaluation_error",
+                        detail=repr(e),
+                        trace=trace,
+                    )
+                    ind = getattr(e, "indicator", None)
+                    if ind:
+                        err_counts[ind] += 1
 
-                        if sortino is None or np.isnan(sortino):
-                            sortino = self.settings.get("nan_fallback", 0.0)
+        for ticker in self._sorted_tickers:
+            results.setdefault(ticker, self._build_evaluation_record())
+        return results, err_counts
 
-                        if dd is None or np.isnan(dd):
-                            dd = 100.0
-                        drawdown_score = 1 - (dd / 100.0)
+    # ------------------------------------------------------------------
+    def _score_assets(self, evaluation_results: dict[str, dict]) -> dict:
+        """Compute per-asset scores and bookkeeping from evaluation stats."""
 
-                        w = config.FITNESS_WEIGHTS
-                        val = (
-                            sortino * w["sortino_ratio"]
-                            + pf * w["profit_factor"]
-                            + drawdown_score * w["max_drawdown"]
-                        )
+        per_asset_metrics: list[float] = []
+        included_assets: list[str] = []
+        per_asset_details: dict[str, dict] = {}
+        total_trades = 0
+        assets_traded = 0
+        asset_weights_cfg = self.settings.get("asset_weights") or {}
+        per_asset_min = self.settings.get("per_asset_min_trades", 1)
+        metric_type = self.settings.get("metric", "composite")
+        nan_fallback = self.settings.get("nan_fallback", 0.0)
+        cap = self.settings.get("winsorize_pf_cap", 5.0)
 
+        for ticker in self._sorted_tickers:
+            stats_raw = evaluation_results.get(ticker, self._empty_stats())
+            stats = dict(stats_raw)
+            reason = stats.pop("evaluation_reason", None)
+            reason_detail = stats.pop("reason_detail", None)
+            reason_trace = stats.pop("reason_trace", None)
+            trace_str = self._normalise_reason_trace(reason_trace)
+            trades = int(stats.get("trades", 0) or 0)
+            total_trades += trades
+            weight = asset_weights_cfg.get(ticker, 1.0)
+            pf_raw = stats.get("profit_factor")
+            if pf_raw is None or pd.isna(pf_raw):
+                pf_capped = nan_fallback
+            else:
+                pf_capped = cap if np.isinf(pf_raw) else min(cap, float(pf_raw))
+
+            if trades < per_asset_min:
+                if self.settings.get("zero_trade_policy") == "penalize":
+                    val = self.settings.get("zero_trade_penalty", -1.0)
                     per_asset_metrics.append(val)
                     included_assets.append(ticker)
                     if trades > 0:
@@ -451,146 +398,195 @@ class MultiAssetFitnessEvaluator:
                         "asset_weight": weight,
                         "profit_factor_capped": pf_capped,
                     }
-                    if reason_detail:
+                    if reason_detail is not None:
                         details["reason_detail"] = reason_detail
-                    if reason_trace:
-                        details["reason_trace"] = " | ".join(
-                            str(x) for x in reason_trace
-                        )
+                    if trace_str:
+                        details["reason_trace"] = trace_str
                     per_asset_details[ticker] = details
-
-            if not per_asset_metrics:
-                poor_score = self.settings.get("poor_score", -999.0)
-                reason = "no_assets"
-                self.floor_failures[reason] += 1
-                self.last_details = {
-                    "per_asset": per_asset_details,
-                    "mu": 0.0,
-                    "sigma": 0.0,
-                    "lambda_sigma": 0.0,
-                    "total_trades": total_trades,
-                    "assets_included": 0,
-                    "assets_traded": 0,
-                    "assets_ignored": len(self.group_data),
-                    "penalties": {
-                        "trade_floor": reason,
-                        "coverage": 0.0,
-                        "min_assets": reason,
-                        "stability": 0.0,
-                    },
-                    "min_total_trades": self.settings.get("min_total_trades", 0),
-                    "fitness": poor_score,
-                    "asset_weights": {},
-                }
-                return poor_score
-
-            # Determine weights for included assets and renormalise
-            asset_weights = self.settings.get("asset_weights") or {}
-            raw_weights = []
-            neg_seen = False
-            for t in included_assets:
-                w = asset_weights.get(t, 1.0)
-                if w < 0:
-                    neg_seen = True
-                    w = 0.0
-                raw_weights.append(w)
-            if neg_seen:
-                print("Warning: negative asset weights clipped to zero")
-            weight_sum = sum(raw_weights)
-            if weight_sum == 0:
-                if raw_weights:
-                    print(
-                        "Warning: all asset weights were zero; reverting to equal weights"
-                    )
-                weights = [1.0 / len(per_asset_metrics)] * len(per_asset_metrics)
-            else:
-                weights = [w / weight_sum for w in raw_weights]
-
-            w_map = {}
-            for t, w in zip(included_assets, weights):
-                per_asset_details[t]["asset_weight"] = w
-                w_map[t] = w
-
-            if err_counts:
-                logger.info("evaluation error counts: %s", dict(err_counts))
-
-            m_arr = np.array(per_asset_metrics, dtype=float)
-            w_arr = np.array(weights, dtype=float)
-            mu, sigma = weighted_mean_std(m_arr, w_arr)
-
-            lam = self.settings.get("lambda_dispersion", 0.0)
-            F = mu - lam * sigma
-
-            stability_penalty = 0.0
-            if config.ENABLE_STABILITY_REG:
-                history = self.settings.get("param_history") or []
-                covs = []
-                for g in config.STABILITY_GENES:
-                    vals = [
-                        float(p[g])
-                        for p in history
-                        if isinstance(p.get(g), (int, float))
-                    ]
-                    if len(vals) > 1:
-                        mean = float(np.mean(vals))
-                        if mean != 0:
-                            std = float(
-                                np.std(vals)
-                            )  # population std (ddof=0) matches SRE
-                            if std > 0 and np.isfinite(std):
-                                cov = std / abs(mean)
-                                if np.isfinite(cov):
-                                    covs.append(cov)
-                if covs:
-                    mean_cov = float(np.mean(covs))
-                    stability_penalty = config.STABILITY_ALPHA * mean_cov
-                    F -= stability_penalty
-
-            policy = self.settings.get("trade_floor_policy", "hard_floor")
-            poor_score = self.settings.get("poor_score", -999.0)
-            min_trades = self.settings.get("min_total_trades", 0)
-            min_assets = self.settings.get("min_included_assets", 1)
-            trade_penalty = None
-            min_assets_penalty = None
-
-            assets_count = len(included_assets)
-            if assets_count < min_assets:
-                if policy == "hard_floor":
-                    F = poor_score
-                    reason = "below_min_included_assets"
-                    trade_penalty = reason
-                    min_assets_penalty = reason
-                    self.floor_failures[reason] += 1
-                    self.last_details = {
-                        "per_asset": per_asset_details,
-                        "mu": mu,
-                        "sigma": sigma,
-                        "lambda_sigma": lam * sigma,
-                        "total_trades": total_trades,
-                        "assets_included": assets_count,
-                        "assets_traded": assets_traded,
-                        "assets_ignored": len(self.group_data) - assets_count,
-                        "penalties": {
-                            "trade_floor": trade_penalty,
-                            "coverage": 0.0,
-                            "min_assets": min_assets_penalty,
-                            "stability": stability_penalty,
-                        },
-                        "min_total_trades": min_trades,
-                        "fitness": F,
-                        "asset_weights": w_map,
-                    }
-                    return F
                 else:
-                    strength = self.settings.get("soft_penalty_strength", 1.0)
-                    scale = (assets_count / max(1, min_assets)) ** strength
-                    F *= scale
-                    min_assets_penalty = {"scale": scale}
+                    reason_str = reason or (
+                        "ignored_zero_trades"
+                        if trades == 0
+                        else "below_per_asset_min_trades"
+                    )
+                    info = self.settings.get("per_asset_floor_info")
+                    if info:
+                        reason_str += (
+                            "; Per-asset floor: base="
+                            f"{info['base_floor']} → scaled={info['ceil']} "
+                            f"(window={info['window_days']}d, base={info['trading_days_per_year']}d)"
+                        )
+                    details = {
+                        **stats,
+                        "score": None,
+                        "included": False,
+                        "asset_weight": weight,
+                        "profit_factor_capped": pf_capped,
+                        "reason": reason_str,
+                    }
+                    if reason_detail is not None:
+                        details["reason_detail"] = reason_detail
+                    if trace_str:
+                        details["reason_trace"] = trace_str
+                    per_asset_details[ticker] = details
+                continue
 
-            if policy == "hard_floor" and total_trades < min_trades:
+            if metric_type == "sortino":
+                val = stats.get("sortino")
+                if val is None or pd.isna(val):
+                    val = nan_fallback
+            elif metric_type == "profit_factor":
+                val = pf_capped
+            elif metric_type == "return":
+                total_return = stats.get("total_return")
+                val = (
+                    nan_fallback
+                    if total_return is None or pd.isna(total_return)
+                    else total_return
+                )
+            else:
+                sortino_val = stats.get("sortino")
+                if sortino_val is None or pd.isna(sortino_val):
+                    sortino_val = nan_fallback
+                max_dd = stats.get("max_drawdown")
+                if max_dd is None or pd.isna(max_dd):
+                    max_dd = 100.0
+                drawdown_score = 1 - (max_dd / 100.0)
+                w = config.FITNESS_WEIGHTS
+                val = (
+                    sortino_val * w["sortino_ratio"]
+                    + pf_capped * w["profit_factor"]
+                    + drawdown_score * w["max_drawdown"]
+                )
+
+            per_asset_metrics.append(val)
+            included_assets.append(ticker)
+            if trades > 0:
+                assets_traded += 1
+            details = {
+                **stats,
+                "score": val,
+                "included": True,
+                "asset_weight": weight,
+                "profit_factor_capped": pf_capped,
+            }
+            if reason_detail is not None:
+                details["reason_detail"] = reason_detail
+            if trace_str:
+                details["reason_trace"] = trace_str
+            per_asset_details[ticker] = details
+
+        return {
+            "per_asset_metrics": per_asset_metrics,
+            "included_assets": included_assets,
+            "per_asset_details": per_asset_details,
+            "total_trades": total_trades,
+            "assets_traded": assets_traded,
+        }
+
+    # ------------------------------------------------------------------
+    def _aggregate_scores(self, summary: dict) -> float:
+        """Combine per-asset scores into the final fitness value."""
+
+        per_asset_metrics = summary["per_asset_metrics"]
+        included_assets = summary["included_assets"]
+        per_asset_details = summary["per_asset_details"]
+        total_trades = summary["total_trades"]
+        assets_traded = summary["assets_traded"]
+
+        if not per_asset_metrics:
+            poor_score = self.settings.get("poor_score", -999.0)
+            reason = "no_assets"
+            self.floor_failures[reason] += 1
+            self.last_details = {
+                "per_asset": per_asset_details,
+                "mu": 0.0,
+                "sigma": 0.0,
+                "lambda_sigma": 0.0,
+                "total_trades": total_trades,
+                "assets_included": 0,
+                "assets_traded": assets_traded,
+                "assets_ignored": len(self.group_data),
+                "penalties": {
+                    "trade_floor": reason,
+                    "coverage": 0.0,
+                    "min_assets": reason,
+                    "stability": 0.0,
+                },
+                "min_total_trades": self.settings.get("min_total_trades", 0),
+                "fitness": poor_score,
+                "asset_weights": {},
+            }
+            return poor_score
+
+        asset_weights_cfg = self.settings.get("asset_weights") or {}
+        raw_weights = []
+        neg_seen = False
+        for ticker in included_assets:
+            w = asset_weights_cfg.get(ticker, 1.0)
+            if w < 0:
+                neg_seen = True
+                w = 0.0
+            raw_weights.append(w)
+        if neg_seen:
+            print("Warning: negative asset weights clipped to zero")
+        weight_sum = sum(raw_weights)
+        if weight_sum == 0:
+            if raw_weights:
+                print(
+                    "Warning: all asset weights were zero; reverting to equal weights"
+                )
+            weights = [1.0 / len(per_asset_metrics)] * len(per_asset_metrics)
+        else:
+            weights = [w / weight_sum for w in raw_weights]
+
+        w_map = {}
+        for ticker, weight in zip(included_assets, weights):
+            per_asset_details[ticker]["asset_weight"] = weight
+            w_map[ticker] = weight
+
+        m_arr = np.array(per_asset_metrics, dtype=float)
+        w_arr = np.array(weights, dtype=float)
+        mu, sigma = weighted_mean_std(m_arr, w_arr)
+
+        lam = self.settings.get("lambda_dispersion", 0.0)
+        F = mu - lam * sigma
+
+        stability_penalty = 0.0
+        if config.ENABLE_STABILITY_REG:
+            history = self.settings.get("param_history") or []
+            covs = []
+            for g in config.STABILITY_GENES:
+                vals = [
+                    float(p[g]) for p in history if isinstance(p.get(g), (int, float))
+                ]
+                if len(vals) > 1:
+                    mean = float(np.mean(vals))
+                    if mean != 0:
+                        std = float(np.std(vals))
+                        if std > 0 and np.isfinite(std):
+                            cov = std / abs(mean)
+                            if np.isfinite(cov):
+                                covs.append(cov)
+            if covs:
+                mean_cov = float(np.mean(covs))
+                stability_penalty = config.STABILITY_ALPHA * mean_cov
+                F -= stability_penalty
+
+        policy = self.settings.get("trade_floor_policy", "hard_floor")
+        poor_score = self.settings.get("poor_score", -999.0)
+        min_trades = self.settings.get("min_total_trades", 0)
+        min_assets = self.settings.get("min_included_assets", 1)
+        trade_penalty: PenaltyDetail = None
+        min_assets_penalty: PenaltyDetail = None
+
+        assets_count = len(included_assets)
+        if assets_count < min_assets:
+            if policy == "hard_floor":
                 F = poor_score
-                reason = "below_group_floor"
+                reason = "below_min_included_assets"
                 trade_penalty = reason
+                min_assets_penalty = reason
                 self.floor_failures[reason] += 1
                 self.last_details = {
                     "per_asset": per_asset_details,
@@ -612,26 +608,17 @@ class MultiAssetFitnessEvaluator:
                     "asset_weights": w_map,
                 }
                 return F
-            elif policy == "soft_penalty" and total_trades < min_trades:
-                mode = self.settings.get("soft_penalty_mode", "multiplicative")
+            else:
                 strength = self.settings.get("soft_penalty_strength", 1.0)
-                if mode == "additive":
-                    penalty = strength * (1 - total_trades / max(1, min_trades))
-                    F -= penalty
-                    trade_penalty = {"mode": "additive", "penalty": penalty}
-                else:
-                    scale = (total_trades / max(1, min_trades)) ** strength
-                    F *= scale
-                    trade_penalty = {"mode": "multiplicative", "scale": scale}
+                scale = (assets_count / max(1, min_assets)) ** strength
+                F *= scale
+                min_assets_penalty = {"scale": scale}
 
-            coverage_penalty = 0.0
-            if self.settings.get("zero_trade_policy") == "ignore":
-                kappa = self.settings.get("coverage_penalty", 0.0)
-                coverage = assets_count / max(1, len(self.group_data))
-                coverage_penalty = kappa * (1 - coverage)
-                F -= coverage_penalty
-
-            # store diagnostics for optional inspection
+        if policy == "hard_floor" and total_trades < min_trades:
+            F = poor_score
+            reason = "below_group_floor"
+            trade_penalty = reason
+            self.floor_failures[reason] += 1
             self.last_details = {
                 "per_asset": per_asset_details,
                 "mu": mu,
@@ -643,7 +630,7 @@ class MultiAssetFitnessEvaluator:
                 "assets_ignored": len(self.group_data) - assets_count,
                 "penalties": {
                     "trade_floor": trade_penalty,
-                    "coverage": coverage_penalty,
+                    "coverage": 0.0,
                     "min_assets": min_assets_penalty,
                     "stability": stability_penalty,
                 },
@@ -651,8 +638,59 @@ class MultiAssetFitnessEvaluator:
                 "fitness": F,
                 "asset_weights": w_map,
             }
-
             return F
+        elif policy == "soft_penalty" and total_trades < min_trades:
+            mode = self.settings.get("soft_penalty_mode", "multiplicative")
+            strength = self.settings.get("soft_penalty_strength", 1.0)
+            if mode == "additive":
+                penalty = strength * (1 - total_trades / max(1, min_trades))
+                F -= penalty
+                trade_penalty = {"mode": "additive", "penalty": penalty}
+            else:
+                scale = (total_trades / max(1, min_trades)) ** strength
+                F *= scale
+                trade_penalty = {"mode": "multiplicative", "scale": scale}
+
+        coverage_penalty = 0.0
+        if self.settings.get("zero_trade_policy") == "ignore":
+            kappa = self.settings.get("coverage_penalty", 0.0)
+            coverage = assets_count / max(1, len(self.group_data))
+            coverage_penalty = kappa * (1 - coverage)
+            F -= coverage_penalty
+
+        self.last_details = {
+            "per_asset": per_asset_details,
+            "mu": mu,
+            "sigma": sigma,
+            "lambda_sigma": lam * sigma,
+            "total_trades": total_trades,
+            "assets_included": assets_count,
+            "assets_traded": assets_traded,
+            "assets_ignored": len(self.group_data) - assets_count,
+            "penalties": {
+                "trade_floor": trade_penalty,
+                "coverage": coverage_penalty,
+                "min_assets": min_assets_penalty,
+                "stability": stability_penalty,
+            },
+            "min_total_trades": min_trades,
+            "fitness": F,
+            "asset_weights": w_map,
+        }
+
+        return F
+
+    # ------------------------------------------------------------------
+    def __call__(self, ga_instance, solution, sol_idx):
+        try:
+            rules = inject_genes_into_rules(self.base_rules, self.gene_map, solution)
+
+            evaluation_results, err_counts = self._evaluate_assets(rules)
+            if err_counts:
+                logger.info("evaluation error counts: %s", dict(err_counts))
+
+            summary = self._score_assets(evaluation_results)
+            return self._aggregate_scores(summary)
 
         except Exception as e:
             print(f"Error in multi-asset fitness evaluation: {e}")

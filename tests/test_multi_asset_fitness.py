@@ -697,6 +697,84 @@ def test_parallel_evaluation_handles_exception():
     assert ev.last_details["per_asset"]["B"]["reason"] == "evaluation_error"
 
 
+def test_evaluate_assets_collects_errors():
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [9, 9, 9]}),
+        "C": pd.DataFrame(),
+    }
+    settings = {
+        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
+        "zero_trade_policy": "ignore",
+        "per_asset_min_trades": 1,
+    }
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    def fake_eval(self, ohlc, rules):
+        if ohlc["Close"].iloc[0] == 9:
+            err = RuntimeError("boom")
+            err.indicator = "bad_indicator"
+            raise err
+        return {
+            "sortino": 0.5,
+            "profit_factor": 1.2,
+            "max_drawdown": 10.0,
+            "trades": 3,
+            "total_return": 4.0,
+            "equity_curve": pd.Series([1, 2, 3]),
+            "signal_counts": {"x": 1},
+        }
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+    results, err_counts = ev._evaluate_assets({})
+
+    assert results["A"]["trades"] == 3
+    assert results["B"]["evaluation_reason"] == "evaluation_error"
+    assert "boom" in results["B"].get("reason_detail", "")
+    assert err_counts["bad_indicator"] == 1
+    assert results["C"]["evaluation_reason"] == "insufficient_coverage"
+
+
+def test_score_assets_preserves_reason_details():
+    settings = {
+        "zero_trade_policy": "penalize",
+        "zero_trade_penalty": -2.0,
+        "per_asset_min_trades": 2,
+    }
+    ev = _make_evaluator(settings)
+
+    good_stats = {
+        "sortino": 0.4,
+        "profit_factor": 1.5,
+        "max_drawdown": 20.0,
+        "trades": 3,
+        "total_return": 5.0,
+        "equity_curve": pd.Series([1, 2, 3]),
+        "signal_counts": {"x": 1},
+    }
+    eval_results = {
+        "A": ev._build_evaluation_record(stats=dict(good_stats)),
+        "B": ev._build_evaluation_record(
+            stats=ev._empty_stats(),
+            reason="evaluation_error",
+            detail="boom",
+            trace=("foo", "bar"),
+        ),
+        "C": ev._build_evaluation_record(stats=dict(good_stats)),
+    }
+
+    summary = ev._score_assets(eval_results)
+
+    assert summary["total_trades"] == 6
+    assert summary["assets_traded"] == 2
+    assert summary["per_asset_metrics"][1] == -2.0
+    details_b = summary["per_asset_details"]["B"]
+    assert details_b["included"] is True
+    assert details_b.get("reason_detail") == "boom"
+    assert details_b.get("reason_trace") == "foo | bar"
+    assert details_b.get("profit_factor_capped") == 0.0
+
+
 def test_csv_columns_and_sort(monkeypatch, tmp_path):
     monkeypatch.setitem(cfg.MULTI_ASSET, "enabled", True)
     monkeypatch.setattr(cfg, "CHARTS", {"save_pngs": False, "show_distribution": False})
