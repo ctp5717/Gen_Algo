@@ -234,6 +234,7 @@ def run_walk_forward_validation(
     import fitness
     import strategy_engine as engine
 
+    config.initialize_config()
     print("\n=== Running Walk-Forward Validation ===")
     np.random.seed(config.SEED)
     num_cores = os.cpu_count()

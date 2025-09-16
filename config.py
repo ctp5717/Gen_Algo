@@ -8,6 +8,7 @@ Configuration File for the GA Trading Framework
 import math
 import os
 from datetime import datetime
+from typing import Any
 
 from dateutil.relativedelta import relativedelta
 
@@ -127,6 +128,17 @@ ENABLE_WALK_FORWARD_VALIDATION = True
 RSI_PERIOD_BOUNDS = (7, 21)
 
 
+_UNSET = object()
+_INITIALIZED = False
+
+today: datetime | None = None
+VALIDATION_BARS: int | None = None
+MAX_HOLD_PERIOD: int | None = None
+TRAINING_PERIOD: dict[str, str] | object = _UNSET
+VALIDATION_PERIOD: dict[str, str] | object = _UNSET
+WALK_FORWARD_SETTINGS: dict[str, Any] | object = _UNSET
+
+
 def _apply_rsi_bounds() -> None:
     low, high = RSI_PERIOD_BOUNDS
     for _cond in STRATEGY_RULES.get("entry_rules", {}).get("conditions", []):
@@ -137,53 +149,144 @@ def _apply_rsi_bounds() -> None:
             break
 
 
-today = datetime.now()
-if "h" in TIMEFRAME.lower() or "m" in TIMEFRAME.lower():
-    VALIDATION_BARS = 91 * (
-        24 if "h" in TIMEFRAME.lower() else 24 * (60 / int(TIMEFRAME.replace("m", "")))
-    )
-else:
-    VALIDATION_BARS = 91
-max_lookback_period = max(20, min(DEFAULT_MAX_PERIOD, int(VALIDATION_BARS - 2)))
-for _cond in STRATEGY_RULES.get("entry_rules", {}).get("conditions", []):
-    if _cond.get("rule_name") == "Long_Term_Trend_Filter":
-        _cond.setdefault("params", {}).setdefault("period", {})[
-            "high"
-        ] = max_lookback_period
-        break
-_apply_rsi_bounds()
-if "m" in TIMEFRAME.lower() or "h" in TIMEFRAME.lower():
-    minutes = (
-        60 * int(TIMEFRAME[:-1]) if TIMEFRAME.endswith("h") else int(TIMEFRAME[:-1])
-    )
-    bars_per_day = int(24 * 60 / minutes)
-    MAX_HOLD_PERIOD = MAX_HOLD_DAYS * bars_per_day
-else:
-    MAX_HOLD_PERIOD = MAX_HOLD_DAYS
-training_years_daily, training_months_intraday = 3, 20
-training_end_date = today - relativedelta(months=VALIDATION_MONTHS)
-if TIMEFRAME in ["1d", "1wk", "1mo"]:
-    training_start_date = training_end_date - relativedelta(years=training_years_daily)
-else:
-    training_start_date = training_end_date - relativedelta(
-        months=training_months_intraday
-    )
+def _clamp_long_term_trend(high: int) -> None:
+    for _cond in STRATEGY_RULES.get("entry_rules", {}).get("conditions", []):
+        if _cond.get("rule_name") == "Long_Term_Trend_Filter":
+            params = _cond.setdefault("params", {})
+            period_cfg = params.setdefault("period", {})
+            if isinstance(period_cfg, dict):
+                period_cfg["high"] = high
+            break
 
-# --- 3. FINAL CONFIGURATION OUTPUTS ---
-if DATA_SOURCE == "binance":
-    TICKER = TICKER.replace("-", "")
-    # Binance typically provides deep history for USDT pairs rather than USD.
-    # Convert "BTCUSD" -> "BTCUSDT" to ensure sufficient historical data.
-    if TICKER.endswith("USD") and not TICKER.endswith("USDT"):
-        TICKER = TICKER[:-3] + "USDT"
-TRAINING_PERIOD = {
-    "start": training_start_date.strftime("%Y-%m-%d"),
-    "end": training_end_date.strftime("%Y-%m-%d"),
-}
-VALIDATION_PERIOD = {
-    "start": training_end_date.strftime("%Y-%m-%d"),
-    "end": today.strftime("%Y-%m-%d"),
-}
+
+def _clamp_vote_threshold() -> None:
+    _active = len(
+        [
+            c
+            for c in STRATEGY_RULES["entry_rules"].get("conditions", [])
+            if c.get("is_active", True)
+        ]
+    )
+    _vt = STRATEGY_RULES["entry_rules"].get("vote_threshold")
+    if isinstance(_vt, dict) and "high" in _vt:
+        _vt["high"] = max(1, min(_vt["high"], _active))
+
+
+def initialize_config(force: bool = False) -> None:
+    """Populate derived configuration values lazily."""
+
+    global _INITIALIZED, today, VALIDATION_BARS, MAX_HOLD_PERIOD
+    global TRAINING_PERIOD, VALIDATION_PERIOD, WALK_FORWARD_SETTINGS, TICKER
+
+    if _INITIALIZED and not force:
+        return
+
+    now = datetime.now()
+    today = now
+
+    tf = str(TIMEFRAME)
+    tf_lower = tf.lower()
+    is_hour = tf_lower.endswith("h")
+    is_minute = tf_lower.endswith("m") and not tf_lower.endswith("mo")
+
+    validation_bars = 91.0
+    if is_hour or is_minute:
+        if is_hour:
+            validation_bars = 91.0 * 24
+        else:
+            try:
+                minute_value = int(tf_lower[:-1])
+            except ValueError:
+                minute_value = 1
+            validation_bars = 91.0 * (24 * (60 / max(minute_value, 1)))
+
+    if force or VALIDATION_BARS is None:
+        VALIDATION_BARS = int(validation_bars)
+
+    max_lookback_period = max(20, min(DEFAULT_MAX_PERIOD, int(validation_bars - 2)))
+    _clamp_long_term_trend(max_lookback_period)
+    _apply_rsi_bounds()
+
+    if is_hour or is_minute:
+        if is_hour:
+            minutes_per_bar = 60 * int(tf_lower[:-1])
+        else:
+            minutes_per_bar = int(tf_lower[:-1])
+        minutes_per_bar = max(minutes_per_bar, 1)
+        bars_per_day = int(24 * 60 / minutes_per_bar)
+        max_hold = MAX_HOLD_DAYS * bars_per_day
+    else:
+        max_hold = MAX_HOLD_DAYS
+
+    if force or MAX_HOLD_PERIOD is None:
+        MAX_HOLD_PERIOD = max_hold
+
+    training_years_daily, training_months_intraday = 3, 20
+    training_end_date = now - relativedelta(months=VALIDATION_MONTHS)
+    if tf_lower in {"1d", "1wk", "1mo"}:
+        training_start_date = training_end_date - relativedelta(
+            years=training_years_daily
+        )
+    else:
+        training_start_date = training_end_date - relativedelta(
+            months=training_months_intraday
+        )
+
+    ticker = TICKER
+    if DATA_SOURCE == "binance":
+        ticker = ticker.replace("-", "")
+        if ticker.endswith("USD") and not ticker.endswith("USDT"):
+            ticker = ticker[:-3] + "USDT"
+    TICKER = ticker
+
+    training_period = {
+        "start": training_start_date.strftime("%Y-%m-%d"),
+        "end": training_end_date.strftime("%Y-%m-%d"),
+    }
+    validation_period = {
+        "start": training_end_date.strftime("%Y-%m-%d"),
+        "end": now.strftime("%Y-%m-%d"),
+    }
+
+    if force or TRAINING_PERIOD is _UNSET:
+        TRAINING_PERIOD = training_period
+    if force or VALIDATION_PERIOD is _UNSET:
+        VALIDATION_PERIOD = validation_period
+
+    wf_start_date = (now - relativedelta(years=3)).strftime("%Y-%m-%d")
+    wf_defaults = {
+        "enabled": ENABLE_WALK_FORWARD_VALIDATION,
+        "total_data_range": {
+            "start": wf_start_date,
+            "end": validation_period["end"],
+        },
+        "training_period_length": 12,
+        "validation_period_length": 3,
+    }
+
+    if (
+        force
+        or WALK_FORWARD_SETTINGS is _UNSET
+        or not isinstance(WALK_FORWARD_SETTINGS, dict)
+    ):
+        WALK_FORWARD_SETTINGS = wf_defaults
+    else:
+        wf_cfg = WALK_FORWARD_SETTINGS
+        wf_cfg.setdefault("enabled", wf_defaults["enabled"])
+        total_range = wf_cfg.setdefault("total_data_range", {})
+        total_range.setdefault("start", wf_defaults["total_data_range"]["start"])
+        total_range.setdefault("end", wf_defaults["total_data_range"]["end"])
+        wf_cfg.setdefault(
+            "training_period_length", wf_defaults["training_period_length"]
+        )
+        wf_cfg.setdefault(
+            "validation_period_length", wf_defaults["validation_period_length"]
+        )
+
+    _clamp_vote_threshold()
+    _validate_combination_logic(STRATEGY_RULES)
+
+    _INITIALIZED = True
 
 
 def to_pandas_freq(tf: str) -> str:
@@ -207,24 +310,6 @@ def to_pandas_freq(tf: str) -> str:
         return tf[:-1] + "min"
     return tf
 
-
-# Walk-forward validation will leverage a longer history than the main
-# optimisation phase.  Start three years back from today regardless of the
-# optimisation window above.
-walk_forward_start_date = (today - relativedelta(years=3)).strftime("%Y-%m-%d")
-
-WALK_FORWARD_SETTINGS = {
-    "enabled": ENABLE_WALK_FORWARD_VALIDATION,
-    "total_data_range": {
-        # Use the extended three year lookback for walk-forward windows
-        "start": walk_forward_start_date,
-        "end": VALIDATION_PERIOD["end"],
-    },
-    # Each window trains on one year of data and tests on the following three
-    # months.
-    "training_period_length": 12,  # months
-    "validation_period_length": 3,
-}
 
 # --- 4. GENETIC ALGORITHM PARAMETERS ---
 # Default to discovery-run settings but allow quick-test overrides via env.
@@ -389,22 +474,6 @@ CHAMPION_SELECTION_SETTINGS = {
     "clone_mutation_rate": 0.20,
 }
 
-# --- 6. STRATEGY RULES DEFINITION ---
-# Moved to separate module for clarity.
-# Clamp vote_threshold gene so the upper bound never exceeds the number of active
-# conditions. This prevents GA runs from sampling impossible thresholds if rules
-# are toggled off later.
-_active = len(
-    [
-        c
-        for c in STRATEGY_RULES["entry_rules"].get("conditions", [])
-        if c.get("is_active", True)
-    ]
-)
-_vt = STRATEGY_RULES["entry_rules"].get("vote_threshold")
-if isinstance(_vt, dict) and "high" in _vt:
-    _vt["high"] = max(1, min(_vt["high"], _active))
-
 
 class ConfigurationError(ValueError):
     """Raised when configuration options are invalid."""
@@ -434,6 +503,3 @@ def _validate_combination_logic(rules: dict) -> None:
             entry["vote_threshold"] = math.ceil(n / 2)
         elif vt < 1 or vt > n:
             raise ConfigurationError(f"vote_threshold {vt} must be between 1 and {n}")
-
-
-_validate_combination_logic(STRATEGY_RULES)

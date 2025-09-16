@@ -280,6 +280,7 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
 def main():
     """The main execution function."""
     ensure_real_vectorbt(Path(__file__).resolve().parent)
+    config.initialize_config()
 
     # Delay heavy imports until after vectorbt is validated
     global analysis, fitness, tuner

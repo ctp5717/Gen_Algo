@@ -17,6 +17,8 @@ sys.modules.setdefault(
 
 import main  # noqa: E402
 
+main.config.initialize_config()
+
 
 def test_main_runs(monkeypatch):
     vb = types.SimpleNamespace(__version__="0", __file__=__file__)

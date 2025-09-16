@@ -66,6 +66,7 @@ class FitnessEvaluator:
         self.gene_map = gene_map
 
     def __call__(self, ga_instance, solution, sol_idx):
+        config.initialize_config()
         try:
             rules = inject_genes_into_rules(self.base_rules, self.gene_map, solution)
             entries = engine.process_strategy_rules(self.ohlc_data, rules)
@@ -682,6 +683,7 @@ class MultiAssetFitnessEvaluator:
 
     # ------------------------------------------------------------------
     def __call__(self, ga_instance, solution, sol_idx):
+        config.initialize_config()
         try:
             rules = inject_genes_into_rules(self.base_rules, self.gene_map, solution)
 
@@ -725,6 +727,7 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
         mapping of ticker -> DataFrame.  Otherwise it is a single DataFrame.
     """
 
+    config.initialize_config()
     settings = copy.deepcopy(getattr(config, "MULTI_ASSET", {}))
     if settings.get("enabled"):
         start = pd.to_datetime(config.TRAINING_PERIOD["start"])

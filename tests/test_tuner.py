@@ -12,6 +12,8 @@ sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import tuner  # noqa: E402
 
+tuner.config.initialize_config()
+
 
 def test_find_best_hyperparameters_selects_best(monkeypatch):
     df = pd.DataFrame(

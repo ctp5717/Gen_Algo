@@ -15,6 +15,8 @@ import config
 import fitness
 from utils.math import weighted_mean_std
 
+config.initialize_config()
+
 
 def _make_evaluator(stats_list, settings=None, group_data=None):
     group_data = group_data or {

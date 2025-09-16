@@ -18,6 +18,8 @@ except Exception:  # pragma: no cover - fallback stub
 
 import walk_forward  # noqa: E402
 
+walk_forward.config.initialize_config()
+
 
 def test_generate_periods_produces_windows():
     start = datetime(2020, 1, 1)
