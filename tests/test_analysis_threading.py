@@ -18,6 +18,7 @@ import analysis  # noqa: E402
 
 
 def test_run_champion_analysis_non_blocking(monkeypatch, tmp_path):
+    analysis.config.initialize_config()
     df = pd.DataFrame(
         {
             "Open": [1, 2],

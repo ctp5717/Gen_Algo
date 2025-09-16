@@ -68,6 +68,7 @@ def _file_sha256(path: Path) -> str | None:
 
 def _get_cache_hashes() -> dict:
     """Compute hashes for any cache files backing the current run."""
+    config.initialize_config()
     train_start = pd.to_datetime(config.TRAINING_PERIOD["start"])
     train_end = pd.to_datetime(config.TRAINING_PERIOD["end"])
     val_start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
@@ -217,6 +218,7 @@ def run_champion_analysis(
     artifacts: list[str] | None = None,
 ):
     """Run analysis on the champion solution using preloaded data."""
+    config.initialize_config()
     ensure_real_vectorbt(Path(__file__).resolve().parent)
     start_time = datetime.now(timezone.utc)
     artifacts = [] if artifacts is None else list(artifacts)
@@ -308,6 +310,7 @@ def _run_multi_asset_analysis(
     best_solution: list, gene_map: dict, group_data: dict, artifacts: list[str]
 ):
     """Generate overview charts for multi-asset validation."""
+    config.initialize_config()
     start_time = datetime.now(timezone.utc)
     artifacts = list(artifacts)
     print("\n\n--- Multi-Asset Champion Analysis ---")
