@@ -1,6 +1,7 @@
 import math
 from types import SimpleNamespace
 
+import itertools
 import numpy as np
 import pandas as pd
 import pytest
@@ -35,23 +36,84 @@ class DummyPortfolio:
         return pd.Series(self._returns)
 
 
-def test_resolve_metrics_handles_aliases_and_units():
+_BASE_VALUES = {
+    "sortino": 1.25,
+    "profit_factor": 2.5,
+    "max_drawdown": 0.12,
+    "total_return": 0.4,
+}
+
+_EXPECTED_VALUES = {
+    "sortino": _BASE_VALUES["sortino"],
+    "profit_factor": _BASE_VALUES["profit_factor"],
+    "max_drawdown": _BASE_VALUES["max_drawdown"] * 100.0,
+    "total_return": _BASE_VALUES["total_return"] * 100.0,
+}
+
+_RETURNS = [0.1, -0.05, 0.02]
+
+
+@pytest.mark.parametrize(
+    "sortino_alias, pf_alias, dd_alias, tr_alias",
+    list(
+        itertools.product(
+            metrics_contract.METRIC_ALIASES["sortino"],
+            metrics_contract.METRIC_ALIASES["profit_factor"],
+            metrics_contract.METRIC_ALIASES["max_drawdown"],
+            metrics_contract.METRIC_ALIASES["total_return"],
+        )
+    ),
+)
+def test_resolve_metrics_handles_all_alias_variants(
+    sortino_alias, pf_alias, dd_alias, tr_alias
+):
     stats = {
-        "sortino_ratio": 1.25,
-        "profit_factor": 2.5,
-        "Max Drawdown": 0.12,
-        "total_return": 0.4,
+        sortino_alias: _BASE_VALUES["sortino"],
+        pf_alias: _BASE_VALUES["profit_factor"],
+        dd_alias: _BASE_VALUES["max_drawdown"],
+        tr_alias: _BASE_VALUES["total_return"],
     }
-    portfolio = DummyPortfolio(stats, returns=[0.1, -0.05, 0.02])
+    portfolio = DummyPortfolio(stats, returns=_RETURNS)
 
     metrics, aliases = metrics_contract.resolve_metrics(portfolio)
 
-    assert pytest.approx(1.25) == metrics["sortino"]
-    assert pytest.approx(2.5) == metrics["profit_factor"]
-    assert pytest.approx(12.0) == metrics["max_drawdown"]  # converted to %
-    assert pytest.approx(40.0) == metrics["total_return"]
-    assert aliases["sortino"] == "sortino_ratio"
-    assert aliases["max_drawdown"] in {"Max Drawdown", "Max Drawdown [%]"}
+    assert pytest.approx(_EXPECTED_VALUES["sortino"]) == metrics["sortino"]
+    assert pytest.approx(_EXPECTED_VALUES["profit_factor"]) == metrics["profit_factor"]
+    assert pytest.approx(_EXPECTED_VALUES["max_drawdown"]) == metrics["max_drawdown"]
+    assert pytest.approx(_EXPECTED_VALUES["total_return"]) == metrics["total_return"]
+    assert aliases["sortino"] == sortino_alias
+    assert aliases["profit_factor"] == pf_alias
+    assert aliases["max_drawdown"] == dd_alias
+    assert aliases["total_return"] == tr_alias
+
+
+def test_resolve_metrics_recovers_after_alias_drift():
+    initial_stats = {
+        "sortino": _BASE_VALUES["sortino"],
+        "profit_factor": _BASE_VALUES["profit_factor"],
+        "max_drawdown": _BASE_VALUES["max_drawdown"],
+        "total_return": _BASE_VALUES["total_return"],
+    }
+    portfolio = DummyPortfolio(initial_stats, returns=_RETURNS)
+
+    metrics, aliases = metrics_contract.resolve_metrics(portfolio)
+    assert aliases["sortino"] == "sortino"
+
+    renamed_stats = {
+        "Sortino Ratio": _BASE_VALUES["sortino"],
+        "Profit Factor": _BASE_VALUES["profit_factor"],
+        "Max Drawdown [%]": _BASE_VALUES["max_drawdown"],
+        "Return [%]": _BASE_VALUES["total_return"],
+    }
+    portfolio._stats = renamed_stats
+
+    metrics, aliases = metrics_contract.resolve_metrics(portfolio)
+
+    assert pytest.approx(_EXPECTED_VALUES["sortino"]) == metrics["sortino"]
+    assert aliases["sortino"] == "Sortino Ratio"
+    assert aliases["profit_factor"] == "Profit Factor"
+    assert aliases["max_drawdown"] == "Max Drawdown [%]"
+    assert aliases["total_return"] == "Return [%]"
 
 
 @pytest.mark.parametrize(

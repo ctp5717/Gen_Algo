@@ -515,6 +515,7 @@ def _run_multi_asset_analysis(
             "combination_logic": combo,
             "vote_threshold": vt,
             "per_asset_signal_counts": per_asset_signal_counts,
+            "metric_sources": dict(details.get("metric_sources") or {}),
         }
         jf = RUN_DIR / f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
         summary["run_metadata_file"] = "run_metadata.json"

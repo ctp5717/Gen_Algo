@@ -1,3 +1,4 @@
+import logging
 import math
 from types import SimpleNamespace
 
@@ -120,3 +121,43 @@ def test_metrics_missing_reason_when_fallback_unavailable(monkeypatch):
     record = results["BBB"]
     assert record.get("evaluation_reason") == "metrics_missing"
     assert "sortino" in (record.get("reason_detail") or "")
+
+
+def test_metrics_error_falls_back_to_missing(monkeypatch, caplog):
+    config.initialize_config(force=True)
+    monkeypatch.setattr(fitness.engine, "process_strategy_rules", _fake_process_rules)
+
+    stats = {
+        "sortino": 1.0,
+        "profit_factor": 1.5,
+        "max_drawdown": 0.08,
+        "total_return": 0.25,
+    }
+
+    def fake_from_signals(*args, **kwargs):
+        return _AliasPortfolio([0.1, -0.05, 0.02], stats)
+
+    def explode(*args, **kwargs):
+        raise KeyError("sortino")
+
+    monkeypatch.setattr(fitness.vbt.Portfolio, "from_signals", fake_from_signals)
+    monkeypatch.setattr(metrics_contract, "evaluate_metrics", explode)
+
+    caplog.set_level(logging.WARNING, logger=fitness.logger.name)
+
+    ohlc = pd.DataFrame({"Close": [1.0, 1.1, 1.05]})
+    evaluator = fitness.MultiAssetFitnessEvaluator(
+        {"AAA": ohlc},
+        {},
+        {},
+        settings=_multi_asset_settings(),
+    )
+
+    results, _ = evaluator._evaluate_assets({})
+    record = results["AAA"]
+    assert record.get("evaluation_reason") == "metrics_missing"
+    assert set((record.get("metric_sources") or {}).values()) == {"missing"}
+
+    score = evaluator(None, [], 0)
+    assert score != -999.0
+    assert any("Metric evaluation failed" in msg for msg in caplog.messages)

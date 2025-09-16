@@ -49,6 +49,9 @@ METRICS_PREFLIGHT = {
     "missing_threshold": 0,
 }
 
+# Optional per-provider alias extensions merged into metrics_contract.METRIC_ALIASES.
+METRIC_ALIASES_EXT: dict[str, tuple[str, ...]] = {}
+
 # --- DATA SOURCE AND API CONFIGURATION ---
 # Select your data source: 'yfinance' or 'binance'
 DATA_SOURCE = "binance"

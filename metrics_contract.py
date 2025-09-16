@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -27,38 +28,57 @@ __all__ = [
 # Canonical metrics and the aliases exposed by vectorbt/QuantStats across versions.
 METRIC_ALIASES: dict[str, tuple[str, ...]] = {
     "sortino": (
-        "Sortino Ratio",
         "sortino",
         "sortino_ratio",
+        "Sortino Ratio",
         "Sortino",
         "QS Sortino Ratio",
     ),
     "profit_factor": (
-        "Profit Factor",
         "profit_factor",
+        "Profit Factor",
         "PF",
         "ProfitFactor",
     ),
     "max_drawdown": (
+        "max_drawdown",
         "Max Drawdown [%]",
         "Max Drawdown",
-        "max_drawdown",
         "Max Drawdown %",
         "Max Drawdown ( % )",
     ),
     "total_return": (
+        "total_return",
         "Total Return [%]",
         "Total Return",
         "Return [%]",
-        "total_return",
         "Cumulative Returns [%]",
     ),
 }
 
+_ALIASES_EXT = getattr(config, "METRIC_ALIASES_EXT", None)
+if isinstance(_ALIASES_EXT, Mapping):
+    for key, extra_aliases in _ALIASES_EXT.items():
+        if not isinstance(extra_aliases, (list, tuple, set)):
+            continue
+        existing = list(METRIC_ALIASES.get(key, ()))
+        for alias in extra_aliases:
+            if not isinstance(alias, str):
+                continue
+            if alias not in existing:
+                existing.append(alias)
+        if existing:
+            METRIC_ALIASES[key] = tuple(existing)
+        else:  # pragma: no cover - defensive
+            METRIC_ALIASES[key] = tuple(existing)
+
 _PERCENTAGE_METRICS = {"max_drawdown", "total_return"}
 _CANONICAL_ORDER = tuple(METRIC_ALIASES.keys())
-_PREFERRED_ALIASES = {key: METRIC_ALIASES[key][0] for key in _CANONICAL_ORDER}
-_ALIAS_CACHE: dict[str, str | None] | None = None
+_PREFERRED_ALIASES = {
+    key: METRIC_ALIASES[key][0] if METRIC_ALIASES[key] else None
+    for key in _CANONICAL_ORDER
+}
+_ALIAS_CACHE: dict[str, dict[str, str | None]] = {}
 
 
 class MetricsAliasError(RuntimeError):
@@ -68,26 +88,71 @@ class MetricsAliasError(RuntimeError):
 def reset_cache() -> None:
     """Reset cached alias selections (primarily for unit tests)."""
 
-    global _ALIAS_CACHE
-    _ALIAS_CACHE = None
+    _clear_cached_aliases()
+
+
+def _key_norm(value: str) -> str:
+    """Normalise keys for tolerant comparisons."""
+
+    if not isinstance(value, str):  # pragma: no cover - defensive guard
+        return str(value)
+    lowered = value.lower()
+    return re.sub(r"[^0-9a-z]+", "_", lowered).strip("_")
+
+
+def _provider_signature(portfolio: Any) -> str:
+    cls = type(portfolio)
+    return f"{cls.__module__}:{cls.__name__}"
+
+
+def _get_cached_aliases(signature: str) -> dict[str, str | None] | None:
+    cached = _ALIAS_CACHE.get(signature)
+    if cached is None:
+        return None
+    return dict(cached)
+
+
+def _set_cached_aliases(signature: str, alias_map: Mapping[str, str | None]) -> None:
+    _ALIAS_CACHE[signature] = dict(alias_map)
+
+
+def _clear_cached_aliases(signature: str | None = None) -> None:
+    if signature is None:
+        _ALIAS_CACHE.clear()
+    else:
+        _ALIAS_CACHE.pop(signature, None)
 
 
 def _normalise_stats(stats: Any) -> dict[str, Any]:
     """Convert stats output (Series, dict, DataFrame) into a mapping."""
 
     if isinstance(stats, pd.Series):
-        return stats.to_dict()
-    if isinstance(stats, Mapping):
-        return dict(stats)
-    if hasattr(stats, "to_dict"):
+        mapping = stats.to_dict()
+    elif isinstance(stats, Mapping):
+        mapping = dict(stats)
+    elif hasattr(stats, "to_dict"):
         try:
-            return dict(stats.to_dict())
+            mapping = dict(stats.to_dict())
         except Exception:  # pragma: no cover - defensive
-            pass
-    try:
-        return dict(stats)
-    except Exception:  # pragma: no cover - defensive
-        return {}
+            mapping = {}
+    else:
+        try:
+            mapping = dict(stats)
+        except Exception:  # pragma: no cover - defensive
+            mapping = {}
+
+    deduped: dict[str, Any] = {}
+    seen: set[str] = set()
+    for key, value in mapping.items():
+        if isinstance(key, str):
+            norm = _key_norm(key)
+            if norm in seen:
+                continue
+            seen.add(norm)
+            deduped[key] = value
+        else:
+            deduped[key] = value
+    return deduped
 
 
 def _coerce_series(data: Any) -> pd.Series | None:
@@ -179,9 +244,19 @@ def _build_metric_dict(
 
 def _discover_aliases(portfolio: Any) -> tuple[dict[str, str | None], dict[str, Any]]:
     stats_all = _normalise_stats(portfolio.stats())
+    lookup: dict[str, str] = {}
+    for key in stats_all:
+        if isinstance(key, str):
+            lookup.setdefault(_key_norm(key), key)
     alias_map: dict[str, str | None] = {}
     for metric, aliases in METRIC_ALIASES.items():
-        alias = next((name for name in aliases if name in stats_all), None)
+        alias = None
+        for candidate in aliases:
+            norm = _key_norm(candidate)
+            match = lookup.get(norm)
+            if match:
+                alias = match
+                break
         alias_map[metric] = alias
     return alias_map, stats_all
 
@@ -189,30 +264,77 @@ def _discover_aliases(portfolio: Any) -> tuple[dict[str, str | None], dict[str, 
 def resolve_metrics(portfolio: Any) -> tuple[dict[str, Any], dict[str, str | None]]:
     """Resolve canonical metrics from a portfolio, handling alias drift."""
 
-    global _ALIAS_CACHE
     stats_dict: dict[str, Any] | None = None
+    signature = _provider_signature(portfolio)
 
-    if _ALIAS_CACHE is None:
+    alias_map = _get_cached_aliases(signature)
+
+    if alias_map is None:
         preferred = [_PREFERRED_ALIASES[m] for m in _CANONICAL_ORDER]
+        requested_pref = [alias for alias in preferred if alias]
         try:
-            stats_obj = portfolio.stats(metrics=preferred)
+            stats_obj = (
+                portfolio.stats(metrics=requested_pref) if requested_pref else {}
+            )
         except Exception:
             alias_map, stats_dict = _discover_aliases(portfolio)
         else:
             stats_dict = _normalise_stats(stats_obj)
-            alias_map = {
-                metric: preferred[idx] for idx, metric in enumerate(_CANONICAL_ORDER)
-            }
-        _ALIAS_CACHE = alias_map
-    else:
-        alias_map = dict(_ALIAS_CACHE)
+            alias_map = {}
+            missing: set[str] = set()
+            for metric, alias in zip(_CANONICAL_ORDER, preferred):
+                if alias and alias in stats_dict:
+                    alias_map[metric] = alias
+                else:
+                    alias_map[metric] = None
+                    missing.add(metric)
+            if missing:
+                fallback_map, stats_all = _discover_aliases(portfolio)
+                for metric in missing:
+                    candidate = fallback_map.get(metric)
+                    if candidate:
+                        alias_map[metric] = candidate
+                if stats_dict:
+                    stats_all.update(stats_dict)
+                    stats_dict = stats_all
+                else:
+                    stats_dict = stats_all
+        _set_cached_aliases(signature, alias_map)
 
     requested = [
         alias for alias in (alias_map.get(m) for m in _CANONICAL_ORDER) if alias
     ]
-    if stats_dict is None:
-        stats_obj = portfolio.stats(metrics=requested) if requested else {}
+
+    while stats_dict is None:
+        if not requested:
+            stats_dict = {}
+            break
+        try:
+            stats_obj = portfolio.stats(metrics=requested)
+        except Exception:
+            _clear_cached_aliases(signature)
+            alias_map, stats_all = _discover_aliases(portfolio)
+            _set_cached_aliases(signature, alias_map)
+            requested = [
+                alias
+                for alias in (alias_map.get(m) for m in _CANONICAL_ORDER)
+                if alias
+            ]
+            stats_dict = stats_all
+            continue
         stats_dict = _normalise_stats(stats_obj)
+        missing_requested = [alias for alias in requested if alias not in stats_dict]
+        if missing_requested:
+            _clear_cached_aliases(signature)
+            alias_map, stats_all = _discover_aliases(portfolio)
+            _set_cached_aliases(signature, alias_map)
+            requested = [
+                alias
+                for alias in (alias_map.get(m) for m in _CANONICAL_ORDER)
+                if alias
+            ]
+            stats_dict = stats_all
+
     metrics = _build_metric_dict(alias_map, stats_dict)
     return metrics, dict(alias_map)
 
@@ -315,9 +437,9 @@ def format_mapping(
 def assert_metric_aliases(portfolio: Any) -> dict[str, str | None]:
     """Validate that each canonical metric is obtainable from the portfolio."""
 
-    global _ALIAS_CACHE
+    signature = _provider_signature(portfolio)
     alias_map, _ = _discover_aliases(portfolio)
-    _ALIAS_CACHE = alias_map
+    _set_cached_aliases(signature, alias_map)
 
     missing = [metric for metric, alias in alias_map.items() if not alias]
     mapping_summary = format_mapping(

@@ -64,7 +64,9 @@ class FitnessEvaluator:
         self.base_rules = base_rules
         self.gene_map = gene_map
         self._metrics_preflight_done = False
+        self._metrics_preflight_warned = False
         self._metric_mapping_logged = False
+        self._metrics_eval_warned = False
 
     def __call__(self, ga_instance, solution, sol_idx):
         config.initialize_config()
@@ -93,10 +95,24 @@ class FitnessEvaluator:
             )
 
             if not self._metrics_preflight_done:
-                metrics_contract.assert_metric_aliases(portfolio)
-                self._metrics_preflight_done = True
+                try:
+                    metrics_contract.assert_metric_aliases(portfolio)
+                except Exception as exc:
+                    if not self._metrics_preflight_warned:
+                        logger.warning("Metric preflight failed: %s", exc)
+                        self._metrics_preflight_warned = True
+                finally:
+                    self._metrics_preflight_done = True
 
-            metrics, sources, _ = metrics_contract.evaluate_metrics(portfolio)
+            try:
+                metrics, sources, _ = metrics_contract.evaluate_metrics(portfolio)
+            except Exception as exc:
+                if not self._metrics_eval_warned:
+                    logger.warning("Metric evaluation failed: %s", exc)
+                    self._metrics_eval_warned = True
+                missing_keys = list(metrics_contract.METRIC_ALIASES)
+                metrics = {key: None for key in missing_keys}
+                sources = {key: "missing" for key in missing_keys}
             if not self._metric_mapping_logged and sources:
                 logger.info(
                     "Metrics mapping: %s", metrics_contract.format_mapping(sources)
@@ -169,7 +185,10 @@ class MultiAssetFitnessEvaluator:
         self.last_details = {}
         self.floor_failures = Counter()
         self._metrics_preflight_done = False
+        self._metrics_preflight_warned = False
         self._metric_mapping_logged = False
+        self._metrics_eval_warned = False
+        self._last_metric_sources: dict[str, str] = {}
 
         # Validate key configuration values to catch misconfiguration early.
         assert (
@@ -269,6 +288,10 @@ class MultiAssetFitnessEvaluator:
         record = dict(stats)
         metric_sources = record.get("metric_sources") or {}
         if isinstance(metric_sources, Mapping):
+            metric_sources = dict(metric_sources)
+            record["metric_sources"] = metric_sources
+            if metric_sources:
+                self._last_metric_sources = dict(metric_sources)
             self._log_metric_mapping(metric_sources)
         missing_metrics = list(record.get("missing_metrics") or [])
         trades = int(record.get("trades", 0) or 0)
@@ -312,10 +335,24 @@ class MultiAssetFitnessEvaluator:
         )
 
         if not self._metrics_preflight_done:
-            metrics_contract.assert_metric_aliases(portfolio)
-            self._metrics_preflight_done = True
+            try:
+                metrics_contract.assert_metric_aliases(portfolio)
+            except Exception as exc:
+                if not self._metrics_preflight_warned:
+                    logger.warning("Metric preflight failed: %s", exc)
+                    self._metrics_preflight_warned = True
+            finally:
+                self._metrics_preflight_done = True
 
-        metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
+        try:
+            metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
+        except Exception as exc:
+            if not self._metrics_eval_warned:
+                logger.warning("Metric evaluation failed: %s", exc)
+                self._metrics_eval_warned = True
+            missing = list(metrics_contract.METRIC_ALIASES)
+            metrics = {key: None for key in missing}
+            sources = {key: "missing" for key in missing}
         trades = int(portfolio.trades.count())
 
         value_fn = getattr(portfolio, "value", None)
@@ -351,6 +388,7 @@ class MultiAssetFitnessEvaluator:
 
         results: dict[str, dict] = {}
         err_counts: Counter = Counter()
+        self._last_metric_sources = {}
         parallel_cfg = self.settings.get("parallel", {})
         verbose = bool(self.settings.get("verbose_asset_errors"))
 
@@ -607,6 +645,7 @@ class MultiAssetFitnessEvaluator:
                 "min_total_trades": self.settings.get("min_total_trades", 0),
                 "fitness": poor_score,
                 "asset_weights": {},
+                "metric_sources": dict(self._last_metric_sources),
             }
             return poor_score
 
@@ -697,6 +736,7 @@ class MultiAssetFitnessEvaluator:
                     "min_total_trades": min_trades,
                     "fitness": F,
                     "asset_weights": w_map,
+                    "metric_sources": dict(self._last_metric_sources),
                 }
                 return F
             else:
@@ -728,6 +768,7 @@ class MultiAssetFitnessEvaluator:
                 "min_total_trades": min_trades,
                 "fitness": F,
                 "asset_weights": w_map,
+                "metric_sources": dict(self._last_metric_sources),
             }
             return F
         elif policy == "soft_penalty" and total_trades < min_trades:
@@ -767,6 +808,7 @@ class MultiAssetFitnessEvaluator:
             "min_total_trades": min_trades,
             "fitness": F,
             "asset_weights": w_map,
+            "metric_sources": dict(self._last_metric_sources),
         }
 
         return F
@@ -803,6 +845,7 @@ class MultiAssetFitnessEvaluator:
                 },
                 "min_total_trades": self.settings.get("min_total_trades", 0),
                 "fitness": poor,
+                "metric_sources": dict(self._last_metric_sources),
             }
             return poor
 
