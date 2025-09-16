@@ -11,6 +11,7 @@ import traceback
 import types
 import warnings
 from collections import Counter
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
@@ -37,6 +38,7 @@ else:  # pragma: no cover - inject stub attributes if minimal module present
         vbt.__file__ = getattr(vbt, "__file__", _vbt_file)
 
 import config
+import metrics_contract
 import strategy_engine as engine
 import trade_floor
 from params_resolver import inject_genes_into_rules
@@ -44,9 +46,6 @@ from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
 
 PenaltyDetail = str | dict[str, float | str] | None
-
-CORE_METRICS = ["Sortino Ratio", "Profit Factor", "Max Drawdown [%]"]
-EXTENDED_METRICS = CORE_METRICS + ["Total Return [%]"]
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +63,8 @@ class FitnessEvaluator:
         self.ohlc_data = ohlc_data
         self.base_rules = base_rules
         self.gene_map = gene_map
+        self._metrics_preflight_done = False
+        self._metric_mapping_logged = False
 
     def __call__(self, ga_instance, solution, sol_idx):
         config.initialize_config()
@@ -91,20 +92,36 @@ class FitnessEvaluator:
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )
 
-            stats = portfolio.stats(metrics=CORE_METRICS)
-            sortino = stats.get("Sortino Ratio")
-            profit_factor = stats.get("Profit Factor")
-            max_drawdown = stats.get("Max Drawdown [%]")
+            if not self._metrics_preflight_done:
+                metrics_contract.assert_metric_aliases(portfolio)
+                self._metrics_preflight_done = True
+
+            metrics, sources, _ = metrics_contract.evaluate_metrics(portfolio)
+            if not self._metric_mapping_logged and sources:
+                logger.info(
+                    "Metrics mapping: %s", metrics_contract.format_mapping(sources)
+                )
+                self._metric_mapping_logged = True
+
+            sortino = metrics.get("sortino")
+            profit_factor = metrics.get("profit_factor")
+            max_drawdown = metrics.get("max_drawdown")
 
             cap = getattr(config, "MULTI_ASSET", {}).get("winsorize_pf_cap", 5.0)
-            if np.isinf(profit_factor) or profit_factor > cap:
-                profit_factor = cap
-            if np.isnan(sortino):
-                sortino = 0
-            if np.isnan(profit_factor):
-                profit_factor = 0
-            if np.isnan(max_drawdown):
+            if profit_factor is None or pd.isna(profit_factor):
+                profit_factor = 0.0
+            else:
+                profit_factor = float(profit_factor)
+                if np.isinf(profit_factor) or profit_factor > cap:
+                    profit_factor = cap
+            if sortino is None or pd.isna(sortino):
+                sortino = 0.0
+            else:
+                sortino = float(sortino)
+            if max_drawdown is None or pd.isna(max_drawdown):
                 max_drawdown = 100.0
+            else:
+                max_drawdown = float(max_drawdown)
 
             drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
@@ -151,6 +168,8 @@ class MultiAssetFitnessEvaluator:
         self.settings["min_included_assets"] = min(mia, len(group_data))
         self.last_details = {}
         self.floor_failures = Counter()
+        self._metrics_preflight_done = False
+        self._metric_mapping_logged = False
 
         # Validate key configuration values to catch misconfiguration early.
         assert (
@@ -193,6 +212,8 @@ class MultiAssetFitnessEvaluator:
             "total_return": None,
             "equity_curve": pd.Series(dtype=float),
             "signal_counts": {},
+            "metric_sources": {},
+            "missing_metrics": [],
         }
 
     # ------------------------------------------------------------------
@@ -229,6 +250,36 @@ class MultiAssetFitnessEvaluator:
             return str(trace)
 
     # ------------------------------------------------------------------
+    def _log_metric_mapping(self, metric_sources: Mapping[str, str]) -> None:
+        """Log the resolved metric mapping exactly once."""
+
+        if self._metric_mapping_logged or not metric_sources:
+            return
+        logger.info(
+            "Metrics mapping: %s", metrics_contract.format_mapping(metric_sources)
+        )
+        self._metric_mapping_logged = True
+
+    # ------------------------------------------------------------------
+    def _prepare_metrics_record(
+        self, stats: dict
+    ) -> tuple[dict, str | None, str | None]:
+        """Normalise returned stats and derive evaluation metadata."""
+
+        record = dict(stats)
+        metric_sources = record.get("metric_sources") or {}
+        if isinstance(metric_sources, Mapping):
+            self._log_metric_mapping(metric_sources)
+        missing_metrics = list(record.get("missing_metrics") or [])
+        trades = int(record.get("trades", 0) or 0)
+        reason = None
+        detail = None
+        if missing_metrics and trades > 0:
+            reason = "metrics_missing"
+            detail = ", ".join(sorted(missing_metrics))
+        return record, reason, detail
+
+    # ------------------------------------------------------------------
     def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
         # Empty or very short dataframes can cause downstream libraries to
@@ -260,16 +311,38 @@ class MultiAssetFitnessEvaluator:
             freq=config.to_pandas_freq(config.TIMEFRAME),
         )
 
-        stats = portfolio.stats(metrics=EXTENDED_METRICS)
+        if not self._metrics_preflight_done:
+            metrics_contract.assert_metric_aliases(portfolio)
+            self._metrics_preflight_done = True
+
+        metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
         trades = int(portfolio.trades.count())
+
+        value_fn = getattr(portfolio, "value", None)
+        if callable(value_fn):
+            try:
+                equity_curve = value_fn()
+            except Exception:
+                equity_curve = pd.Series(dtype=float)
+            else:
+                if not isinstance(equity_curve, pd.Series):
+                    try:
+                        equity_curve = pd.Series(equity_curve)
+                    except Exception:
+                        equity_curve = pd.Series(dtype=float)
+        else:
+            equity_curve = pd.Series(dtype=float)
+
         return {
-            "sortino": stats.get("Sortino Ratio"),
-            "profit_factor": stats.get("Profit Factor"),
-            "max_drawdown": stats.get("Max Drawdown [%]"),
+            "sortino": metrics.get("sortino"),
+            "profit_factor": metrics.get("profit_factor"),
+            "max_drawdown": metrics.get("max_drawdown"),
             "trades": trades,
-            "total_return": stats.get("Total Return [%]"),
-            "equity_curve": portfolio.value(),
+            "total_return": metrics.get("total_return"),
+            "equity_curve": equity_curve,
             "signal_counts": signal_counts,
+            "metric_sources": sources,
+            "missing_metrics": list(missing),
         }
 
     # ------------------------------------------------------------------
@@ -304,8 +377,11 @@ class MultiAssetFitnessEvaluator:
                 for fut in cf.as_completed(future_map):
                     ticker = future_map[fut]
                     try:
-                        stats = fut.result()
-                        results[ticker] = self._build_evaluation_record(stats)
+                        raw_stats = fut.result()
+                        stats, reason, detail = self._prepare_metrics_record(raw_stats)
+                        results[ticker] = self._build_evaluation_record(
+                            stats, reason=reason, detail=detail
+                        )
                     except Exception as e:
                         if verbose:
                             print(f"Error evaluating asset {ticker}: {e}")
@@ -332,8 +408,11 @@ class MultiAssetFitnessEvaluator:
                     )
                     continue
                 try:
-                    stats = self._evaluate_single_asset(ohlc, rules)
-                    results[ticker] = self._build_evaluation_record(stats)
+                    raw_stats = self._evaluate_single_asset(ohlc, rules)
+                    stats, reason, detail = self._prepare_metrics_record(raw_stats)
+                    results[ticker] = self._build_evaluation_record(
+                        stats, reason=reason, detail=detail
+                    )
                 except Exception as e:
                     if verbose:
                         print(f"Error evaluating asset {ticker}: {e}")
@@ -368,10 +447,12 @@ class MultiAssetFitnessEvaluator:
         metric_type = self.settings.get("metric", "composite")
         nan_fallback = self.settings.get("nan_fallback", 0.0)
         cap = self.settings.get("winsorize_pf_cap", 5.0)
+        sources_recorded = False
 
         for ticker in self._sorted_tickers:
             stats_raw = evaluation_results.get(ticker, self._empty_stats())
             stats = dict(stats_raw)
+            metric_sources = stats.pop("metric_sources", None)
             reason = stats.pop("evaluation_reason", None)
             reason_detail = stats.pop("reason_detail", None)
             reason_trace = stats.pop("reason_trace", None)
@@ -403,6 +484,9 @@ class MultiAssetFitnessEvaluator:
                         details["reason_detail"] = reason_detail
                     if trace_str:
                         details["reason_trace"] = trace_str
+                    if metric_sources and not sources_recorded:
+                        details["metric_sources"] = metric_sources
+                        sources_recorded = True
                     per_asset_details[ticker] = details
                 else:
                     reason_str = reason or (
@@ -429,6 +513,9 @@ class MultiAssetFitnessEvaluator:
                         details["reason_detail"] = reason_detail
                     if trace_str:
                         details["reason_trace"] = trace_str
+                    if metric_sources and not sources_recorded:
+                        details["metric_sources"] = metric_sources
+                        sources_recorded = True
                     per_asset_details[ticker] = details
                 continue
 
@@ -475,6 +562,9 @@ class MultiAssetFitnessEvaluator:
                 details["reason_detail"] = reason_detail
             if trace_str:
                 details["reason_trace"] = trace_str
+            if metric_sources and not sources_recorded:
+                details["metric_sources"] = metric_sources
+                sources_recorded = True
             per_asset_details[ticker] = details
 
         return {

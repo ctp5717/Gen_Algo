@@ -86,6 +86,19 @@
   - Single-asset `FitnessEvaluator` uses **vectorbt** to backtest, exit handling with **`.shift()`** for time-based rules, stats (Sortino, Profit Factor with cap/winsorization, Max DD, total return, trades).
   - `MultiAssetFitnessEvaluator` aggregates per-asset stats with dispersion penalties, trade floor (via `trade_floor.scale_floor()`), zero-trade policy, coverage penalties, winsorization caps, etc.
   - `_inject_genes()` overlays GA genes into `STRATEGY_RULES`.
+- `metrics_contract.py` – Canonical metric aliases, unit normalisation, and fallbacks.
+  - `METRIC_ALIASES` captures label drift between vectorbt and QuantStats; `resolve_metrics` caches the discovered mapping.
+  - `compute_fallbacks` synthesises missing metrics from raw returns; prefer `evaluate_metrics` to obtain `(metrics, sources, missing)`.
+  - Configure alias preflight via `config.METRICS_PREFLIGHT` (`mode`: `"warn"|"fail"`, `missing_threshold`: tolerated missing aliases).
+
+| Canonical key   | Accepted aliases (subset)                          | Unit            | Fallback formula                                      |
+|-----------------|-----------------------------------------------------|-----------------|------------------------------------------------------|
+| `sortino`       | `Sortino Ratio`, `sortino_ratio`, `Sortino`         | ratio           | Mean excess return ÷ downside deviation × √252       |
+| `profit_factor` | `Profit Factor`, `PF`, `profit_factor`              | ratio           | Σ positive returns ÷ Σ absolute negative returns     |
+| `max_drawdown`  | `Max Drawdown [%]`, `Max Drawdown`, `max_drawdown`  | percent (0–100) | Max peak-to-trough drop of cumulative returns        |
+| `total_return`  | `Total Return [%]`, `Return [%]`, `total_return`    | percent (0–100) | `(1 + returns).prod() - 1`                           |
+
+Metric mappings are logged once per run (e.g. `sortino→sortino_ratio`) and the first asset records a `metric_sources` map in `last_details`. Assets with trades but missing metrics emit `evaluation_reason="metrics_missing"`.
 
 - `trade_floor.py` – Scales a required minimum trades **over elapsed years**.
 
@@ -108,6 +121,7 @@
   - `.pre-commit-config.yaml` (black, isort, flake8, mypy relaxed),
   - `.flake8` per-file ignores,
   - `requirements.txt`, `requirements-dev.txt`.
+  - Tests run on a matrix covering `vectorbt==0.28.1` with QuantStats and floating `vectorbt>=0.28.1` environments (with/without QuantStats) to surface alias drift.
 
 ---
 
