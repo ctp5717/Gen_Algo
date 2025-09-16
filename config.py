@@ -189,17 +189,16 @@ def initialize_config(force: bool = False) -> None:
     is_hour = tf_lower.endswith("h")
     is_minute = tf_lower.endswith("m") and not tf_lower.endswith("mo")
 
+    validation_bars = 91.0
     if is_hour or is_minute:
         if is_hour:
-            validation_bars = 91 * 24
+            validation_bars = 91.0 * 24
         else:
             try:
                 minute_value = int(tf_lower[:-1])
             except ValueError:
                 minute_value = 1
-            validation_bars = 91 * (24 * (60 / max(minute_value, 1)))
-    else:
-        validation_bars = 91
+            validation_bars = 91.0 * (24 * (60 / max(minute_value, 1)))
 
     if force or VALIDATION_BARS is None:
         VALIDATION_BARS = int(validation_bars)
@@ -225,7 +224,9 @@ def initialize_config(force: bool = False) -> None:
     training_years_daily, training_months_intraday = 3, 20
     training_end_date = now - relativedelta(months=VALIDATION_MONTHS)
     if tf_lower in {"1d", "1wk", "1mo"}:
-        training_start_date = training_end_date - relativedelta(years=training_years_daily)
+        training_start_date = training_end_date - relativedelta(
+            years=training_years_daily
+        )
     else:
         training_start_date = training_end_date - relativedelta(
             months=training_months_intraday
@@ -263,7 +264,11 @@ def initialize_config(force: bool = False) -> None:
         "validation_period_length": 3,
     }
 
-    if force or WALK_FORWARD_SETTINGS is _UNSET or not isinstance(WALK_FORWARD_SETTINGS, dict):
+    if (
+        force
+        or WALK_FORWARD_SETTINGS is _UNSET
+        or not isinstance(WALK_FORWARD_SETTINGS, dict)
+    ):
         WALK_FORWARD_SETTINGS = wf_defaults
     else:
         wf_cfg = WALK_FORWARD_SETTINGS
@@ -271,7 +276,9 @@ def initialize_config(force: bool = False) -> None:
         total_range = wf_cfg.setdefault("total_data_range", {})
         total_range.setdefault("start", wf_defaults["total_data_range"]["start"])
         total_range.setdefault("end", wf_defaults["total_data_range"]["end"])
-        wf_cfg.setdefault("training_period_length", wf_defaults["training_period_length"])
+        wf_cfg.setdefault(
+            "training_period_length", wf_defaults["training_period_length"]
+        )
         wf_cfg.setdefault(
             "validation_period_length", wf_defaults["validation_period_length"]
         )
@@ -466,6 +473,7 @@ CHAMPION_SELECTION_SETTINGS = {
     # Probability of mutating each gene on a clone
     "clone_mutation_rate": 0.20,
 }
+
 
 class ConfigurationError(ValueError):
     """Raised when configuration options are invalid."""
