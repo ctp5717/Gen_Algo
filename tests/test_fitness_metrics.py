@@ -119,4 +119,56 @@ def test_metrics_missing_reason_when_fallback_unavailable(monkeypatch):
     results, _ = evaluator._evaluate_assets({})
     record = results["BBB"]
     assert record.get("evaluation_reason") == "metrics_missing"
-    assert "sortino" in (record.get("reason_detail") or "")
+    signature = metrics_contract._provider_signature(_MissingPortfolio([], {}))
+    detail = record.get("reason_detail") or ""
+    assert signature in detail
+    assert "sortino" in detail
+
+
+def test_evaluation_warning_and_metrics_missing_on_failure(monkeypatch, caplog):
+    config.initialize_config(force=True)
+    monkeypatch.setattr(fitness.engine, "process_strategy_rules", _fake_process_rules)
+
+    stats = {
+        "sortino": 1.0,
+        "profit_factor": 1.5,
+        "max_drawdown": 0.1,
+        "total_return": 0.2,
+    }
+
+    def fake_from_signals(*args, **kwargs):
+        return _AliasPortfolio([0.1, -0.05, 0.02], stats)
+
+    monkeypatch.setattr(fitness.vbt.Portfolio, "from_signals", fake_from_signals)
+
+    def boom(portfolio):
+        raise KeyError("sortino")
+
+    monkeypatch.setattr(metrics_contract, "evaluate_metrics", boom)
+
+    evaluator = fitness.MultiAssetFitnessEvaluator(
+        {"CCC": pd.DataFrame({"Close": [1.0, 1.1, 1.05]})},
+        {},
+        {},
+        settings=_multi_asset_settings(),
+    )
+
+    with caplog.at_level("WARNING"):
+        results, _ = evaluator._evaluate_assets({})
+
+    record = results["CCC"]
+    assert record.get("evaluation_reason") == "metrics_missing"
+    assert set(record.get("missing_metrics") or ()) == set(
+        metrics_contract.METRIC_ALIASES
+    )
+    signature = metrics_contract._provider_signature(_AliasPortfolio([], {}))
+    detail = record.get("reason_detail") or ""
+    assert signature in detail
+    score = evaluator(None, [], 0)
+    assert score != -999.0
+    assert any("Metric evaluation failed for" in msg for msg in caplog.messages)
+    assert any(signature in msg for msg in caplog.messages)
+    detail = evaluator.last_details["per_asset"]["CCC"]
+    assert detail.get("missing_metrics")
+    assert detail.get("metric_sources")
+    assert detail.get("metric_provider") == signature
