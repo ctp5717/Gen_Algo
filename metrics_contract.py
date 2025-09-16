@@ -377,9 +377,7 @@ def _refresh_stats(
         discovery_needed = False
         try:
             stats_obj = (
-                portfolio.stats(metrics=current_requested)
-                if current_requested
-                else {}
+                portfolio.stats(metrics=current_requested) if current_requested else {}
             )
         except KeyError as exc:
             discovery_needed = True

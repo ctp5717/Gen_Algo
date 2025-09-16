@@ -114,8 +114,8 @@ class FitnessEvaluator:
                     exc,
                 )
                 canonical = list(metrics_contract.METRIC_ALIASES)
-                metrics = {metric: None for metric in canonical}
-                sources = {metric: "missing" for metric in canonical}
+                metrics = dict.fromkeys(canonical)
+                sources = dict.fromkeys(canonical, "missing")
             if not self._metric_mapping_logged and sources:
                 logger.info(
                     "Metrics mapping for %s: %s",
@@ -363,8 +363,8 @@ class MultiAssetFitnessEvaluator:
                 exc,
             )
             canonical = list(metrics_contract.METRIC_ALIASES)
-            metrics = {metric: None for metric in canonical}
-            sources = {metric: "missing" for metric in canonical}
+            metrics = dict.fromkeys(canonical)
+            sources = dict.fromkeys(canonical, "missing")
             missing = list(canonical)
         trades = int(portfolio.trades.count())
 
@@ -655,20 +655,20 @@ class MultiAssetFitnessEvaluator:
                 "sigma": 0.0,
                 "lambda_sigma": 0.0,
                 "total_trades": total_trades,
-                    "assets_included": 0,
-                    "assets_traded": assets_traded,
-                    "assets_ignored": len(self.group_data),
-                    "penalties": {
-                        "trade_floor": reason,
-                        "coverage": 0.0,
-                        "min_assets": reason,
-                        "stability": 0.0,
-                    },
-                    "min_total_trades": self.settings.get("min_total_trades", 0),
-                    "fitness": poor_score,
-                    "asset_weights": {},
-                    "metric_sources": metric_sources,
-                }
+                "assets_included": 0,
+                "assets_traded": assets_traded,
+                "assets_ignored": len(self.group_data),
+                "penalties": {
+                    "trade_floor": reason,
+                    "coverage": 0.0,
+                    "min_assets": reason,
+                    "stability": 0.0,
+                },
+                "min_total_trades": self.settings.get("min_total_trades", 0),
+                "fitness": poor_score,
+                "asset_weights": {},
+                "metric_sources": metric_sources,
+            }
             return poor_score
 
         asset_weights_cfg = self.settings.get("asset_weights") or {}

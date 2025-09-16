@@ -59,8 +59,7 @@ _DEFAULT_RETURNS = [0.1, -0.05, 0.02]
 
 def _build_stats(alias_overrides: dict[str, str] | None = None) -> dict[str, float]:
     alias_map = {
-        metric: metrics_contract.METRIC_ALIASES[metric][0]
-        for metric in _BASE_VALUES
+        metric: metrics_contract.METRIC_ALIASES[metric][0] for metric in _BASE_VALUES
     }
     if alias_overrides:
         alias_map.update(alias_overrides)
