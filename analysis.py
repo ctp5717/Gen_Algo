@@ -320,6 +320,7 @@ def _run_multi_asset_analysis(
         return
 
     settings = dict(config.MULTI_ASSET)
+    settings["collect_equity_curve"] = True
     start = pd.to_datetime(config.VALIDATION_PERIOD["start"])
     end = pd.to_datetime(config.VALIDATION_PERIOD["end"])
     per_asset_base = settings.get("per_asset_min_trades")
