@@ -1,3 +1,4 @@
+import concurrent.futures as cf
 import sys
 import types
 from pathlib import Path
@@ -697,6 +698,177 @@ def test_parallel_evaluation_handles_exception():
     assert np.isclose(score, 2.0)
     assert not ev.last_details["per_asset"]["B"]["included"]
     assert ev.last_details["per_asset"]["B"]["reason"] == "evaluation_error"
+
+
+def test_sequential_evaluation_does_not_create_executor(monkeypatch):
+    created = {"thread": 0, "process": 0}
+
+    class SentinelThreadExecutor:
+        def __init__(self, *args, **kwargs):
+            created["thread"] += 1
+
+        def submit(self, *args, **kwargs):
+            raise AssertionError("submit should not be called in sequential mode")
+
+        def shutdown(self, *args, **kwargs):
+            created.setdefault("thread_shutdown", 0)
+            created["thread_shutdown"] += 1
+
+    class SentinelProcessExecutor:
+        def __init__(self, *args, **kwargs):
+            created["process"] += 1
+
+        def submit(self, *args, **kwargs):
+            raise AssertionError("submit should not be called in sequential mode")
+
+        def shutdown(self, *args, **kwargs):
+            created.setdefault("process_shutdown", 0)
+            created["process_shutdown"] += 1
+
+    monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", SentinelThreadExecutor)
+    monkeypatch.setattr(fitness.cf, "ProcessPoolExecutor", SentinelProcessExecutor)
+
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [4, 5, 6]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+        "parallel": {"enabled": False},
+    }
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    def fake_eval(self, ohlc, rules):
+        return {"total_return": 1.5, "trades": 2}
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+
+    for _ in range(2):
+        score = ev(None, [], 0)
+        assert np.isclose(score, 1.5)
+        assert ev.last_details["assets_included"] == 2
+
+    ev.close()
+    assert created["thread"] == 0
+    assert created["process"] == 0
+
+
+def test_parallel_executor_reused_across_calls(monkeypatch):
+    orig_thread = cf.ThreadPoolExecutor
+
+    class CountingThreadPoolExecutor(orig_thread):
+        creations = 0
+        shutdowns = 0
+
+        def __init__(self, *args, **kwargs):
+            type(self).creations += 1
+            super().__init__(*args, **kwargs)
+
+        def shutdown(self, *args, **kwargs):
+            type(self).shutdowns += 1
+            return super().shutdown(*args, **kwargs)
+
+    monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", CountingThreadPoolExecutor)
+
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [4, 5, 6]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
+    }
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    call_count = 0
+
+    def fake_eval(self, ohlc, rules):
+        nonlocal call_count
+        call_count += 1
+        return {"total_return": 2.0, "trades": 3}
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+
+    first = ev(None, [], 0)
+    second = ev(None, [], 0)
+
+    assert np.isclose(first, 2.0)
+    assert np.isclose(second, 2.0)
+    assert call_count == len(group_data) * 2
+    assert CountingThreadPoolExecutor.creations == 1
+
+    ev.close()
+    assert CountingThreadPoolExecutor.shutdowns == 1
+
+
+def test_parallel_executor_reuse_handles_exceptions(monkeypatch):
+    orig_thread = cf.ThreadPoolExecutor
+
+    class CountingThreadPoolExecutor(orig_thread):
+        creations = 0
+
+        def __init__(self, *args, **kwargs):
+            type(self).creations += 1
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", CountingThreadPoolExecutor)
+
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [4, 5, 6]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+        "zero_trade_policy": "ignore",
+        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
+    }
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    id_map = {id(df): ticker for ticker, df in group_data.items()}
+    should_raise = {"value": True}
+
+    def fake_eval(self, ohlc, rules):
+        ticker = id_map[id(ohlc)]
+        if should_raise["value"] and ticker == "B":
+            raise RuntimeError("boom")
+        return {"total_return": 3.0, "trades": 3}
+
+    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
+
+    should_raise["value"] = True
+    first = ev(None, [], 0)
+    first_details = ev.last_details
+    assert np.isclose(first, 3.0)
+    assert not first_details["per_asset"]["B"]["included"]
+    assert first_details["per_asset"]["B"]["reason"] == "evaluation_error"
+
+    should_raise["value"] = False
+    second = ev(None, [], 0)
+    second_details = ev.last_details
+    assert np.isclose(second, 3.0)
+    assert second_details["assets_included"] == 2
+    assert second_details["per_asset"]["B"]["included"]
+    assert CountingThreadPoolExecutor.creations == 1
+
+    ev.close()
 
 
 def test_evaluate_assets_collects_errors():
