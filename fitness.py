@@ -286,7 +286,9 @@ class MultiAssetFitnessEvaluator:
 
         if self._executor is None:
             Executor = (
-                cf.ProcessPoolExecutor if backend == "process" else cf.ThreadPoolExecutor
+                cf.ProcessPoolExecutor
+                if backend == "process"
+                else cf.ThreadPoolExecutor
             )
             executor = Executor(max_workers=max_workers)
             self._executor = executor
@@ -295,7 +297,9 @@ class MultiAssetFitnessEvaluator:
                 try:
                     self._executor_finalizer.detach()
                 except Exception:  # pragma: no cover - best effort cleanup
-                    logger.debug("Failed to detach stale executor finalizer", exc_info=True)
+                    logger.debug(
+                        "Failed to detach stale executor finalizer", exc_info=True
+                    )
             self._executor_finalizer = weakref.finalize(
                 self, MultiAssetFitnessEvaluator._shutdown_executor_static, executor
             )
@@ -495,9 +499,9 @@ class MultiAssetFitnessEvaluator:
                         reason="insufficient_coverage"
                     )
                     continue
-                future_map[executor.submit(self._evaluate_single_asset, ohlc, rules)] = (
-                    ticker
-                )
+                future_map[
+                    executor.submit(self._evaluate_single_asset, ohlc, rules)
+                ] = ticker
             for fut in cf.as_completed(future_map):
                 ticker = future_map[fut]
                 try:
@@ -509,9 +513,7 @@ class MultiAssetFitnessEvaluator:
                 except Exception as e:
                     if verbose:
                         print(f"Error evaluating asset {ticker}: {e}")
-                        tb = traceback.format_exception(
-                            e.__class__, e, e.__traceback__
-                        )
+                        tb = traceback.format_exception(e.__class__, e, e.__traceback__)
                         trace = (tb[0].strip(), tb[-1].strip())
                     else:
                         trace = None

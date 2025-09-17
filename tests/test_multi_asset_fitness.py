@@ -870,6 +870,7 @@ def test_parallel_executor_reuse_handles_exceptions(monkeypatch):
 
     ev.close()
 
+
 def test_evaluate_assets_collects_errors():
     group_data = {
         "A": pd.DataFrame({"Close": [1, 2, 3]}),
