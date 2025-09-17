@@ -10,6 +10,7 @@ import logging
 import traceback
 import types
 import warnings
+import weakref
 from collections import Counter
 from collections.abc import Mapping
 
@@ -191,6 +192,9 @@ class MultiAssetFitnessEvaluator:
         self.floor_failures = Counter()
         self._metrics_preflight_done = False
         self._metric_mapping_logged = False
+        self._executor = None
+        self._executor_signature = None
+        self._executor_finalizer = None
 
         # Validate key configuration values to catch misconfiguration early.
         assert (
@@ -219,6 +223,87 @@ class MultiAssetFitnessEvaluator:
                     "min_total_trades < min_included_assets * per_asset_min_trades; run may be infeasible.",
                     stacklevel=2,
                 )
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _shutdown_executor_static(executor) -> None:
+        """Best-effort shutdown helper that tolerates older signatures."""
+
+        if executor is None:
+            return
+        try:
+            executor.shutdown(wait=True)
+        except TypeError:
+            executor.shutdown()
+        except Exception:  # pragma: no cover - defensive logging only
+            logger.debug("Failed to shutdown executor", exc_info=True)
+
+    # ------------------------------------------------------------------
+    def _shutdown_executor(self) -> None:
+        """Shut down and detach from the cached executor if present."""
+
+        executor = self._executor
+        if executor is None:
+            return
+        self._executor = None
+        self._executor_signature = None
+        finalizer = self._executor_finalizer
+        self._executor_finalizer = None
+        if finalizer is not None:
+            try:
+                finalizer.detach()
+            except Exception:  # pragma: no cover - best effort cleanup
+                logger.debug("Failed to detach executor finalizer", exc_info=True)
+        self._shutdown_executor_static(executor)
+
+    # ------------------------------------------------------------------
+    def close(self) -> None:
+        """Public method to release the cached executor."""
+
+        self._shutdown_executor()
+
+    # ------------------------------------------------------------------
+    def shutdown(self) -> None:
+        """Alias for :meth:`close` to match executor semantics."""
+
+        self.close()
+
+    # ------------------------------------------------------------------
+    def _get_executor(self):
+        """Return the cached executor, creating it lazily when required."""
+
+        parallel_cfg = self.settings.get("parallel", {}) or {}
+        if not parallel_cfg.get("enabled"):
+            if self._executor is not None:
+                self._shutdown_executor()
+            return None
+
+        backend = parallel_cfg.get("backend", "process")
+        max_workers = parallel_cfg.get("max_workers")
+        signature = (backend, max_workers)
+        if self._executor is not None and self._executor_signature != signature:
+            self._shutdown_executor()
+
+        if self._executor is None:
+            Executor = (
+                cf.ProcessPoolExecutor
+                if backend == "process"
+                else cf.ThreadPoolExecutor
+            )
+            executor = Executor(max_workers=max_workers)
+            self._executor = executor
+            self._executor_signature = signature
+            if self._executor_finalizer is not None:
+                try:
+                    self._executor_finalizer.detach()
+                except Exception:  # pragma: no cover - best effort cleanup
+                    logger.debug(
+                        "Failed to detach stale executor finalizer", exc_info=True
+                    )
+            self._executor_finalizer = weakref.finalize(
+                self, MultiAssetFitnessEvaluator._shutdown_executor_static, executor
+            )
+        return self._executor
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -402,54 +487,44 @@ class MultiAssetFitnessEvaluator:
 
         results: dict[str, dict] = {}
         err_counts: Counter = Counter()
-        parallel_cfg = self.settings.get("parallel", {})
         verbose = bool(self.settings.get("verbose_asset_errors"))
 
-        if parallel_cfg.get("enabled"):
-            backend = parallel_cfg.get("backend", "process")
-            max_workers = parallel_cfg.get("max_workers")
-            Executor = (
-                cf.ProcessPoolExecutor
-                if backend == "process"
-                else cf.ThreadPoolExecutor
-            )
-            with Executor(max_workers=max_workers) as ex:
-                future_map = {}
-                for ticker in self._sorted_tickers:
-                    ohlc = self.group_data[ticker]
-                    if ohlc is None or ohlc.empty:
-                        results[ticker] = self._build_evaluation_record(
-                            reason="insufficient_coverage"
-                        )
-                        continue
-                    future_map[ex.submit(self._evaluate_single_asset, ohlc, rules)] = (
-                        ticker
+        executor = self._get_executor()
+        if executor is not None:
+            future_map = {}
+            for ticker in self._sorted_tickers:
+                ohlc = self.group_data[ticker]
+                if ohlc is None or ohlc.empty:
+                    results[ticker] = self._build_evaluation_record(
+                        reason="insufficient_coverage"
                     )
-                for fut in cf.as_completed(future_map):
-                    ticker = future_map[fut]
-                    try:
-                        raw_stats = fut.result()
-                        stats, reason, detail = self._prepare_metrics_record(raw_stats)
-                        results[ticker] = self._build_evaluation_record(
-                            stats, reason=reason, detail=detail
-                        )
-                    except Exception as e:
-                        if verbose:
-                            print(f"Error evaluating asset {ticker}: {e}")
-                            tb = traceback.format_exception(
-                                e.__class__, e, e.__traceback__
-                            )
-                            trace = (tb[0].strip(), tb[-1].strip())
-                        else:
-                            trace = None
-                        results[ticker] = self._build_evaluation_record(
-                            reason="evaluation_error",
-                            detail=repr(e),
-                            trace=trace,
-                        )
-                        ind = getattr(e, "indicator", None)
-                        if ind:
-                            err_counts[ind] += 1
+                    continue
+                future_map[
+                    executor.submit(self._evaluate_single_asset, ohlc, rules)
+                ] = ticker
+            for fut in cf.as_completed(future_map):
+                ticker = future_map[fut]
+                try:
+                    raw_stats = fut.result()
+                    stats, reason, detail = self._prepare_metrics_record(raw_stats)
+                    results[ticker] = self._build_evaluation_record(
+                        stats, reason=reason, detail=detail
+                    )
+                except Exception as e:
+                    if verbose:
+                        print(f"Error evaluating asset {ticker}: {e}")
+                        tb = traceback.format_exception(e.__class__, e, e.__traceback__)
+                        trace = (tb[0].strip(), tb[-1].strip())
+                    else:
+                        trace = None
+                    results[ticker] = self._build_evaluation_record(
+                        reason="evaluation_error",
+                        detail=repr(e),
+                        trace=trace,
+                    )
+                    ind = getattr(e, "indicator", None)
+                    if ind:
+                        err_counts[ind] += 1
         else:
             for ticker in self._sorted_tickers:
                 ohlc = self.group_data[ticker]
