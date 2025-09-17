@@ -48,7 +48,9 @@ def validate_final_strategy_config(cfg: dict[str, Any] | None = None) -> None:
             raise ConfigurationError("INCLUDE_CLASSES entries must be strings")
         normalized = cls.strip()
         if not normalized:
-            raise ConfigurationError("INCLUDE_CLASSES entries must not be empty strings")
+            raise ConfigurationError(
+                "INCLUDE_CLASSES entries must not be empty strings"
+            )
         if normalized.lower() not in known_lower:
             include_unknown.append(normalized)
     if include_unknown:
@@ -99,22 +101,22 @@ def validate_final_strategy_config(cfg: dict[str, Any] | None = None) -> None:
     if not (0 < max_cap <= 1):
         raise ConfigurationError("MAX_WEIGHT_CAP must be in the (0, 1] interval")
     if not (0 <= min_floor < max_cap):
-        raise ConfigurationError("MIN_WEIGHT_FLOOR must satisfy 0 <= floor < MAX_WEIGHT_CAP")
+        raise ConfigurationError(
+            "MIN_WEIGHT_FLOOR must satisfy 0 <= floor < MAX_WEIGHT_CAP"
+        )
 
     if cfg.get("USE_RECENCY_WEIGHTING") and cfg.get("FOLD_DECAY_RATE", 0.0) <= 0:
-        raise ConfigurationError("FOLD_DECAY_RATE must be > 0 when recency weighting is enabled")
+        raise ConfigurationError(
+            "FOLD_DECAY_RATE must be > 0 when recency weighting is enabled"
+        )
 
     param_sensitivity = float(cfg.get("PARAM_SENSITIVITY_THRESHOLD", 0.0))
     if param_sensitivity < 0 or param_sensitivity > 1:
-        raise ConfigurationError(
-            "PARAM_SENSITIVITY_THRESHOLD must be between 0 and 1"
-        )
+        raise ConfigurationError("PARAM_SENSITIVITY_THRESHOLD must be between 0 and 1")
 
     weight_sensitivity = float(cfg.get("WEIGHT_SENSITIVITY_THRESHOLD", 0.0))
     if weight_sensitivity < 0 or weight_sensitivity > 1:
-        raise ConfigurationError(
-            "WEIGHT_SENSITIVITY_THRESHOLD must be between 0 and 1"
-        )
+        raise ConfigurationError("WEIGHT_SENSITIVITY_THRESHOLD must be between 0 and 1")
 
     ratio_threshold = cfg.get("WEIGHT_SENSITIVITY_RATIO_THRESHOLD")
     if ratio_threshold is not None:
@@ -126,7 +128,9 @@ def validate_final_strategy_config(cfg: dict[str, Any] | None = None) -> None:
 
     decimals_cfg = cfg.get("PARAM_VALUE_DECIMALS", {"default": 3})
     if not isinstance(decimals_cfg, dict):
-        raise ConfigurationError("PARAM_VALUE_DECIMALS must be a mapping of parameter names to decimal precision")
+        raise ConfigurationError(
+            "PARAM_VALUE_DECIMALS must be a mapping of parameter names to decimal precision"
+        )
     for key, value in decimals_cfg.items():
         try:
             decimals = int(value)
@@ -135,9 +139,7 @@ def validate_final_strategy_config(cfg: dict[str, Any] | None = None) -> None:
                 f"PARAM_VALUE_DECIMALS[{key!r}] must be an integer"
             ) from exc
         if decimals < 0:
-            raise ConfigurationError(
-                f"PARAM_VALUE_DECIMALS[{key!r}] must be >= 0"
-            )
+            raise ConfigurationError(f"PARAM_VALUE_DECIMALS[{key!r}] must be >= 0")
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -637,6 +639,8 @@ CHAMPION_SELECTION_SETTINGS = {
     # Probability of mutating each gene on a clone
     "clone_mutation_rate": 0.20,
 }
+
+
 def _validate_combination_logic(rules: dict) -> None:
     entry = rules.get("entry_rules", {})
     conditions = [c for c in entry.get("conditions", []) if c.get("is_active", True)]

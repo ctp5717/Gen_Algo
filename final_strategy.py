@@ -8,7 +8,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple, Union, cast
 
 import config
 from run_metadata import merge_run_metadata
@@ -20,8 +20,31 @@ from schemas import (
     load_wf_summary,
 )
 
-
 LOGGER = logging.getLogger(__name__)
+
+
+AssetPayload = Dict[str, Dict[str, Union[str, float]]]
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    """Best-effort conversion of inputs to an integer for configuration values."""
+
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        try:
+            return int(stripped)
+        except ValueError:
+            try:
+                return int(float(stripped))
+            except ValueError:
+                return default
+    return default
 
 
 @dataclass
@@ -101,7 +124,9 @@ def _describe_weighting_scheme(cfg: Dict[str, object]) -> str:
             extras.append(f"shrink {shrink:.2f}")
     else:
         overrides = cfg.get("ASSET_WEIGHTS_OVERRIDE", {}) or {}
-        extras.append(f"{len(overrides)} override weight{'s' if len(overrides) != 1 else ''}")
+        extras.append(
+            f"{len(overrides)} override weight{'s' if len(overrides) != 1 else ''}"
+        )
     if extras:
         detail = f"{detail} ({', '.join(extras)})"
     return f"{scheme} — {detail}"
@@ -169,12 +194,12 @@ def _ascii_box(values: List[Tuple[float, float]]) -> str:
     q3 = _weighted_quantile(values, 0.75)
     vmin = min(v for v, _ in values)
     vmax = max(v for v, _ in values)
-    return (
-        f"{vmin:>7.3f} ┤{q1:>7.3f} ┼{q2:>7.3f} ┼{q3:>7.3f} ┤ {vmax:>7.3f}"
-    )
+    return f"{vmin:>7.3f} ┤{q1:>7.3f} ┼{q2:>7.3f} ┼{q3:>7.3f} ┤ {vmax:>7.3f}"
 
 
-def _kmeans_two_clusters(values: List[Tuple[float, float]], max_iter: int = 32) -> List[List[int]]:
+def _kmeans_two_clusters(
+    values: List[Tuple[float, float]], max_iter: int = 32
+) -> List[List[int]]:
     raw = [v for v, _ in values]
     if len(set(raw)) < 2:
         return [list(range(len(values))), []]
@@ -378,7 +403,9 @@ def _aggregate_parameters(
         total = sum(enum_weights.values())
         if total <= 0:
             continue
-        best_value = max(enum_weights.items(), key=lambda item: (item[1], str(item[0])))[0]
+        best_value = max(
+            enum_weights.items(), key=lambda item: (item[1], str(item[0]))
+        )[0]
         output[name] = best_value
         summaries[name] = ParameterSummary(
             name=name,
@@ -456,16 +483,11 @@ def _bounded_simplex_projection(
 
 
 def _compute_asset_allocation(
-    sre_assets: Dict[str, Dict[str, float]],
+    sre_assets: Dict[str, Dict[str, Any]],
     per_asset: WalkForwardPerAssetV1,
     fold_weights: Dict[int, float],
     cfg: Dict[str, object],
-) -> Tuple[
-    Dict[str, Dict[str, float]],
-    Dict[str, AssetDerivation],
-    List[str],
-    List[str],
-]:
+) -> Tuple[AssetPayload, Dict[str, AssetDerivation], List[str], List[str]]:
     include_raw = cfg.get("INCLUDE_CLASSES", [])
     include_classes = {
         str(cls).strip().lower()
@@ -473,7 +495,7 @@ def _compute_asset_allocation(
         if isinstance(cls, str) and cls.strip()
     }
     min_consistency = float(cfg.get("MIN_ASSET_CONSISTENCY", 0.0))
-    selected: Dict[str, Dict[str, float]] = {}
+    selected: AssetPayload = {}
     derivation: Dict[str, AssetDerivation] = {}
     exclusions: List[str] = []
     allocation_notes: List[str] = []
@@ -517,8 +539,8 @@ def _compute_asset_allocation(
             iqr = _weighted_std(ordered)
         volatility = float(iqr if iqr > 0 else eps)
         selected[ticker]["volatility"] = volatility
-        performance = asset["performance"]
-        consistency = asset["consistency"]
+        performance = float(asset["performance"])
+        consistency = float(asset["consistency"])
         if scheme == "equal":
             raw = 1.0
         elif scheme == "proportional":
@@ -582,7 +604,9 @@ def _compute_asset_allocation(
                 base = [1.0 for _ in selected]
             else:
                 base = [raw_weights[t] for t in selected]
-            projected = _bounded_simplex_projection(base, effective_lower, effective_upper)
+            projected = _bounded_simplex_projection(
+                base, effective_lower, effective_upper
+            )
             for ticker, weight in zip(selected.keys(), projected):
                 weights[ticker] = weight
         shrink = float(cfg.get("SHRINK_TO_EQUAL", 0.0))
@@ -597,7 +621,7 @@ def _compute_asset_allocation(
                     weights[ticker] /= total
     for ticker, asset in selected.items():
         asset["weight"] = float(weights.get(ticker, 0.0))
-    total_weight = sum(asset["weight"] for asset in selected.values())
+    total_weight = sum(float(asset["weight"]) for asset in selected.values())
     if abs(total_weight - 1.0) > 1e-9:
         raise FinalStrategyError("Asset weights must sum to 1.0 within tolerance")
     return selected, derivation, exclusions, allocation_notes
@@ -606,7 +630,10 @@ def _compute_asset_allocation(
 def _format_asset_derivation(derivation: Dict[str, AssetDerivation]) -> str:
     if not derivation:
         return ""
-    lines = ["| Ticker | Raw Weight | Performance | Consistency | Volatility |", "| --- | ---: | ---: | ---: | ---: |"]
+    lines = [
+        "| Ticker | Raw Weight | Performance | Consistency | Volatility |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
     for ticker, detail in derivation.items():
         lines.append(
             f"| {ticker} | {detail.raw_weight:.6f} | {detail.performance:.3f} | "
@@ -635,7 +662,8 @@ def _notes_from_summaries(
         )
     if zero_median:
         notes.append(
-            "Some parameters have median ≈ 0; treat infinite RCV as unstable unless domain logic enforces zero."
+            "Some parameters have median ≈ 0; "
+            "treat infinite RCV as unstable unless domain logic enforces zero."
         )
     return notes
 
@@ -654,13 +682,11 @@ def _render_parameters_table(summaries: Dict[str, ParameterSummary]) -> str:
             value_str = f"{value:.{decimals}f}"
         else:
             value_str = str(value)
-        lines.append(
-            f"| {name} | {value_str} | {summary.stability} | {dist} |"
-        )
+        lines.append(f"| {name} | {value_str} | {summary.stability} | {dist} |")
     return "\n".join(lines)
 
 
-def _render_asset_table(assets: Dict[str, Dict[str, float]]) -> str:
+def _render_asset_table(assets: AssetPayload) -> str:
     lines = [
         "| Ticker | Class | Performance | Consistency | Volatility | Weight |",
         "| --- | --- | ---: | ---: | ---: | ---: |",
@@ -679,12 +705,12 @@ def _render_asset_table(assets: Dict[str, Dict[str, float]]) -> str:
 
 def _write_markdown(
     path: Path,
-    confidence: Dict[str, object],
+    confidence: Dict[str, Any],
     fold_warning: bool,
     use_recency: bool,
     cfg: Dict[str, object],
     summaries: Dict[str, ParameterSummary],
-    assets: Dict[str, Dict[str, float]],
+    assets: AssetPayload,
     derivation: Dict[str, AssetDerivation],
     exclusions: List[str],
     notes: List[str],
@@ -693,7 +719,11 @@ def _write_markdown(
 ) -> None:
     overview_lines = [
         f"Confidence: {confidence.get('category', 'Unknown')} ({confidence.get('score', 'N/A')})",
-        "Fold selection: Elite/Viable" if not fold_warning else "Fold selection fallback: all folds",
+        (
+            "Fold selection: Elite/Viable"
+            if not fold_warning
+            else "Fold selection fallback: all folds"
+        ),
         "Recency weighting: enabled" if use_recency else "Recency weighting: disabled",
     ]
     overview_lines.append(f"Weighting scheme: {weighting_description}")
@@ -701,21 +731,25 @@ def _write_markdown(
         overview_lines.append(
             "Fold weighting note: validation fitness was non-positive; equal weights applied."
         )
-    if cfg.get("SHOW_RECENCY_HALFLIFE"):
-        gamma = float(cfg.get("FOLD_DECAY_RATE", 0.0))
-        if gamma > 0:
-            half_life = math.log(2) / gamma
-            if use_recency:
-                if default_to_uniform:
-                    overview_lines.append(
-                        f"Recency half-life: {half_life:.2f} folds (base fitness ≤ 0; decay inactive)."
-                    )
+        if cfg.get("SHOW_RECENCY_HALFLIFE"):
+            gamma = float(cfg.get("FOLD_DECAY_RATE", 0.0))
+            if gamma > 0:
+                half_life = math.log(2) / gamma
+                if use_recency:
+                    if default_to_uniform:
+                        overview_lines.append(
+                            f"Recency half-life: {half_life:.2f} folds "
+                            "(base fitness ≤ 0; decay inactive)."
+                        )
+                    else:
+                        overview_lines.append(
+                            f"Recency half-life: {half_life:.2f} folds"
+                        )
                 else:
-                    overview_lines.append(f"Recency half-life: {half_life:.2f} folds")
-            else:
-                overview_lines.append(
-                    f"Recency half-life configured at {half_life:.2f} folds (recency weighting disabled)."
-                )
+                    overview_lines.append(
+                        f"Recency half-life configured at {half_life:.2f} folds "
+                        "(recency weighting disabled)."
+                    )
     notes_text = _compose_notes(notes)
     if not notes_text:
         notes_text = "No additional notes."
@@ -750,13 +784,13 @@ def _write_markdown(
 
 def _persist_strategy_artifacts(
     run_dir: Path,
-    payload: Dict[str, object],
-    confidence: Dict[str, object],
+    payload: Dict[str, Any],
+    confidence: Dict[str, Any],
     cfg: Dict[str, object],
     fold_warning: bool,
     use_recency: bool,
     summaries: Dict[str, ParameterSummary],
-    assets: Dict[str, Dict[str, float]],
+    assets: AssetPayload,
     derivation: Dict[str, AssetDerivation],
     exclusions: List[str],
     notes: List[str],
@@ -789,11 +823,13 @@ def _persist_strategy_artifacts(
     )
 
 
-def _load_recommendation(meta_path: Path) -> Dict[str, object]:
+def _load_recommendation(meta_path: Path) -> Dict[str, Any]:
     try:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise FinalStrategyError("run_metadata.json not found; run SRE before FSS") from exc
+        raise FinalStrategyError(
+            "run_metadata.json not found; run SRE before FSS"
+        ) from exc
     except json.JSONDecodeError as exc:
         raise FinalStrategyError("run_metadata.json is not valid JSON") from exc
     recommendation = payload.get("recommendation")
@@ -807,10 +843,10 @@ def _load_recommendation(meta_path: Path) -> Dict[str, object]:
 def _jackknife_sensitivity(
     folds: List[Fold],
     cfg: Dict[str, object],
-    sre_assets: Dict[str, Dict[str, float]],
+    sre_assets: Dict[str, Dict[str, Any]],
     per_asset: WalkForwardPerAssetV1,
     summaries: Dict[str, ParameterSummary],
-    assets: Dict[str, Dict[str, float]],
+    assets: AssetPayload,
 ) -> List[str]:
     if len(folds) <= 2 or not assets:
         return []
@@ -822,7 +858,9 @@ def _jackknife_sensitivity(
         if weight_ratio_threshold_raw is not None
         else None
     )
-    param_ranges: Dict[str, List[float]] = {k: [] for k, v in summaries.items() if v.is_numeric}
+    param_ranges: Dict[str, List[float]] = {
+        k: [] for k, v in summaries.items() if v.is_numeric
+    }
     weight_ranges: Dict[str, List[float]] = {k: [] for k in assets.keys()}
     for skip in range(len(folds)):
         subset = [f for idx, f in enumerate(folds) if idx != skip]
@@ -859,8 +897,9 @@ def _jackknife_sensitivity(
             ratio_display = "inf" if not math.isfinite(ratio) else f"{ratio:.3f}"
             notes.append(
                 "Parameter "
-                f"{name} is sensitive to fold selection: range {spread:.3f} / base {base_display} = "
-                f"{ratio_display} > {param_threshold:.2f} threshold."
+                f"{name} is sensitive to fold selection: range {spread:.3f} / "
+                f"base {base_display} = {ratio_display} > "
+                f"{param_threshold:.2f} threshold."
             )
     for ticker, collected in weight_ranges.items():
         if len(collected) < 2:
@@ -882,13 +921,14 @@ def _jackknife_sensitivity(
             threshold_text = " and ".join(thresholds)
             notes.append(
                 "Weight for "
-                f"{ticker} varies by range {spread:.3f} (base {base_weight:.3f}, ratio {ratio_display}) > "
+                f"{ticker} varies by range {spread:.3f} "
+                f"(base {base_weight:.3f}, ratio {ratio_display}) > "
                 f"{threshold_text} under jackknife analysis."
             )
     return notes
 
 
-def generate_final_strategy(run_context: Dict[str, object]) -> Dict[str, object]:
+def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
     cfg = config.FINAL_STRATEGY
     config.validate_final_strategy_config(cfg)
     weighting_description = _describe_weighting_scheme(cfg)
@@ -898,17 +938,28 @@ def generate_final_strategy(run_context: Dict[str, object]) -> Dict[str, object]
     summary_path = wf_dir / "walk_forward_summary.json"
     per_asset_path = wf_dir / "walk_forward_per_asset.csv"
     if not summary_path.exists():
-        raise FinalStrategyError("walk_forward_summary.json not found; run walk_forward.py first")
+        raise FinalStrategyError(
+            "walk_forward_summary.json not found; run walk_forward.py first"
+        )
     if not per_asset_path.exists():
-        raise FinalStrategyError("walk_forward_per_asset.csv not found; run walk_forward.py first")
+        raise FinalStrategyError(
+            "walk_forward_per_asset.csv not found; run walk_forward.py first"
+        )
     summary = load_wf_summary(summary_path)
-    _ensure_schema_version(summary.metadata.schema_version, "1.0", "walk_forward_summary.json")
+    _ensure_schema_version(
+        summary.metadata.schema_version, "1.0", "walk_forward_summary.json"
+    )
     per_asset, _ = load_wf_per_asset(per_asset_path)
     recommendation = _load_recommendation(run_dir / "run_metadata.json")
-    confidence = recommendation.get("confidence", {})
-    score = int(confidence.get("score", 0))
+    confidence_raw = recommendation.get("confidence", {})
+    confidence: Dict[str, Any]
+    if isinstance(confidence_raw, dict):
+        confidence = cast(Dict[str, Any], confidence_raw)
+    else:
+        confidence = {}
+    score = _coerce_int(confidence.get("score", 0))
     category = str(confidence.get("category", "")).strip()
-    min_conf = int(cfg.get("MIN_CONFIDENCE_FOR_FINAL", 0))
+    min_conf = _coerce_int(cfg.get("MIN_CONFIDENCE_FOR_FINAL", 0))
     gating = score < min_conf or category.lower() == "low"
     if gating:
         note = (
@@ -956,8 +1007,9 @@ def generate_final_strategy(run_context: Dict[str, object]) -> Dict[str, object]
     )
     if not assets:
         note = (
-            "No assets satisfied inclusion rules. Expand INCLUDE_CLASSES, relax "
-            "MIN_ASSET_CONSISTENCY, or revisit SRE exclusions before generating the final strategy."
+            "No assets satisfied inclusion rules. Expand INCLUDE_CLASSES, "
+            "relax MIN_ASSET_CONSISTENCY, or revisit SRE exclusions before "
+            "generating the final strategy."
         )
         notes = [note]
         payload = {
@@ -987,9 +1039,12 @@ def generate_final_strategy(run_context: Dict[str, object]) -> Dict[str, object]
     notes.extend(allocation_notes)
     if fallback:
         notes.append(
-            "No Elite/Viable folds available; synthesised strategy uses all folds with equal base weights."
+            "No Elite/Viable folds available; synthesised strategy uses all "
+            "folds with equal base weights."
         )
-    sensitivity = _jackknife_sensitivity(folds, cfg, sre_assets, per_asset, summaries, assets)
+    sensitivity = _jackknife_sensitivity(
+        folds, cfg, sre_assets, per_asset, summaries, assets
+    )
     notes.extend(sensitivity)
     notes = [n for n in notes if n]
     notes_text = _compose_notes(notes)

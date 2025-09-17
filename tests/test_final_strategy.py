@@ -9,7 +9,13 @@ import pytest
 import config
 import final_strategy
 from final_strategy import WeightedFold
-from schemas import Fold, Metadata, PerAssetRow, WalkForwardPerAssetV1, WalkForwardSummaryV1
+from schemas import (
+    Fold,
+    Metadata,
+    PerAssetRow,
+    WalkForwardPerAssetV1,
+    WalkForwardSummaryV1,
+)
 
 
 @pytest.fixture
@@ -145,7 +151,9 @@ def test_asset_weighting_override_mismatch(cfg_copy):
         rows=[PerAssetRow(fold=0, ticker="AAA", score=1.0, trades=5, included=True)]
     )
     with pytest.raises(final_strategy.FinalStrategyError):
-        final_strategy._compute_asset_allocation(sre_assets, per_asset, {0: 1.0}, cfg_copy)
+        final_strategy._compute_asset_allocation(
+            sre_assets, per_asset, {0: 1.0}, cfg_copy
+        )
 
 
 def test_asset_weighting_relaxes_floor(cfg_copy):
@@ -196,9 +204,24 @@ def test_jackknife_notes_include_thresholds(cfg_copy):
     cfg_copy["MIN_WEIGHT_FLOOR"] = 0.0
     cfg_copy["SHRINK_TO_EQUAL"] = 0.0
     folds = [
-        Fold(fold_id=0, validation_fitness=0.2, params={"alpha": 1.0}, champion_status="Elite"),
-        Fold(fold_id=1, validation_fitness=0.9, params={"alpha": 10.0}, champion_status="Elite"),
-        Fold(fold_id=2, validation_fitness=0.8, params={"alpha": 20.0}, champion_status="Elite"),
+        Fold(
+            fold_id=0,
+            validation_fitness=0.2,
+            params={"alpha": 1.0},
+            champion_status="Elite",
+        ),
+        Fold(
+            fold_id=1,
+            validation_fitness=0.9,
+            params={"alpha": 10.0},
+            champion_status="Elite",
+        ),
+        Fold(
+            fold_id=2,
+            validation_fitness=0.8,
+            params={"alpha": 20.0},
+            champion_status="Elite",
+        ),
     ]
     weighted_folds, mapping = final_strategy._compute_fold_weights(folds, cfg_copy)
     _, summaries = final_strategy._aggregate_parameters(weighted_folds, cfg_copy)
@@ -243,9 +266,24 @@ def test_weight_sensitivity_ratio_guard(cfg_copy):
     cfg_copy["MIN_WEIGHT_FLOOR"] = 0.0
     cfg_copy["SHRINK_TO_EQUAL"] = 0.0
     folds = [
-        Fold(fold_id=0, validation_fitness=1.0, params={"alpha": 1.0}, champion_status="Elite"),
-        Fold(fold_id=1, validation_fitness=0.8, params={"alpha": 1.2}, champion_status="Elite"),
-        Fold(fold_id=2, validation_fitness=0.7, params={"alpha": 1.4}, champion_status="Elite"),
+        Fold(
+            fold_id=0,
+            validation_fitness=1.0,
+            params={"alpha": 1.0},
+            champion_status="Elite",
+        ),
+        Fold(
+            fold_id=1,
+            validation_fitness=0.8,
+            params={"alpha": 1.2},
+            champion_status="Elite",
+        ),
+        Fold(
+            fold_id=2,
+            validation_fitness=0.7,
+            params={"alpha": 1.4},
+            champion_status="Elite",
+        ),
     ]
     weighted_folds, mapping = final_strategy._compute_fold_weights(folds, cfg_copy)
     _, summaries = final_strategy._aggregate_parameters(weighted_folds, cfg_copy)
@@ -292,7 +330,11 @@ def test_confidence_gate_blocks_strategy(tmp_path):
     wf = run_dir / "walk_forward"
     wf.mkdir()
     summary = {
-        "metadata": {"schema_version": "1.0", "num_folds": 1, "asset_universe": ["AAA"]},
+        "metadata": {
+            "schema_version": "1.0",
+            "num_folds": 1,
+            "asset_universe": ["AAA"],
+        },
         "folds": [
             {
                 "fold_id": 0,
@@ -324,7 +366,11 @@ def _write_integration_files(base: Path) -> None:
     wf = base / "walk_forward"
     wf.mkdir()
     summary = {
-        "metadata": {"schema_version": "1.0", "num_folds": 3, "asset_universe": ["AAA", "BBB", "CCC"]},
+        "metadata": {
+            "schema_version": "1.0",
+            "num_folds": 3,
+            "asset_universe": ["AAA", "BBB", "CCC"],
+        },
         "folds": [
             {
                 "fold_id": 0,
