@@ -7,8 +7,8 @@ This guide walks through environment setup, basic usage, and how the main module
 ## Installation
 
 ```bash
-python -V   # Python 3.13+
-pip install -r requirements.txt -r requirements-dev.txt
+python -V   # Python 3.12 or 3.13
+python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ## Running an Optimization

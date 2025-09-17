@@ -128,8 +128,8 @@ Metric mappings are logged once per run (e.g. `sortino→sortino_ratio`) and the
 ## 3) Environment & setup
 
 ```bash
-python -V   # Use Python 3.13+
-pip install -r requirements.txt -r requirements-dev.txt
+python -V   # Use Python 3.12 or 3.13
+python -m pip install -r requirements.txt -r requirements-dev.txt
 
 # Optional heavy deps for real backtests (tests stub them if missing)
 # (already in requirements.txt): vectorbt, pandas-ta
@@ -142,6 +142,8 @@ export BINANCE_API_SECRET=...
 # Reproducibility:
 export GA_SEED=42  # overrides config.SEED
 ```
+
+The CI matrix exercises Linux runners on Python 3.12 and 3.13; keep code and dependencies compatible with both.
 
 ### Using the real `vectorbt` (important)
 This repo ships a lightweight `vbt_stub.py` for tests. The real `vectorbt` package is used by default; the stub only takes effect when explicitly injected.
@@ -326,7 +328,7 @@ The tuning module also supports a deeper GA candidate for exhaustive searches:
 Add it to `config.HYPERPARAMETER_SEARCH_SPACE` when exploring larger populations.
 
 CI expectations:
-- Linux, Python 3.13, `pytest -q -n auto` with coverage.
+- Linux matrix (Python 3.12 & 3.13), `pytest -q -n auto` with coverage.
 - Lint via pre-commit; basic security scan via CodeQL & Bandit.
 - No secrets in tree.
 
