@@ -55,6 +55,72 @@ def _make_evaluator(settings=None, stats_list=None):
     return evaluator
 
 
+def _setup_single_asset_evaluator(monkeypatch, collect=None):
+    """Prepare an evaluator for single-asset equity curve tests."""
+
+    index = pd.date_range("2024-01-01", periods=3, freq="D")
+    ohlc = pd.DataFrame({"Close": [1.0, 1.1, 1.2]}, index=index)
+    equity = pd.Series([100.0, 101.0, 102.0], index=index, dtype=float)
+    calls = {"value": 0}
+
+    class DummyPortfolio:
+        def __init__(self):
+            self.trades = types.SimpleNamespace(count=lambda: 1)
+
+        @classmethod
+        def from_signals(cls, *args, **kwargs):
+            return cls()
+
+        def value(self):
+            calls["value"] += 1
+            return equity
+
+        def stats(self, *args, **kwargs):
+            return {}
+
+    monkeypatch.setattr(fitness.vbt, "Portfolio", DummyPortfolio)
+    monkeypatch.setattr(
+        fitness.metrics_contract, "assert_metric_aliases", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        fitness.metrics_contract, "_provider_signature", lambda *a, **k: "dummy"
+    )
+
+    def fake_metrics(portfolio):
+        return (
+            {
+                "sortino": 0.5,
+                "profit_factor": 1.2,
+                "max_drawdown": 10.0,
+                "total_return": 0.2,
+            },
+            {},
+            [],
+        )
+
+    monkeypatch.setattr(fitness.metrics_contract, "evaluate_metrics", fake_metrics)
+
+    def fake_process(ohlc_df, rules, collect_counts=False):
+        entries = pd.Series(
+            [True] + [False] * (len(ohlc_df.index) - 1),
+            index=ohlc_df.index,
+            dtype=bool,
+        )
+        counts = {"entries": int(entries.sum())}
+        return (entries, counts) if collect_counts else entries
+
+    monkeypatch.setattr(fitness.engine, "process_strategy_rules", fake_process)
+
+    group_data = {"A": ohlc}
+    if collect is None:
+        evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {})
+    else:
+        evaluator = fitness.MultiAssetFitnessEvaluator(
+            group_data, {}, {}, {"collect_equity_curve": collect}
+        )
+    return evaluator, ohlc, equity, calls
+
+
 def test_dispersion_math_sanity():
     vals = np.array([1.6, 1.0, 0.4], dtype=float)
     w = np.array([1 / 3, 1 / 3, 1 / 3], dtype=float)
@@ -603,6 +669,23 @@ def test_ga_and_tuner_consistency(monkeypatch):
     assert np.isclose(fit, score_val)
 
 
+def test_equity_curve_not_collected_by_default(monkeypatch):
+    evaluator, ohlc, _, calls = _setup_single_asset_evaluator(monkeypatch)
+    stats = evaluator._evaluate_single_asset(ohlc, {})
+    assert calls["value"] == 0
+    assert isinstance(stats["equity_curve"], pd.Series)
+    assert stats["equity_curve"].empty
+
+
+def test_equity_curve_collection_opt_in(monkeypatch):
+    evaluator, ohlc, equity, calls = _setup_single_asset_evaluator(
+        monkeypatch, collect=True
+    )
+    stats = evaluator._evaluate_single_asset(ohlc, {})
+    assert calls["value"] == 1
+    pd.testing.assert_series_equal(stats["equity_curve"], equity)
+
+
 def test_handles_asset_error_gracefully():
     """Evaluator should continue even if one asset raises an error."""
     group_data = {
@@ -968,6 +1051,7 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
 
     class DummyEval:
         def __init__(self, group, rules, gene_map, settings):
+            assert settings.get("collect_equity_curve") is True
             self.last_details = {
                 "per_asset": {
                     "A": {
