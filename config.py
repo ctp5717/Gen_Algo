@@ -7,12 +7,139 @@ Configuration File for the GA Trading Framework
 
 import math
 import os
+import warnings
 from datetime import datetime
 from typing import Any
 
 from dateutil.relativedelta import relativedelta
 
 from strategy_rules import STRATEGY_RULES
+
+
+class ConfigurationError(ValueError):
+    """Raised when configuration options are invalid."""
+
+
+KNOWN_ASSET_CLASSES = {
+    "Stars",
+    "Stalwarts",
+    "Gambles",
+    "Borderline",
+    "Drags",
+    "Insufficient Data",
+}
+
+
+def validate_final_strategy_config(cfg: dict[str, Any] | None = None) -> None:
+    """Validate final strategy synthesis configuration values."""
+
+    cfg = cfg or globals().get("FINAL_STRATEGY", {})
+    if not isinstance(cfg, dict):
+        raise ConfigurationError("FINAL_STRATEGY must be a dictionary")
+
+    include_classes = cfg.get("INCLUDE_CLASSES", [])
+    if not isinstance(include_classes, (list, tuple, set)):
+        raise ConfigurationError("INCLUDE_CLASSES must be a sequence of class names")
+    include_classes_list = list(include_classes)
+    include_unknown: list[str] = []
+    known_lower = {cls.lower() for cls in KNOWN_ASSET_CLASSES}
+    for cls in include_classes_list:
+        if not isinstance(cls, str):
+            raise ConfigurationError("INCLUDE_CLASSES entries must be strings")
+        normalized = cls.strip()
+        if not normalized:
+            raise ConfigurationError(
+                "INCLUDE_CLASSES entries must not be empty strings"
+            )
+        if normalized.lower() not in known_lower:
+            include_unknown.append(normalized)
+    if include_unknown:
+        warnings.warn(
+            "Unknown FINAL_STRATEGY INCLUDE_CLASSES entries: "
+            + ", ".join(sorted(set(include_unknown))),
+            UserWarning,
+            stacklevel=2,
+        )
+
+    watch = float(cfg.get("PARAM_RCV_WATCHLIST", 0.0))
+    unstable = float(cfg.get("PARAM_RCV_UNSTABLE", 0.0))
+    if watch >= unstable:
+        raise ConfigurationError("PARAM_RCV_WATCHLIST must be < PARAM_RCV_UNSTABLE")
+
+    scheme = cfg.get("WEIGHTING_SCHEME", "risk_adjusted")
+    allowed_schemes = {"equal", "proportional", "risk_adjusted", "override"}
+    if scheme not in allowed_schemes:
+        raise ConfigurationError(
+            "WEIGHTING_SCHEME must be one of: equal | proportional | risk_adjusted | override"
+        )
+
+    overrides = cfg.get("ASSET_WEIGHTS_OVERRIDE", {})
+    if scheme == "override":
+        if not overrides:
+            raise ConfigurationError(
+                "ASSET_WEIGHTS_OVERRIDE must define weights when WEIGHTING_SCHEME is 'override'"
+            )
+        total = sum(float(v) for v in overrides.values())
+        if total <= 0 or not math.isclose(total, 1.0, abs_tol=1e-9):
+            raise ConfigurationError(
+                "ASSET_WEIGHTS_OVERRIDE weights must sum to 1.0 when override scheme is used"
+            )
+        if any(float(v) < 0 for v in overrides.values()):
+            raise ConfigurationError("Override weights must be non-negative")
+    else:
+        if overrides and any(float(v) for v in overrides.values()):
+            raise ConfigurationError(
+                "ASSET_WEIGHTS_OVERRIDE is only respected when WEIGHTING_SCHEME=='override'"
+            )
+
+    shrink = float(cfg.get("SHRINK_TO_EQUAL", 0.0))
+    if shrink < 0 or shrink > 1:
+        raise ConfigurationError("SHRINK_TO_EQUAL must be between 0 and 1")
+
+    max_cap = float(cfg.get("MAX_WEIGHT_CAP", 1.0))
+    min_floor = float(cfg.get("MIN_WEIGHT_FLOOR", 0.0))
+    if not (0 < max_cap <= 1):
+        raise ConfigurationError("MAX_WEIGHT_CAP must be in the (0, 1] interval")
+    if not (0 <= min_floor < max_cap):
+        raise ConfigurationError(
+            "MIN_WEIGHT_FLOOR must satisfy 0 <= floor < MAX_WEIGHT_CAP"
+        )
+
+    if cfg.get("USE_RECENCY_WEIGHTING") and cfg.get("FOLD_DECAY_RATE", 0.0) <= 0:
+        raise ConfigurationError(
+            "FOLD_DECAY_RATE must be > 0 when recency weighting is enabled"
+        )
+
+    param_sensitivity = float(cfg.get("PARAM_SENSITIVITY_THRESHOLD", 0.0))
+    if param_sensitivity < 0 or param_sensitivity > 1:
+        raise ConfigurationError("PARAM_SENSITIVITY_THRESHOLD must be between 0 and 1")
+
+    weight_sensitivity = float(cfg.get("WEIGHT_SENSITIVITY_THRESHOLD", 0.0))
+    if weight_sensitivity < 0 or weight_sensitivity > 1:
+        raise ConfigurationError("WEIGHT_SENSITIVITY_THRESHOLD must be between 0 and 1")
+
+    ratio_threshold = cfg.get("WEIGHT_SENSITIVITY_RATIO_THRESHOLD")
+    if ratio_threshold is not None:
+        ratio_val = float(ratio_threshold)
+        if ratio_val < 0:
+            raise ConfigurationError(
+                "WEIGHT_SENSITIVITY_RATIO_THRESHOLD must be >= 0 when provided"
+            )
+
+    decimals_cfg = cfg.get("PARAM_VALUE_DECIMALS", {"default": 3})
+    if not isinstance(decimals_cfg, dict):
+        raise ConfigurationError(
+            "PARAM_VALUE_DECIMALS must be a mapping of parameter names to decimal precision"
+        )
+    for key, value in decimals_cfg.items():
+        try:
+            decimals = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(
+                f"PARAM_VALUE_DECIMALS[{key!r}] must be an integer"
+            ) from exc
+        if decimals < 0:
+            raise ConfigurationError(f"PARAM_VALUE_DECIMALS[{key!r}] must be >= 0")
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -456,6 +583,39 @@ RECOMMENDATION = {
     },
 }
 
+FINAL_STRATEGY = {
+    # --- Fold weighting ---
+    "USE_RECENCY_WEIGHTING": False,
+    "FOLD_DECAY_RATE": 0.0,
+    # --- Safety gates ---
+    "MIN_CONFIDENCE_FOR_FINAL": 60,
+    # --- Asset selection & weighting ---
+    "INCLUDE_CLASSES": ["Stars", "Stalwarts"],
+    "MIN_ASSET_CONSISTENCY": 60.0,
+    "WEIGHTING_SCHEME": "risk_adjusted",
+    "ASSET_WEIGHTS_OVERRIDE": {},
+    "MAX_WEIGHT_CAP": 0.35,
+    "MIN_WEIGHT_FLOOR": 0.02,
+    "SHRINK_TO_EQUAL": 0.25,
+    # --- Parameter stability (robust) ---
+    "PARAM_RCV_UNSTABLE": 0.50,
+    "PARAM_RCV_WATCHLIST": 0.35,
+    "PARAM_RCV_DDOF": 0,
+    "MULTIMODAL_MIN_SEPARATION": 0.75,
+    "MULTIMODAL_MIN_CLUSTER_WEIGHT": 0.2,
+    # --- Sensitivity thresholds ---
+    "PARAM_SENSITIVITY_THRESHOLD": 0.15,
+    "WEIGHT_SENSITIVITY_THRESHOLD": 0.05,
+    "WEIGHT_SENSITIVITY_RATIO_THRESHOLD": 0.25,
+    # --- Reporting knobs ---
+    "SHOW_PARAM_DISTS": True,
+    "SHOW_RECENCY_HALFLIFE": True,
+    # --- Parameter rounding ---
+    "PARAM_VALUE_DECIMALS": {"default": 3},
+}
+
+validate_final_strategy_config(FINAL_STRATEGY)
+
 # Global NaN handling policy for signal combination. Individual rule sets may
 # override ``nan_policy`` and ``ffill_lookback``.
 NAN_POLICY = "FALSE"  # FALSE | PROPAGATE | FORWARD_FILL
@@ -479,10 +639,6 @@ CHAMPION_SELECTION_SETTINGS = {
     # Probability of mutating each gene on a clone
     "clone_mutation_rate": 0.20,
 }
-
-
-class ConfigurationError(ValueError):
-    """Raised when configuration options are invalid."""
 
 
 def _validate_combination_logic(rules: dict) -> None:
