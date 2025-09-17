@@ -145,6 +145,7 @@ def test_champion_equity_in_metadata(tmp_path, monkeypatch):
 
     class DummyEval:
         def __init__(self, group, rules, gene_map, settings):
+            assert settings.get("collect_equity_curve") is True
             self.last_details = {
                 "per_asset": {
                     "A": {"score": 1.0, "trades": 1, "equity_curve": pd.Series([1, 2])},

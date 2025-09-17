@@ -185,6 +185,9 @@ class MultiAssetFitnessEvaluator:
         self.settings = copy.deepcopy(defaults)
         if settings:
             self.settings.update(settings)
+        self.settings["collect_equity_curve"] = bool(
+            self.settings.get("collect_equity_curve", False)
+        )
         # Clamp min_included_assets to available data after alignment
         mia = self.settings.get("min_included_assets", 1)
         self.settings["min_included_assets"] = min(mia, len(group_data))
@@ -453,20 +456,20 @@ class MultiAssetFitnessEvaluator:
             missing = list(canonical)
         trades = int(portfolio.trades.count())
 
-        value_fn = getattr(portfolio, "value", None)
-        if callable(value_fn):
-            try:
-                equity_curve = value_fn()
-            except Exception:
-                equity_curve = pd.Series(dtype=float)
-            else:
-                if not isinstance(equity_curve, pd.Series):
-                    try:
-                        equity_curve = pd.Series(equity_curve)
-                    except Exception:
-                        equity_curve = pd.Series(dtype=float)
-        else:
-            equity_curve = pd.Series(dtype=float)
+        equity_curve = pd.Series(dtype=float)
+        if self.settings.get("collect_equity_curve"):
+            value_fn = getattr(portfolio, "value", None)
+            if callable(value_fn):
+                try:
+                    equity_curve = value_fn()
+                except Exception:
+                    equity_curve = pd.Series(dtype=float)
+                else:
+                    if not isinstance(equity_curve, pd.Series):
+                        try:
+                            equity_curve = pd.Series(equity_curve)
+                        except Exception:
+                            equity_curve = pd.Series(dtype=float)
 
         return {
             "sortino": metrics.get("sortino"),
