@@ -221,34 +221,27 @@ This module's purpose is to provide a final, unbiased report on the performance 
     ```
 
 3.  **Install Dependencies:**
-    Create a file named `requirements.txt` with the content below and run the installation command.
-
-    **`requirements.txt` file:**
-
-    ```text
-    pygad
-    vectorbt
-    pandas
-    numpy
-    yfinance
-    python-binance
-    pandas-ta==0.4.67b0
-    setuptools
-    python-dateutil
-    matplotlib
-    ```
-
-    **Installation Command:**
+    Use the checked-in requirement files to install the runtime stack—there is
+    no need to craft a manual dependency list.
 
     ```bash
     pip install -r requirements.txt
     ```
 
-    On startup the framework logs the detected indicator backend and library
-    versions (``pandas-ta``, ``pandas``, ``numpy`` and whether ``TA-Lib`` is
-    active) so mismatches are easier to diagnose.
+    The curated list covers the GA/backtesting stack (`pygad`, `vectorbt`,
+    `pandas`, `numpy`) plus supporting extras such as `pyarrow` for Parquet
+    caching and `pydantic` for schema validation. On startup the framework logs
+    the detected indicator backend and library versions (``pandas-ta``,
+    ``pandas``, ``numpy`` and whether ``TA-Lib`` is active) so mismatches are
+    easier to diagnose.
 
-    Optionally install and run `pre-commit` for linting:
+    For linting and tests, install the optional developer dependencies:
+
+    ```bash
+    pip install -r requirements-dev.txt
+    ```
+
+    After installing the dev dependencies you can run `pre-commit` for linting:
 
     ```bash
     pre-commit run -a
