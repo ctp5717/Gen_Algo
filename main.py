@@ -16,7 +16,7 @@ import traceback
 import types
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt  # For non-blocking plot display
 import pandas as pd
@@ -51,9 +51,9 @@ def _default_run_champion(*a, **k):
     return None
 
 
-analysis = types.SimpleNamespace(run_champion_analysis=_default_run_champion)
-fitness = types.SimpleNamespace(FitnessEvaluator=None)
-tuner = types.SimpleNamespace(find_best_hyperparameters=None)
+analysis: Any = types.SimpleNamespace(run_champion_analysis=_default_run_champion)
+fitness: Any = types.SimpleNamespace(FitnessEvaluator=None)
+tuner: Any = types.SimpleNamespace(find_best_hyperparameters=None)
 
 
 def on_generation(ga_instance):
@@ -307,9 +307,11 @@ def main(argv: list[str] | None = None):
     import fitness as _fitness
 
     if patched_analysis.run_champion_analysis is not _default_run_champion:
-        _analysis.run_champion_analysis = patched_analysis.run_champion_analysis
+        cast(Any, _analysis).run_champion_analysis = (
+            patched_analysis.run_champion_analysis
+        )
     if patched_fitness.FitnessEvaluator is not None:
-        _fitness.FitnessEvaluator = patched_fitness.FitnessEvaluator
+        cast(Any, _fitness).FitnessEvaluator = patched_fitness.FitnessEvaluator
     analysis, fitness = _analysis, _fitness
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
@@ -366,6 +368,10 @@ def main(argv: list[str] | None = None):
     wf_enabled = wf_settings.get(
         "enabled", getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False)
     )
+    train_slice_start: Any = config.TRAINING_PERIOD["start"]
+    train_slice_end: Any = config.TRAINING_PERIOD["end"]
+    val_slice_start: Any = config.VALIDATION_PERIOD["start"]
+    val_slice_end: Any = config.VALIDATION_PERIOD["end"]
     if wf_enabled:
         wf_range = wf_settings.get("total_data_range", {})
         wf_start = pd.to_datetime(wf_range.get("start", train_start))
@@ -389,14 +395,10 @@ def main(argv: list[str] | None = None):
         if not all_data:
             return
         training_data = {
-            t: df.loc[config.TRAINING_PERIOD["start"] : config.TRAINING_PERIOD["end"]]
-            for t, df in all_data.items()
+            t: df.loc[train_slice_start:train_slice_end] for t, df in all_data.items()
         }
         validation_data = {
-            t: df.loc[
-                config.VALIDATION_PERIOD["start"] : config.VALIDATION_PERIOD["end"]
-            ]
-            for t, df in all_data.items()
+            t: df.loc[val_slice_start:val_slice_end] for t, df in all_data.items()
         }
     else:
         print(f"Loading data from {earliest} to {latest}...")
@@ -409,12 +411,8 @@ def main(argv: list[str] | None = None):
         )
         if all_data.empty:
             return
-        training_data = all_data.loc[
-            config.TRAINING_PERIOD["start"] : config.TRAINING_PERIOD["end"]
-        ]
-        validation_data = all_data.loc[
-            config.VALIDATION_PERIOD["start"] : config.VALIDATION_PERIOD["end"]
-        ]
+        training_data = all_data.loc[train_slice_start:train_slice_end]
+        validation_data = all_data.loc[val_slice_start:val_slice_end]
 
     sample = (
         next(iter(training_data.values()))
@@ -587,7 +585,8 @@ def main(argv: list[str] | None = None):
                             final_strategy.generate_final_strategy({"run_dir": run_dir})
                         except Exception:
                             LOGGER.exception(
-                                "Final strategy synthesizer failed for run at %s", run_dir
+                                "Final strategy synthesizer failed for run at %s",
+                                run_dir,
                             )
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")

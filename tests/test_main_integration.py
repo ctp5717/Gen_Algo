@@ -129,7 +129,9 @@ def _configure_minimal_main(monkeypatch):
     monkeypatch.setattr(
         main.config, "WALK_FORWARD_SETTINGS", {"enabled": False}, raising=False
     )
-    monkeypatch.setattr(main.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False)
+    monkeypatch.setattr(
+        main.config, "FITNESS_WEIGHTS", {"min_trades": 0}, raising=False
+    )
     monkeypatch.setattr(main.config, "GA_NUM_GENERATIONS", 1, raising=False)
     monkeypatch.setattr(main.config, "GA_POPULATION_SIZE", 1, raising=False)
     monkeypatch.setattr(main.config, "GA_PARENTS_MATING", 1, raising=False)
@@ -377,7 +379,10 @@ def test_final_strategy_schema_version_guard(tmp_path, monkeypatch, caplog):
     assert "final_strategy.md" not in artifacts_meta
     log_text = caplog.text
     assert "Final strategy synthesizer failed" in log_text
-    assert "Unsupported run_metadata.recommendation schema_version '2.0'; expected '1.0'" in log_text
+    assert (
+        "Unsupported run_metadata.recommendation schema_version '2.0'; expected '1.0'"
+        in log_text
+    )
 
 
 def test_final_strategy_requires_summary(tmp_path, monkeypatch, caplog):
@@ -414,7 +419,10 @@ def test_final_strategy_markdown_snapshot(tmp_path, monkeypatch):
         "Confidence: High (80)",
         "Fold selection: Elite/Viable",
         "Recency weighting: disabled",
-        "Weighting scheme: risk_adjusted — weights ∝ (performance / volatility) × consistency (cap 1.00, floor 0.00)",
+        (
+            "Weighting scheme: risk_adjusted — weights ∝ (performance / volatility) × "
+            "consistency (cap 1.00, floor 0.00)"
+        ),
         "## Recommended Parameters",
         "| Gene | Value | Stability | Distribution |",
         "| --- | --- | --- | --- |",
@@ -471,9 +479,7 @@ def test_final_strategy_markdown_snapshot(tmp_path, monkeypatch):
     assert md_text == expected_md
 
 
-def test_final_strategy_skips_on_unreadable_metadata(
-    tmp_path, monkeypatch, caplog
-):
+def test_final_strategy_skips_on_unreadable_metadata(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.ERROR, logger=main.LOGGER.name)
 
     def corrupt_metadata(run_dir: Path) -> None:
