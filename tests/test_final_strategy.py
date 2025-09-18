@@ -2,6 +2,7 @@ import copy
 import json
 import logging
 import math
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,86 @@ def test_parameter_precision_overrides(cfg_copy):
     params, summaries = final_strategy._aggregate_parameters(folds, cfg_copy)
     assert params["alpha"] == pytest.approx(1.2346, abs=1e-9)
     assert summaries["alpha"].precision == 4
+
+
+def test_render_asset_table_adds_total_and_note():
+    table = final_strategy._render_asset_table(
+        {
+            "AAA": {
+                "class": "Stars",
+                "performance": 1.1,
+                "consistency": 80.0,
+                "volatility": 0.12,
+                "weight": 0.6,
+            },
+            "BBB": {
+                "class": "Stalwarts",
+                "performance": 0.7,
+                "consistency": 70.0,
+                "volatility": 0.15,
+                "weight": 0.4,
+            },
+        }
+    )
+    lines = table.splitlines()
+    total_line = next(line for line in lines if line.startswith("| **Total**"))
+    assert total_line.endswith("| 1.000000 |")
+    assert any(
+        "displayed weights are rounded for readability" in line for line in lines
+    )
+
+
+def test_render_asset_table_empty_assets_placeholder():
+    table = final_strategy._render_asset_table({})
+    assert "| _None_ |" in table
+    assert "| **Total**" not in table
+    assert "displayed weights are rounded for readability" not in table
+
+
+def test_render_asset_table_accepts_decimal_weights():
+    table = final_strategy._render_asset_table(
+        {
+            "AAA": {
+                "class": "Stars",
+                "performance": 1.0,
+                "consistency": 70.0,
+                "volatility": 0.1,
+                "weight": Decimal("0.3"),
+            },
+            "BBB": {
+                "class": "Stalwarts",
+                "performance": 0.8,
+                "consistency": 65.0,
+                "volatility": 0.2,
+                "weight": Decimal("0.7"),
+            },
+        }
+    )
+    assert "| **Total** |" in table
+    assert "1.000000" in table
+    assert "displayed weights are rounded for readability" in table
+
+
+@pytest.mark.parametrize("count", [40, 100])
+def test_render_asset_table_many_rows_total_remains_one(count):
+    assets = {}
+    weight = 1.0 / count
+    for idx in range(count):
+        ticker = f"A{idx:02d}"
+        assets[ticker] = {
+            "class": "Stars",
+            "performance": 1.0 + idx * 0.01,
+            "consistency": 70.0,
+            "volatility": 0.1,
+            "weight": weight,
+        }
+    table = final_strategy._render_asset_table(assets)
+    lines = table.splitlines()
+    total_line = next(line for line in lines if line.startswith("| **Total**"))
+    assert total_line.endswith("| 1.000000 |")
+    assert any(
+        "displayed weights are rounded for readability" in line for line in lines
+    )
 
 
 def test_parameter_near_zero_rcv_triggers_note(cfg_copy):
@@ -362,6 +443,50 @@ def test_confidence_gate_blocks_strategy(tmp_path):
     assert "Confidence gate blocked" in md
 
 
+def test_write_markdown_exclusions_render_separate_lines(tmp_path):
+    md_path = tmp_path / "final_strategy.md"
+    final_strategy._write_markdown(
+        path=md_path,
+        confidence={"category": "High", "score": 90},
+        fold_warning=False,
+        use_recency=False,
+        cfg={},
+        summaries={},
+        assets={},
+        derivation={},
+        exclusions=["AAA excluded", "BBB excluded"],
+        notes=[],
+        weighting_description="equal",
+        default_to_uniform=False,
+    )
+    content = md_path.read_text()
+    assert (
+        "\n## Excluded Assets\n- AAA excluded\n- BBB excluded\n\n## Confidence"
+        in content
+    )
+    assert "relative coefficient of variation" in content
+
+
+def test_write_markdown_exclusions_none_has_trailing_newline(tmp_path):
+    md_path = tmp_path / "final_strategy.md"
+    final_strategy._write_markdown(
+        path=md_path,
+        confidence={"category": "Medium", "score": 50},
+        fold_warning=False,
+        use_recency=False,
+        cfg={},
+        summaries={},
+        assets={},
+        derivation={},
+        exclusions=[],
+        notes=[],
+        weighting_description="equal",
+        default_to_uniform=False,
+    )
+    content = md_path.read_text()
+    assert "\n## Excluded Assets\n- None\n\n## Confidence" in content
+
+
 def _write_integration_files(base: Path) -> None:
     wf = base / "walk_forward"
     wf.mkdir()
@@ -419,10 +544,60 @@ def _write_integration_files(base: Path) -> None:
     (base / "run_metadata.json").write_text(json.dumps(run_meta))
 
 
-def test_generate_final_strategy_integration_snapshot(tmp_path, monkeypatch):
+def test_generate_final_strategy_missing_weight_warns_and_notes(
+    tmp_path, monkeypatch, caplog
+):
     _write_integration_files(tmp_path)
     monkeypatch.setitem(config.FINAL_STRATEGY, "SHRINK_TO_EQUAL", 0.0)
-    result = final_strategy.generate_final_strategy({"run_dir": tmp_path})
+
+    original_compute = final_strategy._compute_asset_allocation
+
+    def compute_stub(*args, **kwargs):
+        assets, derivation, exclusions, notes = original_compute(*args, **kwargs)
+        for data in assets.values():
+            data.pop("weight", None)
+        return assets, derivation, exclusions, notes
+
+    monkeypatch.setattr(final_strategy, "_compute_asset_allocation", compute_stub)
+
+    with caplog.at_level(logging.WARNING, logger=final_strategy.LOGGER.name):
+        payload = final_strategy.generate_final_strategy({"run_dir": tmp_path})
+
+    assert "missing weight" in caplog.text.lower()
+    assert "Missing weights detected for assets" in payload["notes"]
+    md_text = (tmp_path / "final_strategy.md").read_text()
+    assert "Missing weights detected for assets" in md_text
+
+
+def test_generate_final_strategy_missing_weight_strict_mode_errors(
+    tmp_path, monkeypatch
+):
+    _write_integration_files(tmp_path)
+    monkeypatch.setitem(config.FINAL_STRATEGY, "SHRINK_TO_EQUAL", 0.0)
+
+    original_compute = final_strategy._compute_asset_allocation
+
+    def compute_stub(*args, **kwargs):
+        assets, derivation, exclusions, notes = original_compute(*args, **kwargs)
+        for data in assets.values():
+            data.pop("weight", None)
+        return assets, derivation, exclusions, notes
+
+    monkeypatch.setattr(final_strategy, "_compute_asset_allocation", compute_stub)
+    monkeypatch.setenv("FSS_STRICT", "1")
+
+    with pytest.raises(final_strategy.FinalStrategyError) as exc:
+        final_strategy.generate_final_strategy({"run_dir": tmp_path})
+
+    assert "Missing asset weights detected in strict mode" in str(exc.value)
+    assert not (tmp_path / "final_strategy.md").exists()
+
+
+def test_generate_final_strategy_integration_snapshot(tmp_path, monkeypatch, caplog):
+    _write_integration_files(tmp_path)
+    monkeypatch.setitem(config.FINAL_STRATEGY, "SHRINK_TO_EQUAL", 0.0)
+    with caplog.at_level(logging.INFO):
+        result = final_strategy.generate_final_strategy({"run_dir": tmp_path})
     assert result["assets"]
     md_path = tmp_path / "final_strategy.md"
     snapshot_path = Path(__file__).parent / "snapshots" / "final_strategy.md"
@@ -430,6 +605,9 @@ def test_generate_final_strategy_integration_snapshot(tmp_path, monkeypatch):
     meta = json.loads((tmp_path / "run_metadata.json").read_text())
     assert "final_strategy" in meta
     assert "final_strategy.md" in meta.get("artifacts", [])
+    digest = meta["artifacts_meta"]["final_strategy.md"]["sha256"]
+    assert f"sha256={digest}" in caplog.text
+    assert str(md_path) in caplog.text
 
 
 def test_validate_final_strategy_config_override_sum_error():

@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple, Union, cast
@@ -23,7 +24,17 @@ from schemas import (
 LOGGER = logging.getLogger(__name__)
 
 
+_STRICT_ENV_VALUES = {"1", "true", "yes", "on"}
+
+
 AssetPayload = Dict[str, Dict[str, Union[str, float]]]
+
+
+def _strict_missing_weight_mode() -> bool:
+    """Return True when missing asset weights should raise."""
+
+    value = os.getenv("FSS_STRICT", "")
+    return value.strip().lower() in _STRICT_ENV_VALUES
 
 
 def _coerce_int(value: Any, default: int = 0) -> int:
@@ -686,6 +697,24 @@ def _render_parameters_table(summaries: Dict[str, ParameterSummary]) -> str:
     return "\n".join(lines)
 
 
+def _detect_missing_asset_weights(assets: AssetPayload) -> List[str]:
+    """Ensure assets include a weight entry and warn when missing."""
+
+    missing: List[str] = []
+    for ticker, data in assets.items():
+        if "weight" not in data:
+            LOGGER.warning("Asset %s missing weight; using 0.0", ticker)
+            data["weight"] = 0.0
+            missing.append(ticker)
+    if missing and _strict_missing_weight_mode():
+        joined = ", ".join(missing)
+        raise FinalStrategyError(
+            "Missing asset weights detected in strict mode: "
+            f"{joined}. Set FSS_STRICT=0 to allow defaults."
+        )
+    return sorted(missing)
+
+
 def _render_asset_table(assets: AssetPayload) -> str:
     lines = [
         "| Ticker | Class | Performance | Consistency | Volatility | Weight |",
@@ -694,12 +723,28 @@ def _render_asset_table(assets: AssetPayload) -> str:
     if not assets:
         lines.append("| _None_ | | | | | |")
         return "\n".join(lines)
-    ordered = sorted(assets.items(), key=lambda item: item[1]["weight"], reverse=True)
+    ordered = sorted(
+        assets.items(),
+        key=lambda item: float(item[1].get("weight", 0.0)),
+        reverse=True,
+    )
+    total_weight = 0.0
     for ticker, data in ordered:
+        if "weight" not in data:
+            LOGGER.warning("Asset %s missing weight; using 0.0", ticker)
+            weight = 0.0
+        else:
+            weight = float(data["weight"])
+        total_weight += weight
         lines.append(
             f"| {ticker} | {data['class']} | {data['performance']:.3f} | "
-            f"{data['consistency']:.1f}% | {data['volatility']:.4f} | {data['weight']:.4f} |"
+            f"{data['consistency']:.1f}% | {data['volatility']:.4f} | {weight:.4f} |"
         )
+    lines.append(f"| **Total** | | | | | {total_weight:.6f} |")
+    lines.append("")
+    lines.append(
+        "Note: displayed weights are rounded for readability; the internal sum remains exactly 1.0."
+    )
     return "\n".join(lines)
 
 
@@ -768,13 +813,18 @@ def _write_markdown(
     body.append((derivation_table or "_No derivation available._") + "\n")
     body.append("## Excluded Assets\n")
     if exclusions:
-        body.extend(["- " + reason for reason in exclusions])
+        body.extend([f"- {reason}\n" for reason in exclusions])
     else:
-        body.append("- None")
-    body.append("\n## Confidence & SRE Summary\n")
+        body.append("- None\n")
+    body.append("\n")
+    body.append("## Confidence & SRE Summary\n")
     body.append(
         f"Inherited confidence: {confidence.get('category', 'Unknown')} "
         f"({confidence.get('score', 'N/A')}).\n"
+    )
+    body.append(
+        "FSS stability classifications use relative coefficient of variation (RCV; IQR/median) "
+        "while SRE reports coefficient of variation (CoV), so labels may diverge.\n"
     )
     body.append("## Notes\n" + notes_text + "\n")
     body.append("## Configuration\n")
@@ -797,6 +847,8 @@ def _persist_strategy_artifacts(
     weighting_description: str,
     default_to_uniform: bool,
 ) -> None:
+    if payload.get("notes") is None:
+        payload["notes"] = ""
     md_path = run_dir / "final_strategy.md"
     _write_markdown(
         md_path,
@@ -820,6 +872,11 @@ def _persist_strategy_artifacts(
             "artifacts": ["final_strategy.md"],
             "artifacts_meta": {"final_strategy.md": {"sha256": digest}},
         },
+    )
+    LOGGER.info(
+        "Persisted final strategy markdown at %s (sha256=%s)",
+        md_path,
+        digest,
     )
 
 
@@ -1035,12 +1092,19 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
             default_to_uniform=default_to_uniform,
         )
         return payload
+    missing_weights = _detect_missing_asset_weights(assets)
     notes = _notes_from_summaries(summaries)
     notes.extend(allocation_notes)
     if fallback:
         notes.append(
             "No Elite/Viable folds available; synthesised strategy uses all "
             "folds with equal base weights."
+        )
+    if missing_weights:
+        joined = ", ".join(missing_weights)
+        notes.append(
+            "Missing weights detected for assets: "
+            f"{joined}. Defaulted to 0.0 for reporting."
         )
     sensitivity = _jackknife_sensitivity(
         folds, cfg, sre_assets, per_asset, summaries, assets
