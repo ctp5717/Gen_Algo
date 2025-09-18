@@ -432,6 +432,12 @@ def test_final_strategy_markdown_snapshot(tmp_path, monkeypatch):
         "| --- | --- | ---: | ---: | ---: | ---: |",
         "| AAA | Stars | 1.100 | 75.0% | 0.1000 | 1.0000 |",
         "| BBB | Stalwarts | 0.700 | 70.0% | 0.1000 | 0.0000 |",
+        "| **Total** | | | | | 1.000000 |",
+        "",
+        (
+            "Note: displayed weights are rounded for readability; "
+            "the internal sum remains exactly 1.0."
+        ),
         "### Derivation",
         "| Ticker | Raw Weight | Performance | Consistency | Volatility |",
         "| --- | ---: | ---: | ---: | ---: |",
@@ -439,8 +445,14 @@ def test_final_strategy_markdown_snapshot(tmp_path, monkeypatch):
         "| BBB | 490.000000 | 0.700 | 70.0% | 0.1000 |",
         "## Excluded Assets",
         "- None",
+        "",
         "## Confidence & SRE Summary",
         "Inherited confidence: High (80).",
+        (
+            "FSS stability classifications use relative coefficient of variation "
+            "(RCV; IQR/median) while SRE reports coefficient of variation (CoV), "
+            "so labels may diverge."
+        ),
         "## Notes",
         "No additional notes.",
         "## Configuration",

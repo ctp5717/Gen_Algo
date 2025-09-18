@@ -14,6 +14,9 @@ Weighting scheme: risk_adjusted — weights ∝ (performance / volatility) × co
 | --- | --- | ---: | ---: | ---: | ---: |
 | AAA | Stars | 1.100 | 80.0% | 0.1000 | 0.5000 |
 | BBB | Stalwarts | 0.650 | 70.0% | 0.1000 | 0.5000 |
+| **Total** | | | | | 1.000000 |
+
+Note: displayed weights are rounded for readability; the internal sum remains exactly 1.0.
 ### Derivation
 | Ticker | Raw Weight | Performance | Consistency | Volatility |
 | --- | ---: | ---: | ---: | ---: |
@@ -21,8 +24,10 @@ Weighting scheme: risk_adjusted — weights ∝ (performance / volatility) × co
 | BBB | 455.000000 | 0.650 | 70.0% | 0.1000 |
 ## Excluded Assets
 - CCC: class=Gambles not in INCLUDE_CLASSES
+
 ## Confidence & SRE Summary
 Inherited confidence: Medium (71).
+FSS stability classifications use relative coefficient of variation (RCV; IQR/median) while SRE reports coefficient of variation (CoV), so labels may diverge.
 ## Notes
 Weight cap further relaxed to 0.500 for feasibility.
 ## Configuration
