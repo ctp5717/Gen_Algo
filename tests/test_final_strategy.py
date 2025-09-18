@@ -460,7 +460,10 @@ def test_write_markdown_exclusions_render_separate_lines(tmp_path):
         default_to_uniform=False,
     )
     content = md_path.read_text()
-    assert "\n## Excluded Assets\n- AAA excluded\n- BBB excluded\n\n## Confidence" in content
+    assert (
+        "\n## Excluded Assets\n- AAA excluded\n- BBB excluded\n\n## Confidence"
+        in content
+    )
     assert "relative coefficient of variation" in content
 
 
