@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import pandas as pd
+
+
+def _get_active_value(rules: Mapping[str, Any], key: str) -> Any:
+    """Return the ``params.value`` for an active exit rule if present."""
+
+    rule = rules.get(key)
+    if not isinstance(rule, Mapping) or not rule.get("is_active", False):
+        return None
+
+    params = rule.get("params", {})
+    if not isinstance(params, Mapping):
+        return None
+
+    return params.get("value")
 
 
 def extract_exit_params(
     entries: pd.Series,
-    exit_rules: dict | None,
+    exit_rules: Mapping[str, Any] | None,
     hold_period: int,
 ):
     """Extract exit parameters for vectorbt from strategy rules.
@@ -16,8 +33,8 @@ def extract_exit_params(
     ----------
     entries : pd.Series
         Entry signal series.
-    exit_rules : dict | None
-        Dictionary of exit rules from strategy configuration.
+    exit_rules : Mapping[str, Any] | None
+        Mapping of exit rules from strategy configuration.
     hold_period : int
         Maximum holding period in bars for time-based exits.
 
@@ -27,29 +44,12 @@ def extract_exit_params(
         ``(time_based_exit, sl_stop, sl_trail, tp_stop)``
     """
 
-    exit_rules = exit_rules or {}
-
-    sl_rule = exit_rules.get("stop_loss", {})
-    tsl_rule = exit_rules.get("trailing_stop", {})
-    tp_rule = exit_rules.get("take_profit", {})
-
-    sl_stop = (
-        sl_rule.get("params", {}).get("value")
-        if sl_rule.get("is_active", False)
-        else None
-    )
-    sl_trail = (
-        tsl_rule.get("params", {}).get("value")
-        if tsl_rule.get("is_active", False)
-        else None
-    )
-    tp_stop = (
-        tp_rule.get("params", {}).get("value")
-        if tp_rule.get("is_active", False)
-        else None
-    )
-
+    rules = exit_rules if isinstance(exit_rules, Mapping) else {}
     time_based_exit = entries.shift(hold_period, fill_value=False)
-    time_based_exit = time_based_exit.reindex(entries.index, fill_value=False)
+
+    sl_stop, sl_trail, tp_stop = (
+        _get_active_value(rules, key)
+        for key in ("stop_loss", "trailing_stop", "take_profit")
+    )
 
     return time_based_exit, sl_stop, sl_trail, tp_stop
