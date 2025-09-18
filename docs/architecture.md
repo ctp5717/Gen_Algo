@@ -2,21 +2,34 @@
 
 **Audience:** Developers and maintainers extending the framework.
 
-The project is organised as a set of small modules with clear inputs and outputs. Core relationships are shown below.
+The project is organised as a set of composable modules with clear inputs,
+outputs, and metadata contracts.
 
 ```mermaid
-graph LR
-    config.py --> data_loader.py
-    data_loader.py --> strategy_engine.py
-    indicator_library.py --> strategy_engine.py
-    strategy_rules.py --> strategy_engine.py
-    strategy_engine.py --> fitness.py
-    fitness.py --> analysis.py
+flowchart TD
+    subgraph Signals
+        config[config.py] --> loader[data_loader.get_data]
+        loader --> engine[strategy_engine.build_signals]
+        indicators[indicator_library.py] --> engine
+        contracts[indicator_contracts.py] --> preflight[preflight.check_indicator_contracts]
+        engine -. columns .-> preflight
+    end
+    engine --> fitness[fitness.FitnessEvaluator]
+    fitness --> analysis[analysis.run_champion_analysis]
+    analysis --> metadata[run_metadata.merge_run_metadata]
+    analysis --> walk[walk_forward.run_walk_forward_validation]
+    walk --> recommendation[recommendation.generate_recommendation]
+    recommendation --> final[final_strategy.generate_final_strategy]
+    walk --> metadata
+    recommendation --> metadata
+    final --> metadata
 ```
 
-### Fitness Evaluation Example
+### Fitness evaluation
 
-The `FitnessEvaluator` wraps the backtesting engine and composite score:
+`fitness.get_fitness_evaluator` returns either a single-asset or multi-asset
+evaluator. Both wrap vectorbt and honour the composite score weights defined in
+`config.FITNESS_WEIGHTS`.
 
 ```python
 portfolio = vbt.Portfolio.from_signals(
@@ -32,11 +45,35 @@ portfolio = vbt.Portfolio.from_signals(
 metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
 ```
 
-Each module is designed for deterministic behaviour and should be accompanied by tests when modified.
+### Recommendation and final strategy
 
-### Metric Contract
+Walk-forward validation writes schema v1.0 JSON/CSV artifacts that feed the
+recommendation and final-strategy stages. Both are callable utilities designed
+for orchestration scripts:
 
-`metrics_contract.py` centralises statistic aliases, unit normalisation, and fallback logic. The canonical metrics and fallbacks are:
+```python
+from pathlib import Path
+
+from recommendation import generate_recommendation
+from final_strategy import generate_final_strategy
+
+run_dir = Path("./runs/2024-01-15")
+
+# Produce strategy_recommendation.md and update run_metadata.json
+generate_recommendation({"run_dir": run_dir})
+
+# Synthesize final_strategy.md from recommendation + walk-forward outputs
+generate_final_strategy({"run_dir": run_dir})
+```
+
+`final_strategy.generate_final_strategy` enforces gating rules from
+`config.FINAL_STRATEGY`, aggregates per-fold parameters, and computes portfolio
+weights via `_bounded_simplex_projection` with optional recency weighting.
+
+### Metric contract
+
+`metrics_contract.py` centralises statistic aliases, unit normalisation, and
+fallback logic. The canonical metrics and fallbacks are:
 
 | Canonical key   | Accepted aliases (subset)                          | Unit            | Fallback formula                                      |
 |-----------------|-----------------------------------------------------|-----------------|------------------------------------------------------|

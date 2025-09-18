@@ -357,6 +357,9 @@ CI expectations:
 - Keep functions small with clear IO contracts; prefer pure functions where possible.
 - Add/modify tests for any behavior change.
 - Update `README.md` and files in `docs/` when behaviour or interfaces change.
+- Keep the README documentation map in sync with `docs/` additions (notably
+  `docs/operations.md` and `docs/strategy_authoring.md`). Update the runbook when
+  orchestration steps or artifact names change.
 
 ---
 
