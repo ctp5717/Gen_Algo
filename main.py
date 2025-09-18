@@ -473,7 +473,9 @@ def main(argv: list[str] | None = None):
         gene_type=list(gene_types),
         mutation_num_genes=mutation_num_genes,
         fitness_func=fitness_function,
-        parallel_processing=["process", num_cores],
+        # Keep GA evaluations in-process to avoid pickling the large evaluator payload
+        # (vectorbt data + fitness evaluator state) for every candidate solution.
+        parallel_processing=["thread", num_cores],
         # --- NEW: Pass the callback function to the GA instance ---
         on_generation=on_generation,
     )

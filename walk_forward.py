@@ -391,7 +391,8 @@ def run_walk_forward_validation(
             gene_type=gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
-            parallel_processing=["process", num_cores],
+            # Use threads so PyGAD keeps the evaluator and OHLCV data in-process.
+            parallel_processing=["thread", num_cores],
             random_seed=config.SEED,
         )
         if champion_pool and hasattr(ga_instance, "population"):

@@ -233,7 +233,8 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             gene_type=list(gene_types),
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
-            parallel_processing=["process", num_cores],
+            # Threads avoid expensive serialization of the GA instance per evaluation.
+            parallel_processing=["thread", num_cores],
             random_seed=config.SEED,
         )
         ga.run()
