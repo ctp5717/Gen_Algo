@@ -161,7 +161,7 @@ def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
 
     walk_forward.run_walk_forward_validation(tmp_path)
 
-    assert captured["parallel_processing"][1] == os.cpu_count()
+    assert captured["parallel_processing"] == ["thread", os.cpu_count()]
 
 
 def test_walk_forward_returns_summary(monkeypatch, tmp_path):
