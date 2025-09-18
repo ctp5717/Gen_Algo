@@ -585,8 +585,8 @@ RECOMMENDATION = {
 
 FINAL_STRATEGY = {
     # --- Fold weighting ---
-    "USE_RECENCY_WEIGHTING": False,
-    "FOLD_DECAY_RATE": 0.0,
+    "USE_RECENCY_WEIGHTING": True,
+    "FOLD_DECAY_RATE": 0.139,
     # --- Safety gates ---
     "MIN_CONFIDENCE_FOR_FINAL": 60,
     # --- Asset selection & weighting ---
