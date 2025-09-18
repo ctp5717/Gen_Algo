@@ -4,15 +4,19 @@
 Main Application Orchestrator for the GA Trading Framework
 (This version includes a progress indicator for the GA run)
 """
+import argparse
 import copy
+import json
+import logging
 import os
 import pprint
+import sys
 import time  # <-- NEW: Import the time module
 import traceback
 import types
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt  # For non-blocking plot display
 import pandas as pd
@@ -25,6 +29,8 @@ from deps import ensure_real_vectorbt
 from gene_parser import parse_genes_from_config  # now defined in its own module
 from params_resolver import resolve_effective_rules
 from strategy_rules import STRATEGY_RULES
+
+LOGGER = logging.getLogger(__name__)
 
 # --- NEW: Callback function for progress tracking ---
 start_time = 0.0
@@ -45,9 +51,9 @@ def _default_run_champion(*a, **k):
     return None
 
 
-analysis = types.SimpleNamespace(run_champion_analysis=_default_run_champion)
-fitness = types.SimpleNamespace(FitnessEvaluator=None)
-tuner = types.SimpleNamespace(find_best_hyperparameters=None)
+analysis: Any = types.SimpleNamespace(run_champion_analysis=_default_run_champion)
+fitness: Any = types.SimpleNamespace(FitnessEvaluator=None)
+tuner: Any = types.SimpleNamespace(find_best_hyperparameters=None)
 
 
 def on_generation(ga_instance):
@@ -277,8 +283,17 @@ def indicator_preflight(sample: pd.DataFrame, rules: dict) -> None:
             )
 
 
-def main():
+def main(argv: list[str] | None = None):
     """The main execution function."""
+    parser = argparse.ArgumentParser(description="GA trading orchestrator")
+    parser.add_argument(
+        "--no-fss",
+        action="store_true",
+        help="Skip the final strategy synthesizer step",
+    )
+    args = parser.parse_args([] if argv is None else list(argv))
+    skip_fss = bool(args.no_fss)
+
     ensure_real_vectorbt(Path(__file__).resolve().parent)
     config.initialize_config()
 
@@ -292,9 +307,11 @@ def main():
     import fitness as _fitness
 
     if patched_analysis.run_champion_analysis is not _default_run_champion:
-        _analysis.run_champion_analysis = patched_analysis.run_champion_analysis
+        cast(Any, _analysis).run_champion_analysis = (
+            patched_analysis.run_champion_analysis
+        )
     if patched_fitness.FitnessEvaluator is not None:
-        _fitness.FitnessEvaluator = patched_fitness.FitnessEvaluator
+        cast(Any, _fitness).FitnessEvaluator = patched_fitness.FitnessEvaluator
     analysis, fitness = _analysis, _fitness
 
     if getattr(config, "AUTO_TUNE_ENABLED", False):
@@ -351,6 +368,10 @@ def main():
     wf_enabled = wf_settings.get(
         "enabled", getattr(config, "ENABLE_WALK_FORWARD_VALIDATION", False)
     )
+    train_slice_start: Any = config.TRAINING_PERIOD["start"]
+    train_slice_end: Any = config.TRAINING_PERIOD["end"]
+    val_slice_start: Any = config.VALIDATION_PERIOD["start"]
+    val_slice_end: Any = config.VALIDATION_PERIOD["end"]
     if wf_enabled:
         wf_range = wf_settings.get("total_data_range", {})
         wf_start = pd.to_datetime(wf_range.get("start", train_start))
@@ -374,14 +395,10 @@ def main():
         if not all_data:
             return
         training_data = {
-            t: df.loc[config.TRAINING_PERIOD["start"] : config.TRAINING_PERIOD["end"]]
-            for t, df in all_data.items()
+            t: df.loc[train_slice_start:train_slice_end] for t, df in all_data.items()
         }
         validation_data = {
-            t: df.loc[
-                config.VALIDATION_PERIOD["start"] : config.VALIDATION_PERIOD["end"]
-            ]
-            for t, df in all_data.items()
+            t: df.loc[val_slice_start:val_slice_end] for t, df in all_data.items()
         }
     else:
         print(f"Loading data from {earliest} to {latest}...")
@@ -394,12 +411,8 @@ def main():
         )
         if all_data.empty:
             return
-        training_data = all_data.loc[
-            config.TRAINING_PERIOD["start"] : config.TRAINING_PERIOD["end"]
-        ]
-        validation_data = all_data.loc[
-            config.VALIDATION_PERIOD["start"] : config.VALIDATION_PERIOD["end"]
-        ]
+        training_data = all_data.loc[train_slice_start:train_slice_end]
+        validation_data = all_data.loc[val_slice_start:val_slice_end]
 
     sample = (
         next(iter(training_data.values()))
@@ -536,10 +549,49 @@ def main():
                     recommendation.generate_recommendation({"run_dir": run_dir})
                 except Exception as e:
                     print(f"Recommendation engine failed: {e}")
+                else:
+                    meta_path = run_dir / "run_metadata.json"
+                    should_run_fss = True
+                    if skip_fss:
+                        LOGGER.info(
+                            "Skipping final strategy synthesizer (--no-fss flag enabled)"
+                        )
+                        should_run_fss = False
+                    elif not meta_path.exists():
+                        LOGGER.warning(
+                            "Skipping final strategy synthesizer; run_metadata.json not found at %s",
+                            meta_path,
+                        )
+                        should_run_fss = False
+                    else:
+                        try:
+                            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            LOGGER.exception(
+                                "run_metadata.json unreadable at %s", meta_path
+                            )
+                            metadata = None
+                            should_run_fss = False
+                        if metadata is not None and not metadata.get("recommendation"):
+                            LOGGER.warning(
+                                "Skipping final strategy synthesizer; recommendation payload missing in %s",
+                                meta_path,
+                            )
+                            should_run_fss = False
+                    if should_run_fss:
+                        try:
+                            import final_strategy
+
+                            final_strategy.generate_final_strategy({"run_dir": run_dir})
+                        except Exception:
+                            LOGGER.exception(
+                                "Final strategy synthesizer failed for run at %s",
+                                run_dir,
+                            )
         except Exception as e:
             print(f"An error occurred during walk-forward validation: {e}")
             traceback.print_exc()
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
