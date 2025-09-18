@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+from pandas.api.types import is_bool_dtype
 
 import config
 
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 # Auto-registered indicator mapping from ``indicator_library``
 INDICATOR_MAPPING = {k.lower(): v for k, v in ind_lib.INDICATOR_REGISTRY.items()}
+BOOLEAN_DTYPE = pd.BooleanDtype()
 
 # Common shorthand aliases for indicators
 ALIASES = {
@@ -642,6 +644,13 @@ def process_strategy_rules(
     if not isinstance(ffill_lookback, int):
         raise TypeError("ffill_lookback must be an integer")
     ffill_limit = None if ffill_lookback == 0 else ffill_lookback
+    apply_ffill = nan_policy_u == "FORWARD_FILL"
+    treat_nan_as_false = nan_policy_u == "FALSE"
+
+    data_index = ohlc_data.index
+    data_columns = tuple(ohlc_data.columns)
+    data_id = id(ohlc_data)
+    data_len = len(ohlc_data)
 
     active_conds = [c for c in conditions if c.get("is_active", True)]
     used_inds = {c.get("indicator", "").lower() for c in active_conds}
@@ -693,6 +702,8 @@ def process_strategy_rules(
             1 <= vote_threshold <= n
         ), "vote_threshold must be between 1 and the number of active conditions"
 
+    use_cache = not clear_between and max_cache_keys > 0
+
     signals = []
     counts = {} if collect_counts else None
 
@@ -729,10 +740,9 @@ def process_strategy_rules(
         key = (
             indicator_name,
             params_tuple,
-            id(ohlc_data),  # different data -> different cache bucket
-            tuple(ohlc_data.columns),
+            data_id,  # different data -> different cache bucket
+            data_columns,
         )
-        use_cache = not clear_between and max_cache_keys > 0
         cache_entry = _INDICATOR_CACHE.get(key) if use_cache else None
         if cache_entry is not None:
             _CACHE_HITS += 1
@@ -745,9 +755,9 @@ def process_strategy_rules(
                 except Exception as e:  # pragma: no cover - defensive
                     raise IndicatorCallError(indicator_name, e) from e
                 indicator_output = contracts.normalize_output(
-                    indicator_name, raw_output, norm_params, index=ohlc_data.index
+                    indicator_name, raw_output, norm_params, index=data_index
                 )
-                if use_cache and len(ohlc_data) <= max_cache_rows:
+                if use_cache and data_len <= max_cache_rows:
                     _INDICATOR_CACHE[key] = (
                         weakref.ref(ohlc_data),
                         indicator_output,
@@ -763,9 +773,9 @@ def process_strategy_rules(
             except Exception as e:  # pragma: no cover - defensive
                 raise IndicatorCallError(indicator_name, e) from e
             indicator_output = contracts.normalize_output(
-                indicator_name, raw_output, norm_params, index=ohlc_data.index
+                indicator_name, raw_output, norm_params, index=data_index
             )
-            if use_cache and len(ohlc_data) <= max_cache_rows:
+            if use_cache and data_len <= max_cache_rows:
                 _INDICATOR_CACHE[key] = (
                     weakref.ref(ohlc_data),
                     indicator_output,
@@ -789,10 +799,26 @@ def process_strategy_rules(
                 target_series, condition_logic
             )
         else:
-            individual_signal = pd.Series(False, index=ohlc_data.index)
+            individual_signal = pd.Series(False, index=data_index)
 
-        if nan_policy_u == "FORWARD_FILL":
+        if apply_ffill:
+            if not isinstance(individual_signal.dtype, pd.BooleanDtype):
+                individual_signal = individual_signal.astype(BOOLEAN_DTYPE)
             individual_signal = individual_signal.ffill(limit=ffill_limit)
+        elif treat_nan_as_false:
+            if isinstance(individual_signal.dtype, pd.BooleanDtype):
+                if individual_signal.isna().any():
+                    individual_signal = individual_signal.fillna(False)
+                individual_signal = individual_signal.astype(bool, copy=False)
+            elif not is_bool_dtype(individual_signal.dtype):
+                values = individual_signal.to_numpy(dtype=float, copy=False)
+                if np.isnan(values).any():
+                    values = np.nan_to_num(values, nan=0.0)
+                individual_signal = pd.Series(
+                    values.astype(bool),
+                    index=data_index,
+                    name=individual_signal.name,
+                )
 
         signals.append(individual_signal)
         if collect_counts:
@@ -803,16 +829,24 @@ def process_strategy_rules(
             counts[name] = int(np.nansum(values))
 
     if not signals:
-        empty = pd.Series(False, index=ohlc_data.index)
+        empty = pd.Series(False, index=data_index)
         result = (empty, {}) if collect_counts else empty
     elif len(signals) == 1:
         single = signals[0]
-        if nan_policy_u == "FORWARD_FILL":
+        if apply_ffill:
+            if not isinstance(single.dtype, pd.BooleanDtype):
+                single = single.astype(BOOLEAN_DTYPE)
             single = single.fillna(False)
-        elif nan_policy_u == "FALSE":
-            single = single.fillna(False)
+        elif treat_nan_as_false:
+            if isinstance(single.dtype, pd.BooleanDtype):
+                if single.isna().any():
+                    single = single.fillna(False)
+                single = single.astype(bool, copy=False)
+            elif not is_bool_dtype(single.dtype):
+                single = single.astype(bool, copy=False)
         else:
-            single = single.astype("boolean")
+            if not isinstance(single.dtype, pd.BooleanDtype):
+                single = single.astype(BOOLEAN_DTYPE)
         result = (single, counts) if collect_counts else single
     else:
         combined = _combine_signals(
