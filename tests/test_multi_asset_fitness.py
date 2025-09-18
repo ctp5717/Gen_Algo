@@ -896,6 +896,40 @@ def test_parallel_executor_reused_across_calls(monkeypatch):
     assert CountingThreadPoolExecutor.shutdowns == 1
 
 
+def test_executor_uses_default_parallel_config(monkeypatch):
+    backend = cfg.MULTI_ASSET["parallel"]["backend"]
+    expected_workers = cfg.MULTI_ASSET["parallel"]["max_workers"]
+    created: dict[str, object] = {}
+
+    class DummyExecutor:
+        def __init__(self, *args, **kwargs):
+            created["args"] = args
+            created["kwargs"] = kwargs
+
+        def shutdown(self, wait=True):  # pragma: no cover - trivial stub
+            created["shutdown"] = created.get("shutdown", 0) + 1
+
+    if backend == "thread":
+        monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", DummyExecutor)
+    else:
+        monkeypatch.setattr(fitness.cf, "ProcessPoolExecutor", DummyExecutor)
+
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+
+    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {})
+
+    executor = ev._get_executor()
+    assert isinstance(executor, DummyExecutor)
+    assert created["kwargs"].get("max_workers") == expected_workers
+    assert ev._executor_signature == (backend, expected_workers)
+
+    ev.close()
+    assert created.get("shutdown") == 1
+
+
 def test_parallel_executor_reuse_handles_exceptions(monkeypatch):
     orig_thread = cf.ThreadPoolExecutor
 

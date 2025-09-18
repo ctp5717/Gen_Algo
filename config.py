@@ -477,9 +477,9 @@ FITNESS_WEIGHTS = {
 }
 
 # --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
-# These options control the behaviour of the multi-asset fitness evaluator.  By
-# default the framework behaves exactly as before (single asset) until
-# `MULTI_ASSET['enabled']` is set to True.
+# These options control the behaviour of the multi-asset fitness evaluator.
+# Multi-asset scoring is enabled by default so that GA runs consider the entire
+# configured universe without requiring additional flags.
 MULTI_ASSET = {
     # Master switch
     "enabled": True,
@@ -522,9 +522,9 @@ MULTI_ASSET = {
     "min_total_trades_per_year": 50,
     # Parallel evaluation of per-asset statistics
     "parallel": {
-        "enabled": False,  # when True uses concurrent.futures
+        "enabled": True,  # when True uses concurrent.futures
         "backend": "thread",  # "thread" or "process"
-        "max_workers": None,
+        "max_workers": max(1, os.cpu_count() or 1),
     },
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
