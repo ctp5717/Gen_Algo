@@ -1,429 +1,133 @@
 # AI Genetic Algorithm Trading Framework
 
-### Overview
+The project is a modular research environment for evolving algorithmic trading
+strategies with a genetic algorithm (GA). It orchestrates signal generation,
+vectorbt backtests, multi-asset scoring, walk-forward validation, a narrative
+recommendation report, and a final portfolio synthesis pass. All stages record
+metadata so results can be reproduced or audited later.
 
-This project is a sophisticated and highly configurable Python-based framework for discovering, optimizing, and backtesting algorithmic trading strategies. It leverages a **Genetic Algorithm (GA)** to evolve strategy parameters, finding potentially profitable solutions over historical market data.
+```mermaid
+flowchart LR
+    subgraph Optimisation
+        A[config.py] --> B[data_loader.get_data]
+        B --> C[strategy_engine.build_signals]
+        C --> D[fitness.FitnessEvaluator]
+        D --> E[pygad GA]
+    end
+    E --> F[analysis.run_champion_analysis]
+    F --> G[walk_forward.run_walk_forward_validation]
+    G --> H[recommendation.generate_recommendation]
+    H --> I[final_strategy.generate_final_strategy]
+    F -.-> J[run_metadata.merge_run_metadata]
+    G -.-> J
+    H -.-> J
+    I -.-> J
+```
 
-The core philosophy is a modular, "batteries-included" design that separates the strategy logic, data handling, and optimization engine. This allows for rapid experimentation and robust validation of new trading ideas.
+## Who should read this repository?
 
-### Documentation
+- **Quant researchers & strategists** – configure indicator rules in
+  `strategy_rules.py`, tune GA parameters in `config.py`, and interpret the
+  recommendation/final-strategy artifacts produced after validation.
+- **Platform & operations engineers** – run batch jobs, manage dependencies,
+  watch caching, and collect artifacts for downstream review. See
+  `docs/operations.md` for the detailed runbook.
+- **Automation agents & contributors** – follow `AGENTS.md` for repository
+  conventions, CI expectations, and change-management rules.
 
-- [Getting Started](docs/getting_started.md) – installation and basic usage.
-- [Architecture](docs/architecture.md) – module relationships for developers.
-- [Agents Guide](AGENTS.md) – instructions for automated contributors.
+## Quick start
 
-### Environment Variables
+1. **Python environment** – Use Python 3.12 or 3.13. Optional but recommended:
+   `python -m venv .venv && source .venv/bin/activate`.
+2. **Install dependencies** – `python -m pip install -r requirements.txt -r
+   requirements-dev.txt`.
+3. **Environment variables** – Copy `.env.example` to `.env` and fill in values
+   such as `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `BINANCE_TLD`, `GA_SEED`,
+   and feature toggles like `GA_QUICK_TEST` (reduced GA loop) or `USE_VBT_STUB`
+   (uses the vectorbt stub in tests).
+4. **Verify vectorbt** – The framework requires the real package, not
+   `vbt_stub.py`. You can verify the installation with:
 
-Copy `.env.example` to `.env` and populate the values before running the framework:
+   ```bash
+   python -c "from deps import ensure_real_vectorbt; ensure_real_vectorbt()"
+   ```
+
+5. **Run an optimisation** – `python main.py`. The script performs an indicator
+   preflight, runs PyGAD against the configured gene space, saves fitness plots,
+   and triggers champion analysis. When walk-forward validation is enabled it
+   will also call the recommendation and final-strategy stages.
+6. **Explore additional workflows**:
+   - `python walk_forward.py` – rolling train/test windows with metadata.
+   - `python tuner.py` – sweep GA hyperparameters (`sol_per_pop`,
+     `num_parents_mating`, `mutation_num_genes`).
+   - `python preflight.py` – standalone indicator contract checks.
+
+## Documentation map
+
+- [`docs/getting_started.md`](docs/getting_started.md) – installation and
+  day-one usage for researchers.
+- [`docs/architecture.md`](docs/architecture.md) – module relationships and the
+  data/metadata contracts between them.
+- [`docs/strategy_authoring.md`](docs/strategy_authoring.md) – how to design new
+  entry rules, expose GA genes, and keep indicator contracts healthy.
+- [`docs/operations.md`](docs/operations.md) – runbook for orchestrating full
+  experiments and curating artifacts.
+- [`AGENTS.md`](AGENTS.md) – automation and contribution guide (tests, style,
+  CI expectations).
+
+## Core modules at a glance
+
+| Module | Responsibility |
+| --- | --- |
+| `config.py` | Central configuration (data source, GA knobs, multi-asset policy, recommendation/final-strategy settings). Calls `validate_final_strategy_config` before synthesis. |
+| `data_loader.py` | Fetches OHLCV data from Binance US or yfinance with deterministic cache naming via `build_cache_stem`. |
+| `indicator_library.py` & `indicator_contracts.py` | Implement indicators using `pandas_ta` and describe expected output columns/bands. |
+| `strategy_engine.py` | Builds entry signals, handles majority voting, NaN policies, and indicator column selection. |
+| `fitness.py` | Wraps vectorbt backtests for single- and multi-asset evaluation. Applies composite metrics and winsorisation. |
+| `analysis.py` | Runs champion validation, plots GA progress, and records hashes plus library versions through `run_metadata.merge_run_metadata`. |
+| `walk_forward.py` | Generates rolling training/test windows, evaluates champions, and writes schema v1.0 summary/per-asset artifacts for downstream stages. |
+| `recommendation.py` | Produces `strategy_recommendation.md` and an auditable recommendation payload (`confidence`, asset stance, parameter stability). |
+| `final_strategy.py` | Consumes walk-forward + recommendation outputs, enforces gating rules, and emits `final_strategy.md` with weighted parameters and portfolio allocation. |
+
+## Data, caching, and reproducibility
+
+- `data_loader.py` caches Parquet files in `data_cache/`. Cache stems include
+  ticker, source, date range, and timeframe so repeated runs are deterministic.
+- `analysis.run_champion_analysis`, `walk_forward`, `recommendation`, and
+  `final_strategy` each call `merge_run_metadata` to append hashes, timing, and
+  artifact pointers inside `run_metadata.json`.
+- Set `config.PREFLIGHT_ALL_INDICATORS = True` to compute every indicator before
+  optimisation, surfacing missing column/band issues early.
+- Trade floor policies (`trade_floor.py`) and composite metrics rely on
+  deterministic seeds (`config.SEED` or `GA_SEED` env) to keep GA runs
+  repeatable across environments.
+
+## Outputs
+
+Running `python main.py` (with walk-forward enabled) produces the following key
+artifacts inside the run directory (default: project root):
+
+- `ga_fitness_evolution.png` – snapshot of per-generation best fitness.
+- `analysis/` plots and CSV summaries from champion analysis.
+- `walk_forward/walk_forward_summary.json` &
+  `walk_forward/walk_forward_per_asset.csv` – schema v1.0 artifacts consumed by
+  the recommendation and final strategy stages.
+- `strategy_recommendation.md` + `run_metadata.json["recommendation"]` –
+  confidence score, asset classes, and parameter stability notes generated by
+  `recommendation.generate_recommendation`.
+- `final_strategy.md` + `run_metadata.json["final_strategy"]` – parameter and
+  asset-weight synthesis from `final_strategy.generate_final_strategy`.
+
+## Quality gates
+
+The project ships with an automated test suite and pre-commit hooks. Before
+opening a pull request run:
 
 ```bash
-cp .env.example .env
+pytest -q              # or pytest -q -n auto for a parallel run
+pre-commit run -a      # formatting, lint, and safety checks
 ```
 
-Fill in `GA_SEED`, `BINANCE_TLD`, `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `GA_QUICK_TEST`, and `USE_VBT_STUB` with your own settings.
-
-### Key Features (Current Version 1.2)
-
-  * **Genetic Algorithm Core:** Uses the `pygad` library to optimize strategy parameters across a multi-generational process.
-  * **Dynamic Strategy Configuration:** All strategy rules, indicators, and parameters are defined in a single, easy-to-edit `config.py` file.
-  * **Multi-Indicator Support:** The engine can build strategies using a confluence of indicators, including EMA, RSI, MACD, and Bollinger Bands, with on/off switches for each rule.
-  * **Multi-Source Data Loader:** Fetches historical data from both `yfinance` and the **Binance.US** API, with automated caching.
-  * **Automated Rolling Dates:** Intelligently calculates training and validation periods based on the current date and selected timeframe.
-  * **Robust Backtesting:** Utilizes the `vectorbt` library for high-speed, vectorized backtesting.
-  * **Advanced Risk Management:** Includes optimizable stop-loss, take-profit, trailing stop loss, and a static max hold period.
-  * **Composite Fitness Function:** The GA optimizes for a blended score of multiple metrics (Sortino Ratio, Profit Factor, Max Drawdown) to find more balanced strategies.
-  * **Multi-Asset Fitness with Robustness Penalty:** Evaluate strategies across a group of assets using the weighted mean minus λ·standard deviation of per-asset scores with a configurable trade floor.
-  * **Automated Validation:** After optimization, the "champion" strategy is automatically tested on a separate, unseen out-of-sample dataset.
-  * **Progress Tracking:** A live progress bar provides real-time feedback during optimization runs.
-
-### Indicator Defaults & Aliases
-
-Multi-output indicators default to specific outputs when a rule omits a target column or band:
-
-| Indicator | Default selection |
-| --------- | ----------------- |
-| MACD | Histogram |
-| Stochastic | %K line |
-| Bollinger/Keltner/Donchian | Middle band |
-| MA Envelope | Middle band |
-| ADX/DMI | ADX line |
-| Ichimoku | Baseline (`IKS_*`) |
-| Pivot Points | `P` |
-| TRIX (with signal) | TRIX line |
-
-Override these defaults by specifying `condition["column"]` or `condition["band"]`.
-
-The **MA Envelope** indicator (`ma_envelope`) accepts `period`, `percent`, and
-`ma` parameters. The `percent` distance may be supplied as either `2.0` or
-`0.02`; both are normalised to the same fractional float for caching and column
-names. Output columns follow the pattern
-`MAE_{U|M|L}_<period>_<percent>` where the middle band is selected by default
-when no `column` or `band` is specified.
-
-Indicator names are case-insensitive and support these shorthands:
-
-| Alias | Full name |
-| ----- | --------- |
-| uo | ultimate_oscillator |
-| willr | williams_r |
-| kc | keltner |
-| dc | donchian |
-| dmi | adx |
-| bb | bbands |
-| bollinger | bbands |
-| keltner_channels | keltner |
-
-Missing columns or bands raise an error by default (`strict_column=True`).
-Set `strict_column=False` globally under `entry_rules` or per rule via
-`condition["strict_column"]` to fall back to the first available column.
-
-### Project Architecture
-
-Of course. Here is a comprehensive breakdown of each file in our project and its specific role in the framework.
-
----
-### `config.py` - The Control Panel
-This is the single most important file for the user. It is the central "control panel" for the entire application, designed so that you can run vastly different experiments without ever touching the core logic files.
-
-* **Key Responsibilities:**
-    * **Data Source Selection:** Sets the `DATA_SOURCE` (`binance` or `yfinance`) and reads API credentials from environment variables.
-    * **Asset & Timeframe:** Defines which asset to test (`SELECTED_ASSET_NAME`) and at what resolution (`TIMEFRAME`).
-    * **Timeframe Conversion:** Minute bars map to `'min'` for pandas frequency strings (e.g., `'15m'` → `'15min'`). See [`tests/test_config_to_pandas_freq.py`](tests/test_config_to_pandas_freq.py) for validation.
-    * **Dynamic Date Calculation:** Intelligently calculates the rolling `TRAINING_PERIOD` and `VALIDATION_PERIOD` based on the current date and the selected timeframe, automatically respecting the data history limits of the chosen API.
-    * **Strategy Definition:** The `strategy_rules.py` module contains the `STRATEGY_RULES` dictionary, the heart of the system. This is where you build your trading strategy by combining indicator rules, setting their parameters, defining which parameters should be optimized as "genes," and using `is_active` flags to turn rules on or off.
-    * **Risk Management:** Sets the `MAX_HOLD_PERIOD` for trades, now expressed
-      as days converted into bars based on the selected `TIMEFRAME`.
-    * **GA Tuning:** Holds all parameters for the Genetic Algorithm (`GA_POPULATION_SIZE`, `GA_NUM_GENERATIONS`, etc.).
-    * **Fitness Criteria:** Defines the `FITNESS_WEIGHTS` for the composite score, telling the AI what characteristics of a "good" strategy to prioritize.
-    * **Multi-Asset Settings:** The `MULTI_ASSET` block controls group evaluation including asset weights, dispersion penalty `lambda_dispersion`, trade-floor policies, zero-trade handling and per-asset trade requirements. A global `COVERAGE_THRESHOLD` setting decides how much historical data an asset must have to be included, and the `poor_score` value defines the sentinel fitness used when the trade floor fails.
-    * **Determinism & Fees:** A global `SEED` ensures reproducible runs (override with the `GA_SEED` environment variable) and `FEES` centralises trading costs.
-    * **Lambda Grid:** Optional `lambda_grid` values allow coarse tuning of the dispersion penalty before main GA runs; `lambda_grid_generations` controls how many GA generations each sweep or rescore uses (default `1`). Set `lambda_grid` to `None` to disable the grid search.
-
----
-### `data_loader.py` - The Data Handler
-This module's sole responsibility is to fetch, clean, and cache market data.
-
-* **Key Responsibilities:**
-    * **Data Routing:** Acts as a "router" by checking the `DATA_SOURCE` in the config file and calling the appropriate private function to get data (e.g., `_get_binance_data`).
-    * **API Connection:** Contains the specific logic for connecting to different APIs (Binance, yfinance).
-    * **Data Standardization:** Cleans the data returned from different APIs into a single, standard format (a pandas DataFrame with a `DatetimeIndex` and capitalized column names: `Open`, `High`, `Low`, `Close`, `Volume`). This includes flattening complex `MultiIndex` columns.
-* **Caching:** Manages the `data_cache` directory. It saves a local Parquet copy of any downloaded data (with seamless legacy CSV reads) so that subsequent runs are nearly instantaneous, avoiding redundant API calls.
-
----
-### `indicator_library.py` - The Toolbox
-This file is a simple, clean, and expandable "toolbox" of functions for calculating technical indicators.
-
-* **Key Responsibilities:**
-    * Contains a separate, self-contained function for each indicator (e.g., `calculate_ema`, `calculate_rsi`, `calculate_macd`).
-    * Uses the high-performance `pandas-ta` library to perform the actual mathematical calculations, ensuring speed and accuracy.
-    * Provides a standardized interface where each function accepts price data and parameters, and returns the calculated indicator values.
-
----
-### `strategy_engine.py` - The Logic Engine
-This is the core processor that translates your ideas from the config file into actual trading signals.
-
-* **Key Responsibilities:**
-    * **Rule Interpretation:** It reads the `STRATEGY_RULES` dictionary from `strategy_rules`.
-    * **Dynamic Indicator Calls:** It uses the `INDICATOR_MAPPING` dictionary to dynamically call the correct calculation functions from the `indicator_library.py` based on the active rules.
-    * **Signal Generation:** It processes the `'condition'` logic for each rule (e.g., `'price_is_above_indicator'`, `'indicator_crosses_above_value'`) to generate a boolean Series of signals.
-    * **Intelligent Column Selection:** For indicators that return multiple columns of data (like MACD or Bollinger/Keltner/Donchian/MA Envelope bands), it intelligently selects the correct column to use based on the condition type. `condition["band"]` can target specific Bollinger, Keltner, Donchian, or MA Envelope bands (`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`), but specifying `condition["column"]` overrides the selection if both are provided. The default column used when `column` is omitted is listed below:
-
-      | Indicator            | Default column            |
-      | -------------------- | ------------------------- |
-      | MACD                 | Histogram (falls back to line)
-      | Bollinger/Keltner/Donchian/MA Envelope | Middle band
-      | ADX/DMI             | ADX line
-      | Stochastic          | %K line (`STOCHk_*`)
-      | Ichimoku            | Baseline (`IKS_*`)
-      | Pivot Points        | `P`
-      | TRIX (with signal)  | TRIX line
-
-    * **Deterministic Caching:** Indicator outputs are cached using a hash of the
-      indicator name, normalised parameters, and input columns. Percent inputs,
-      such as MA Envelope's `percent`, are converted to a fractional float before
-      hashing, so `2.0` and `0.02` produce the same cache entry.
-
-      When a requested column or band is missing, the engine raises a `KeyError` by default. Setting `strict_column=False` under `entry_rules` falls back to the first available column **and emits a warning**. This fallback may use an unintended column; override per-rule via `condition["strict_column"]` when needed.
-
-    Example:
-
-    ```python
-    {
-        "indicator": "bbands",
-        "params": {"period": 20, "std_dev": 2},
-        "condition": {"type": "price_is_above_indicator", "band": "upper", "column": "BBL"},
-    }
-    # Uses BBL because `column` overrides `band`
-
-    {
-        "indicator": "adx",
-        "params": {"period": 14},
-        "condition": {
-            "type": "indicator_is_above_value",
-            "value": 20,
-            "column": "DMX",
-            "strict_column": False,
-        },
-    }
-    # Falls back to ADX line with a warning because `DMX` is missing and `strict_column` is False for this rule
-    ```
-
-    * **Signal Combination:** It combines the signals from all active rules using the specified `combination_logic` (case-insensitive, defaults to `"AND"`). NaNs are handled according to `nan_policy`: `"FALSE"` fills them, `"PROPAGATE"` preserves them, and `"FORWARD_FILL"` carries forward the last non-NaN value. For `"VOTE"`, a majority threshold is used when `vote_threshold` is `None`.
-    * **Output:** It returns a final, single pandas Series of `True`/`False` entry signals to the backtester.
-
----
-### `fitness.py` - The GA's Judge
-This module is the critical bridge between the Genetic Algorithm and our trading logic. It's responsible for evaluating how "fit" any given strategy is.
-
-* **Key Responsibilities:**
-    * **Gene Injection:** It takes a "solution" (a list of parameter values) from the GA and uses the `gene_map` to precisely inject those values into a temporary copy of the `STRATEGY_RULES`.
-    * **Backtest Execution:** It calls the `strategy_engine` to get entry signals for the injected strategy, then runs a high-speed backtest using `vectorbt`, applying all exit logic (stop loss, trailing stop, take profit, max hold time).
-    * **Performance Scoring:** It calculates the **composite fitness score** based on the backtest results and the `FITNESS_WEIGHTS` defined in the config file.
-    * **Output:** It returns a single number (the fitness score) to the Genetic Algorithm, which the GA uses to rank that solution and guide the evolution process.
-
----
-### `main.py` - The Orchestrator
-This is the main entry point of the application. It controls the entire end-to-end workflow from setup to final analysis.
-
-* **Key Responsibilities:**
-    * **Initialization:** Imports all other modules and reads all settings from `config.py`.
-    * **Gene Parsing:** Uses the `parse_genes_from_config` utility from `gene_parser.py` to scan the `STRATEGY_RULES`, find all active genes, and build the necessary `gene_space` and `gene_map` data structures required by `PyGAD`.
-    * **Data Loading:** Calls the `data_loader` to fetch the **training data**.
-    * **GA Execution:** Configures and launches the `pygad.GA` instance, enabling parallel processing and hooking in our custom `fitness` function and `on_generation` progress bar.
-    * **Results Display:** Prints a summary of the best solution found by the GA.
-    * **Handoff to Analysis:** Automatically calls the `analysis.py` module to perform the final validation run on the "champion" strategy.
-
----
-### `analysis.py` - The Reporter
-This module's purpose is to provide a final, unbiased report on the performance of the single best strategy discovered by the GA.
-
-* **Key Responsibilities:**
-    * **Out-of-Sample Testing:** It loads a completely separate, **unseen validation dataset** based on the `VALIDATION_PERIOD` in `config.py`.
-    * **Champion Backtest:** It re-runs the backtest **one time** using the winning set of parameters found by the GA.
-    * **Statistical Reporting:** It uses `vectorbt` to generate and print a detailed table of performance statistics (Total Return, Max Drawdown, Win Rate, etc.).
-    * **Visualization:** It generates and displays a plot of the strategy's equity curve against the benchmark "buy and hold" return for the validation period.
-    * **Artifacts:** All plots and metadata are written to `Reporting/<run_id>`; the most recent run is linked via `Reporting/latest` or, if symlinks are unsupported, a `Reporting/LATEST_RUN.txt` pointer file.
-
-### Setup and Installation
-
-1.  **Clone the Repository:**
-
-    ```bash
-    git clone <your-repo-url>
-    cd <your-repo-name>
-    ```
-
-2.  **Create a Virtual Environment (Recommended):**
-
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-
-3.  **Install Dependencies:**
-    Use the checked-in requirement files to install the runtime stack—there is
-    no need to craft a manual dependency list.
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-    The curated list covers the GA/backtesting stack (`pygad`, `vectorbt`,
-    `pandas`, `numpy`) plus supporting extras such as `pyarrow` for Parquet
-    caching and `pydantic` for schema validation. On startup the framework logs
-    the detected indicator backend and library versions (``pandas-ta``,
-    ``pandas``, ``numpy`` and whether ``TA-Lib`` is active) so mismatches are
-    easier to diagnose.
-
-    For linting and tests, install the optional developer dependencies:
-
-    ```bash
-    pip install -r requirements-dev.txt
-    ```
-
-    After installing the dev dependencies you can run `pre-commit` for linting:
-
-    ```bash
-    pre-commit run -a
-    ```
-
-    If you encounter SSL certificate errors (e.g., behind a corporate proxy), point Git to the certifi bundle:
-
-    ```bash
-    export SSL_CERT_FILE="$(python -c 'import certifi; print(certifi.where())')"
-    ```
-
-4.  **Add API Keys:**
-
-      * Set the following environment variables before running the framework:
-
-        - `BINANCE_API_KEY`
-        - `BINANCE_API_SECRET`
-        - `BINANCE_TLD` (optional, defaults to `us`)
-
-      The `config.py` file automatically reads these values so no manual editing
-      of the source code is required.
-
-### How to Use
-
-1.  **Configure Your Experiment:** Open `config.py`.
-
-      * Set the `SELECTED_ASSET_NAME`, `TIMEFRAME`, and `DATA_SOURCE`.
-      * Go to the `STRATEGY_RULES` dictionary. Use the `'is_active': True/False` flags to choose which indicator conditions to include in your strategy.
-      * Adjust the `low` and `high` ranges for any genes you want to optimize.
-
-#### Entry Rule Combination Logic
-
-The `entry_rules` section supports three ways to combine individual indicator conditions:
-
-* `"AND"` – all conditions must be true.
-* `"OR"` – any condition being true triggers a signal.
-* `"VOTE"` – at least *k* conditions must be true.  If `vote_threshold` is
-  `None` or omitted, the engine uses a majority (`ceil(N/2)`).  Values outside
-  `1..N` raise a `ValueError`.
-
-`combination_logic` is case-insensitive and defaults to `"AND"` when omitted.
-With only one active condition, all combination types behave the same.
-`nan_policy` controls how missing indicator values are handled before combining:
-`"FALSE"` (default) replaces NaNs with `False`, `"PROPAGATE"` keeps them, and
-`"FORWARD_FILL"` carries forward the last non-NaN value.
-
-Indicators such as moving averages often emit `NaN` values at the start of the
-series (e.g., a 14-period RSI has 13 initial NaNs). With the default
-`nan_policy="FALSE"`, those early `NaN` values become `False` so trading can
-begin as soon as other conditions are satisfied. Setting
-`nan_policy="PROPAGATE"` keeps the `NaN`s, and the combined signal will remain
-`NaN` until all indicators have valid data. `nan_policy="FORWARD_FILL"` allows
-carrying forward the last known value for a limited number of bars. The cap is
-controlled by `ffill_lookback` (default `config.NAN_FFILL_LOOKBACK`); `0` means
-unlimited forward fill.
-
-Example configurations:
-
-```python
-"entry_rules": {
-    "combination_logic": "OR",
-    "conditions": [...],
-}
-
-"entry_rules": {
-    "combination_logic": "VOTE",
-    "vote_threshold": None,  # defaults to majority
-    "nan_policy": "FALSE",
-    "conditions": [...],
-}
-```
-```python
-# Propagate NaNs to avoid trading on incomplete data
-"entry_rules": {
-    "nan_policy": "PROPAGATE",
-    "conditions": [...],
-}
-```
-
-Both `combination_logic` and `vote_threshold` may be declared as genes (using
-the `gene` key) so the GA can explore different combination modes and
-thresholds.
-
-To target specific Bollinger, Keltner, Donchian, or MA Envelope bands, provide a
-`band` hint or use the `*_band` condition types. The `band` hint accepts
-`"upper"`, `"middle"`/`"mid"`/`"basis"`, or `"lower"`:
-
-```python
-{
-    "indicator": "bbands",
-    "params": {"period": 20, "std_dev": 2},
-    "condition": {"type": "price_is_above_indicator", "band": "upper"},
-}
-# equivalent shorthand
-{
-    "indicator": "bbands",
-    "params": {"period": 20, "std_dev": 2},
-    "condition": {"type": "price_is_above_upper_band"},
-}
-```
-
-2.  **Run the Optimizer:** Execute the `main.py` script from your terminal.
-
-    ```bash
-    python3 main.py
-    ```
-
-3.  **Analyze the Results:** The script will first run the optimization, printing a live progress bar. At the end, it will display a plot of the GA's learning curve, print the optimal parameters, and then automatically run the final analysis on the unseen validation data, printing a full statistical report and displaying the final equity curve.
-
-### Project Roadmap
-
-Of course. Here is the complete project roadmap, with thorough descriptions for all the features we have not yet implemented.
-
-### **Project Roadmap**
-
-#### **V1.0: Minimum Viable Product (MVP) - ✅ Complete**
-* A stable, single-asset optimization framework with core modular architecture and multi-core processing.
-
----
-#### **V1.1: Quality of Life & Core Refinements - ✅ Complete**
-* **Progress Tracking:** Real-time console updates during GA optimization.
-* **Centralized Timeframe Configuration:** A single `TIMEFRAME` setting in `config.py` controls all modules.
-* **Automated Rolling Dates:** The config file intelligently calculates training/validation periods, respecting API data limits.
-  * **Maximum Trade Hold Duration:** A key risk parameter (`MAX_HOLD_PERIOD`) is
-    now calculated as days converted into bars, ensuring consistency across
-    different intraday timeframes.
-* **Composite Fitness Function:** The AI optimizes for a blended score of multiple performance metrics (Sortino, Profit Factor, etc.).
-
----
-#### **V1.2: Strategy Enhancement & Robustness**
-* **Status:** ✅ Complete.
-* **Features:**
-    * **Expanded Indicator Library:** ✅ Complete.
-    * **Advanced Exit Logic (Trailing Stops):** ✅ Complete.
-    * **Walk-Forward Validation:** ✅ Complete.
-    * **Tune GA Hyperparameters:** ✅ Complete.
-
----
-#### **V2.0: Major Architectural Upgrade**
-* **Status:** **In Progress**
-* **Features:**
-    * **Portfolio-Level Optimization Engine:** ✅ Complete.
-        * *Uses a multi-asset system that measures fitness across a group of assets, with a goal to avoid over-fitting strategies to a single asset.
-    * **Advanced Combination Logic:** ✅ Complete.
-        * *`strategy_engine.py` now supports `AND`, `OR`, and `VOTE` (N-of-M) logic for combining indicator conditions, providing more flexible entry signals.*
-    * **Strategy Recommendation Engine:** ✅ Complete.
-        * *Turns multi-asset backtests and walk-forward validation into a single, production-ready trading strategy recommendation with a confidence score, asset stance, and clear rationale.*
-    * **Complete Indicator Library:** ✅ Complete.
-        * *This is the process of building out the remaining functions in `indicator_library.py` to include all 25 indicators we originally planned. This gives the AI the widest possible set of tools to build strategies with, increasing the potential for discovering novel patterns.*
-
----
-### Strategy Recommendation Engine
-
-After walk-forward validation, the framework runs a Strategy Recommendation Engine that writes two artifacts:
-
-* `strategy_recommendation.md` – a human-readable report
-* `run_metadata.json` → `"recommendation"` block for machine consumption
-
-The report includes an **Overall Confidence** score (High/Medium/Low) and an **Asset Performance Matrix** that classifies each asset by median performance and consistency:
-
-* **Stars** – performance ≥1.0 & consistency ≥70%
-* **Stalwarts** – performance between 0.0 and 1.0 & consistency ≥60%
-* **Gambles** – performance ≥1.0 & consistency <50%
-* **Drags** – performance <0.0 & consistency <50%
-
-Assets with too few samples are labeled **Insufficient Data**. The engine also reports parameter stability, flagging genes with high coefficients of variation.
-
----
-#### **V3.0: Advanced Framework & Future Vision**
-* **Status:** **Planned**
-* **Features:**
-    * **Genetic Programming (GP):** (Planned)
-        * *This is a significant evolution beyond our current GA. Instead of just optimizing the **parameters** of a fixed strategy, GP would allow the AI to **build the strategy structure itself**. The "genes" would become the indicators and logical operators (e.g., `EMA`, `RSI`, `>`, `AND`). The AI would evolve entire trading rule trees from scratch, allowing it to discover completely novel strategies that a human might never design.*
-    * **Graphical User Interface (GUI):** (Planned)
-        * *This involves building a user-friendly, visual interface for the framework using a library like Streamlit. It would allow you to change `config.py` settings with buttons and dropdowns, launch optimization runs, and see the results and plots displayed in an interactive dashboard without having to directly edit code.*
-    * **Live Trading Integration:** (Planned)
-        * *This is the final step to connect the framework to the real world. We would build a module that connects to a broker's API (like Binance.US) and can automatically place paper or live trades based on the signals generated by a "champion" strategy.*
-
-### License
-
-This project is released under the [MIT License](LICENSE).
-
-### Disclaimer
-
-This framework is an educational tool for research and quantitative analysis. It is not financial advice. All trading involves significant risk, and any strategies developed with this tool should be thoroughly tested and understood before any capital is risked. Past performance is not indicative of future results.
+Continuous integration mirrors these commands on Python 3.12 and 3.13 and also
+executes CodeQL/Bandit security scans. Keep the tree free of secrets—API keys
+must be provided via environment variables.
