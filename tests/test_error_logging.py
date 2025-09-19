@@ -1,11 +1,10 @@
-import pandas as pd
-
 import concurrent.futures as cf
 
-import indicator_contracts as contracts
-import strategy_engine
+import pandas as pd
 
 import fitness
+import indicator_contracts as contracts
+import strategy_engine
 from fitness import MultiAssetFitnessEvaluator
 
 

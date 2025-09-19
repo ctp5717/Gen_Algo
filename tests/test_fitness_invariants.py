@@ -69,9 +69,7 @@ def _sequential_executor(monkeypatch):
             results, errors = self._evaluate_assets({"solution": vector})
             err_counts.update(errors)
             assets_map = {
-                ticker: results.get(
-                    ticker, self._build_evaluation_record()
-                )
+                ticker: results.get(ticker, self._build_evaluation_record())
                 for ticker in self._sorted_tickers
             }
             summary = self._score_assets(assets_map)
@@ -119,6 +117,7 @@ def _sequential_executor(monkeypatch):
         "_evaluate_population",
         _sync_population,
     )
+
 
 def test_dispersion_null_when_metrics_equal():
     m = [1.0, 1.0, 1.0]

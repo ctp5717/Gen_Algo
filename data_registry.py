@@ -42,7 +42,9 @@ class DataRegistry:
         return self._root / f"{window_id}__{safe_asset}.npy"
 
     # ------------------------------------------------------------------
-    def register_window(self, window_id: str, data_map: dict[str, pd.DataFrame]) -> dict[str, dict[str, Any]]:
+    def register_window(
+        self, window_id: str, data_map: dict[str, pd.DataFrame]
+    ) -> dict[str, dict[str, Any]]:
         descriptors: dict[str, dict[str, Any]] = {}
         for asset_id, df in data_map.items():
             descriptors[asset_id] = self.register_slice(window_id, asset_id, df)
@@ -181,7 +183,7 @@ class DataRegistry:
         if backend == "columnar":
             columns = descriptor.get("columns", [])
             arrays: dict[str, Any] = {}
-            for col, path, dtype_str in zip(
+            for col, path, _dtype_str in zip(
                 columns,
                 descriptor.get("column_paths", []),
                 descriptor.get("column_dtypes", []),
@@ -276,4 +278,3 @@ registry = DataRegistry(
     columnar_threshold=_threshold,
     schema_version=_schema_version,
 )
-

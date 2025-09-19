@@ -49,9 +49,7 @@ def _sequential_executor(monkeypatch):
             results, errors = self._evaluate_assets({"solution": vector})
             err_counts.update(errors)
             assets_map = {
-                ticker: results.get(
-                    ticker, self._build_evaluation_record()
-                )
+                ticker: results.get(ticker, self._build_evaluation_record())
                 for ticker in self._sorted_tickers
             }
             summary = self._score_assets(assets_map)

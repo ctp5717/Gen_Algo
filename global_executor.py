@@ -21,7 +21,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypedDict
 
 import config
 
@@ -45,7 +45,22 @@ _base_in_flight_cap = 0
 _memory_target_bytes = 0
 _avg_batch_bytes = 0.0
 _future_starts: dict[cf.Future, float] = {}
-_metrics = {
+
+
+class ExecutorMetrics(TypedDict):
+    submitted: int
+    completed: int
+    total_runtime: float
+    pending: int
+    max_pending: int
+    in_flight_cap: int
+    base_in_flight_cap: int
+    bytes_avg: float
+    worker_count: int
+    worker_seeds: list[int]
+
+
+_metrics: ExecutorMetrics = {
     "submitted": 0,
     "completed": 0,
     "total_runtime": 0.0,
@@ -74,7 +89,11 @@ def _worker_initializer(seed: int) -> None:
     if _cpu_affinity:
         try:
             os.sched_setaffinity(0, _cpu_affinity)
-            logger.info("worker %s affinity=%s", mp.current_process().name, sorted(_cpu_affinity))
+            logger.info(
+                "worker %s affinity=%s",
+                mp.current_process().name,
+                sorted(_cpu_affinity),
+            )
         except Exception:  # pragma: no cover - affinity is best effort
             logger.debug("CPU affinity unavailable on this platform", exc_info=True)
     try:  # pragma: no cover - defensive seeding path
@@ -126,7 +145,9 @@ def _on_future_done(fut: cf.Future) -> None:
         _pending_cond.notify_all()
 
 
-def create(overrides: dict[str, Any] | None = None, *, force: bool = False) -> cf.ProcessPoolExecutor:
+def create(
+    overrides: dict[str, Any] | None = None, *, force: bool = False
+) -> cf.ProcessPoolExecutor:
     """Create (or return) the global executor.
 
     Parameters
@@ -138,7 +159,8 @@ def create(overrides: dict[str, Any] | None = None, *, force: bool = False) -> c
         changed.  Primarily used by tests.
     """
 
-    global _executor, _executor_settings, _in_flight_cap, _cpu_affinity, _memory_target_bytes
+    global _executor, _executor_settings, _in_flight_cap, _cpu_affinity
+    global _memory_target_bytes, _avg_batch_bytes, _base_in_flight_cap
 
     settings = _load_settings(overrides)
     start_method = settings.get("start_method") or "spawn"
@@ -184,7 +206,9 @@ def create(overrides: dict[str, Any] | None = None, *, force: bool = False) -> c
         seeds = [int(seed) + i for i in range(max_workers)]
         _in_flight_cap = int(settings.get("in_flight_cap") or max_workers * 8)
         _base_in_flight_cap = max(1, _in_flight_cap)
-        _memory_target_bytes = int(float(settings.get("memory_target_gib") or 0) * (1024**3))
+        _memory_target_bytes = int(
+            float(settings.get("memory_target_gib") or 0) * (1024**3)
+        )
         _avg_batch_bytes = 0.0
         with _pending_cond:
             global _pending_tasks
@@ -217,7 +241,10 @@ def create(overrides: dict[str, Any] | None = None, *, force: bool = False) -> c
 
 
 def submit(
-    fn: Callable[..., Any], *args: Any, overrides: dict[str, Any] | None = None, **kwargs: Any
+    fn: Callable[..., Any],
+    *args: Any,
+    overrides: dict[str, Any] | None = None,
+    **kwargs: Any,
 ) -> cf.Future:
     """Submit ``fn`` to the global executor with basic back-pressure."""
 
@@ -265,7 +292,7 @@ def record_batch_metrics(bytes_count: int) -> int:
         bytes_count = 0
 
     with _pending_cond:
-        global _avg_batch_bytes, _in_flight_cap, _base_in_flight_cap, _memory_target_bytes
+        global _avg_batch_bytes, _in_flight_cap
 
         if bytes_count > 0:
             if _avg_batch_bytes <= 0:
@@ -289,7 +316,9 @@ def record_batch_metrics(bytes_count: int) -> int:
                 (_memory_target_bytes or 0) / (1024**3),
             )
             _in_flight_cap = max(1, target_cap)
-        elif target_cap > _in_flight_cap and _in_flight_cap < (_base_in_flight_cap or target_cap):
+        elif target_cap > _in_flight_cap and _in_flight_cap < (
+            _base_in_flight_cap or target_cap
+        ):
             proposed = min((_base_in_flight_cap or target_cap), _in_flight_cap + 1)
             if not _memory_target_bytes or (_avg_batch_bytes * proposed) < max(
                 _memory_target_bytes * 0.8, 1.0
@@ -332,4 +361,3 @@ def shutdown(wait: bool = True) -> None:
         _metrics["worker_count"] = 0
         _metrics["worker_seeds"] = []
         _future_starts.clear()
-

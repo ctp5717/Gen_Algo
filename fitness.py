@@ -6,13 +6,12 @@ Fitness Function for Genetic Algorithm
 """
 import concurrent.futures as cf
 import copy
+import itertools
 import logging
+import math
+import traceback
 import types
 import warnings
-import itertools
-import time
-import traceback
-import math
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
@@ -42,12 +41,12 @@ else:  # pragma: no cover - inject stub attributes if minimal module present
         vbt.__file__ = getattr(vbt, "__file__", _vbt_file)
 
 import config
+import fitness_worker
 import global_executor
 import metrics_contract
 import strategy_engine as engine
 import trade_floor
 from data_registry import registry as data_registry
-import fitness_worker
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
@@ -203,11 +202,15 @@ class MultiAssetFitnessEvaluator:
         self.floor_failures = Counter()
         self._metrics_preflight_done = False
         self._metric_mapping_logged = False
-        self._window_id = self.settings.get("window_id") or f"window-{next(_WINDOW_COUNTER)}"
+        self._window_id = (
+            self.settings.get("window_id") or f"window-{next(_WINDOW_COUNTER)}"
+        )
         self._window_released = False
         self._descriptors = data_registry.register_window(self._window_id, group_data)
         self._assets_with_data = [
-            ticker for ticker, desc in self._descriptors.items() if not desc.get("empty")
+            ticker
+            for ticker, desc in self._descriptors.items()
+            if not desc.get("empty")
         ]
         self._assets_without_data = [
             ticker for ticker, desc in self._descriptors.items() if desc.get("empty")
@@ -217,18 +220,31 @@ class MultiAssetFitnessEvaluator:
         exec_cfg = dict(getattr(config, "GLOBAL_EXECUTOR", {}))
         self._batch_size = max(1, int(exec_cfg.get("batch_size") or 1))
         self._min_batch_size = max(1, int(exec_cfg.get("min_batch_size") or 1))
-        self._max_batch_size = max(self._min_batch_size, int(exec_cfg.get("max_batch_size") or self._batch_size))
-        self._batch_adjustment_rate = float(exec_cfg.get("batch_step_ratio", 0.25) or 0.25)
+        self._max_batch_size = max(
+            self._min_batch_size,
+            int(exec_cfg.get("max_batch_size") or self._batch_size),
+        )
+        self._batch_adjustment_rate = float(
+            exec_cfg.get("batch_step_ratio", 0.25) or 0.25
+        )
         self._batch_adjustment_rate = min(0.5, max(0.05, self._batch_adjustment_rate))
         self._batch_cooldown_submissions = max(
             1, int(exec_cfg.get("batch_cooldown_submissions", 6) or 6)
         )
         self._submissions_since_adjustment = self._batch_cooldown_submissions
-        self._latency_target = max(0.01, float(exec_cfg.get("latency_target_ms", 200)) / 1000.0)
-        self._queue_high_watermark = float(exec_cfg.get("queue_high_watermark", 0.85) or 0.85)
-        self._queue_low_watermark = float(exec_cfg.get("queue_low_watermark", 0.35) or 0.35)
+        self._latency_target = max(
+            0.01, float(exec_cfg.get("latency_target_ms", 200)) / 1000.0
+        )
+        self._queue_high_watermark = float(
+            exec_cfg.get("queue_high_watermark", 0.85) or 0.85
+        )
+        self._queue_low_watermark = float(
+            exec_cfg.get("queue_low_watermark", 0.35) or 0.35
+        )
         self._queue_high_watermark = min(0.99, max(0.0, self._queue_high_watermark))
-        self._queue_low_watermark = max(0.0, min(self._queue_high_watermark, self._queue_low_watermark))
+        self._queue_low_watermark = max(
+            0.0, min(self._queue_high_watermark, self._queue_low_watermark)
+        )
         self._reducer_timeout = float(exec_cfg.get("reducer_timeout", 30.0) or 30.0)
         self._latency_ema = 0.0
         self._bytes_ema = 0.0
@@ -395,7 +411,9 @@ class MultiAssetFitnessEvaluator:
         if max_pending >= high_water or self._latency_ema > self._latency_target * 1.5:
             desired = max(self._min_batch_size, self._batch_size - step)
             direction = -1 if desired < self._batch_size else 0
-        elif max_pending <= low_water and self._latency_ema < self._latency_target * 0.7:
+        elif (
+            max_pending <= low_water and self._latency_ema < self._latency_target * 0.7
+        ):
             desired = min(self._max_batch_size, self._batch_size + step)
             direction = 1 if desired > self._batch_size else 0
         elif (
@@ -455,9 +473,7 @@ class MultiAssetFitnessEvaluator:
 
         mean_latency = sum(latencies) / len(latencies) if latencies else 0.0
         p95_latency = float(np.percentile(latencies, 95)) if latencies else 0.0
-        throughput = (
-            total_evaluations / total_latency if total_latency > 0 else 0.0
-        )
+        throughput = total_evaluations / total_latency if total_latency > 0 else 0.0
         occupancy = total_cpu / total_latency if total_latency > 0 else 0.0
 
         error_counts = Counter()
@@ -535,7 +551,10 @@ class MultiAssetFitnessEvaluator:
                 chunk = payload[start : start + current_batch_size]
                 if not chunk:
                     continue
-                serialization_volume += sum(len(item["vector"]) for item in chunk) * 8
+                batch_vector_count = 0
+                for entry in chunk:
+                    batch_vector_count += len(entry["vector"])
+                serialization_volume += batch_vector_count * 8
                 future = global_executor.submit(
                     fitness_worker.evaluate_batch,
                     descriptor,
@@ -572,19 +591,27 @@ class MultiAssetFitnessEvaluator:
 
             for future in done:
                 meta = future_meta.get(future, {})
-                asset = meta.get("asset")
+                asset_key = meta.get("asset")
+                if asset_key is None:
+                    logger.error(
+                        "Missing asset metadata for future result (window=%s)",
+                        self._window_id,
+                    )
+                    continue
                 indices_chunk = meta.get("indices", [])
                 try:
                     result = future.result()
                 except Exception as exc:  # pragma: no cover - executor exceptions
-                    detail = repr(exc)
+                    detail: str | None = repr(exc)
                     for idx in indices_chunk:
-                        candidate_state[idx]["assets"][asset] = self._build_evaluation_record(
-                            reason="evaluation_error",
-                            detail=detail,
+                        candidate_state[idx]["assets"][asset_key] = (
+                            self._build_evaluation_record(
+                                reason="evaluation_error",
+                                detail=detail,
+                            )
                         )
                         if verbose:
-                            print(f"Error evaluating asset {asset}: {exc}")
+                            print(f"Error evaluating asset {asset_key}: {exc}")
                     continue
 
                 latency_val = float(result.get("latency", 0.0))
@@ -602,22 +629,22 @@ class MultiAssetFitnessEvaluator:
                     evaluations_processed += 1
                     assets_map = candidate_state[sol_idx]["assets"]
                     if entry.get("reason") == "insufficient_coverage":
-                        assets_map[asset] = self._build_evaluation_record(
+                        assets_map[asset_key] = self._build_evaluation_record(
                             reason="insufficient_coverage"
                         )
                         continue
                     error_payload = entry.get("error")
                     if error_payload:
-                        if verbose:
+                        if verbose and asset_key is not None:
                             msg = error_payload.get("message", "")
-                            print(f"Error evaluating asset {asset}: {msg}")
+                            print(f"Error evaluating asset {asset_key}: {msg}")
                         indicator = error_payload.get("indicator")
                         if indicator:
                             err_counts[indicator] += 1
                         detail = self._compose_reason_detail(
                             error_payload.get("message"), indicator
                         )
-                        assets_map[asset] = self._build_evaluation_record(
+                        assets_map[asset_key] = self._build_evaluation_record(
                             reason="evaluation_error",
                             detail=detail,
                             trace=error_payload.get("trace"),
@@ -626,7 +653,7 @@ class MultiAssetFitnessEvaluator:
 
                     stats_raw = entry.get("stats") or self._empty_stats()
                     stats, reason, detail = self._prepare_metrics_record(stats_raw)
-                    assets_map[asset] = self._build_evaluation_record(
+                    assets_map[asset_key] = self._build_evaluation_record(
                         stats,
                         reason=reason,
                         detail=detail,
@@ -637,9 +664,7 @@ class MultiAssetFitnessEvaluator:
         completed = int(after_metrics.get("completed", 0)) - before_completed
         cpu_time = float(after_metrics.get("total_runtime", 0.0)) - before_runtime
         total_latency = sum(latencies)
-        throughput = (
-            evaluations_processed / total_latency if total_latency > 0 else 0.0
-        )
+        throughput = evaluations_processed / total_latency if total_latency > 0 else 0.0
         occupancy = cpu_time / total_latency if total_latency > 0 else 0.0
         max_pending = int(after_metrics.get("max_pending", 0))
         in_flight_cap = int(after_metrics.get("in_flight_cap", 0))
@@ -717,9 +742,7 @@ class MultiAssetFitnessEvaluator:
 
         if vector is not None:
             vector_list = np.asarray(vector).tolist()
-            rules = inject_genes_into_rules(
-                self.base_rules, self.gene_map, vector_list
-            )
+            rules = inject_genes_into_rules(self.base_rules, self.gene_map, vector_list)
         elif rules_override is not None:
             rules = rules_override
         else:

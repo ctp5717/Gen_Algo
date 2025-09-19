@@ -160,9 +160,8 @@ def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
 
     walk_forward.run_walk_forward_validation(tmp_path)
 
-    assert (
-        captured["fitness_batch_size"]
-        == walk_forward.config.GLOBAL_EXECUTOR.get("batch_size")
+    assert captured["fitness_batch_size"] == walk_forward.config.GLOBAL_EXECUTOR.get(
+        "batch_size"
     )
 
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-import traceback
 import time
+import traceback
 from typing import Any
 
 import pandas as pd
@@ -81,9 +81,7 @@ def _evaluate_candidate(
         try:
             metrics_contract.assert_metric_aliases(portfolio)
         except Exception as exc:  # pragma: no cover - warning path
-            logger.warning(
-                "Metric alias preflight failed for %s: %s", signature, exc
-            )
+            logger.warning("Metric alias preflight failed for %s: %s", signature, exc)
         _WORKER_STATE["metrics_preflight_done"] = True
 
     try:
@@ -113,7 +111,11 @@ def _evaluate_candidate(
                         equity_curve = pd.Series(dtype=float)
 
     if sources and not _WORKER_STATE["metric_mapping_logged"]:
-        logger.info("Metrics mapping for %s: %s", signature, metrics_contract.format_mapping(sources))
+        logger.info(
+            "Metrics mapping for %s: %s",
+            signature,
+            metrics_contract.format_mapping(sources),
+        )
         _WORKER_STATE["metric_mapping_logged"] = True
 
     return {
@@ -216,4 +218,3 @@ def evaluate_batch(
         "rows": int(len(ohlc)),
         "bytes": bytes_estimate,
     }
-

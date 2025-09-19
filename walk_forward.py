@@ -240,9 +240,7 @@ def run_walk_forward_validation(
     np.random.seed(config.SEED)
     num_cores = os.cpu_count()
     start_time = datetime.now(timezone.utc)
-    print(
-        f"Using {num_cores} CPU cores via the global executor during each window."
-    )
+    print(f"Using {num_cores} CPU cores via the global executor during each window.")
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
@@ -389,25 +387,34 @@ def run_walk_forward_validation(
         run_id = run_dir.name if hasattr(run_dir, "name") else str(run_dir)
         metrics_csv_path = wf_dir / f"executor_metrics_{run_id}_window{idx}.csv"
 
-        def generation_callback(ga_instance):
-            collector = getattr(evaluator, "collect_generation_report", None)
+        def generation_callback(
+            ga_instance,
+            *,
+            window_idx=idx,
+            rows=metrics_rows,
+            bound_evaluator=evaluator,
+        ) -> None:
+            collector = getattr(bound_evaluator, "collect_generation_report", None)
             report = collector() if callable(collector) else None
             if not report:
-                report = getattr(evaluator, "instrumentation", {}) or {}
+                report = getattr(bound_evaluator, "instrumentation", {}) or {}
             if not report:
                 return
             report = dict(report)
             report["generation"] = ga_instance.generations_completed
-            report["window"] = idx
-            metrics_rows.append(report)
-            mean_latency_ms = float(
-                report.get("mean_latency", report.get("latency_mean", 0.0))
-            ) * 1000
-            p95_latency_ms = float(
-                report.get("p95_latency", report.get("latency_p95", 0.0))
-            ) * 1000
+            report["window"] = window_idx
+            rows.append(report)
+            mean_latency_ms = (
+                float(report.get("mean_latency", report.get("latency_mean", 0.0)))
+                * 1000
+            )
+            p95_latency_ms = (
+                float(report.get("p95_latency", report.get("latency_p95", 0.0))) * 1000
+            )
             pending_now = report.get("pending", report.get("queue_depth", 0))
-            max_pending = report.get("max_pending", report.get("queue_depth", pending_now))
+            max_pending = report.get(
+                "max_pending", report.get("queue_depth", pending_now)
+            )
             base_cap = report.get("base_in_flight_cap", report.get("in_flight_cap", 0))
             print(
                 (
@@ -415,7 +422,7 @@ def run_walk_forward_validation(
                     "pending={pending} max={max_pending} cap={cap}/{base} mean={mean:.2f}ms "
                     "p95={p95:.2f}ms batch={batch}->{next_batch}"
                 ).format(
-                    window=idx,
+                    window=window_idx,
                     gen=report["generation"],
                     thr=report.get("throughput", 0.0),
                     occ=report.get("occupancy", 0.0),
@@ -504,21 +511,29 @@ def run_walk_forward_validation(
                     prepared = dict(row)
                     prepared.setdefault("pending", prepared.get("queue_depth"))
                     prepared.setdefault("max_pending", prepared.get("queue_depth"))
-                    prepared.setdefault("base_in_flight_cap", prepared.get("in_flight_cap"))
+                    prepared.setdefault(
+                        "base_in_flight_cap", prepared.get("in_flight_cap")
+                    )
                     prepared["worker_seeds"] = ",".join(
                         str(seed) for seed in prepared.get("worker_seeds", [])
                     )
                     prepared["error_top"] = ";".join(
-                        f"{name}:{count}" for name, count in prepared.get("error_top", [])
+                        f"{name}:{count}"
+                        for name, count in prepared.get("error_top", [])
                     )
                     writer.writerow({key: prepared.get(key) for key in fieldnames})
             print(f"Executor metrics written to {metrics_csv_path}")
 
-        summary = metrics_rows[-1] if metrics_rows else getattr(evaluator, "instrumentation", {})
+        summary = (
+            metrics_rows[-1]
+            if metrics_rows
+            else getattr(evaluator, "instrumentation", {})
+        )
         if summary:
-            mean_latency_ms = float(
-                summary.get("mean_latency", summary.get("latency_mean", 0.0))
-            ) * 1000
+            mean_latency_ms = (
+                float(summary.get("mean_latency", summary.get("latency_mean", 0.0)))
+                * 1000
+            )
             print(
                 "Final executor summary: thr={:.2f}/s occ={:.2f} queue={} mean_latency={:.2f}ms".format(
                     summary.get("throughput", 0.0),

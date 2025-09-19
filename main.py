@@ -338,9 +338,7 @@ def main(argv: list[str] | None = None):
             f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})"
         )
     num_cores = os.cpu_count()
-    print(
-        f"Detected {num_cores} CPU cores available for the global executor."
-    )
+    print(f"Detected {num_cores} CPU cores available for the global executor.")
     print("-" * 35)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -458,12 +456,12 @@ def main(argv: list[str] | None = None):
         report["generation"] = ga_instance.generations_completed
         metrics_rows.append(report)
 
-        mean_latency_ms = float(
-            report.get("mean_latency", report.get("latency_mean", 0.0))
-        ) * 1000
-        p95_latency_ms = float(
-            report.get("p95_latency", report.get("latency_p95", 0.0))
-        ) * 1000
+        mean_latency_ms = (
+            float(report.get("mean_latency", report.get("latency_mean", 0.0))) * 1000
+        )
+        p95_latency_ms = (
+            float(report.get("p95_latency", report.get("latency_p95", 0.0))) * 1000
+        )
         pending_now = report.get("pending", report.get("queue_depth", 0))
         max_pending = report.get("max_pending", report.get("queue_depth", pending_now))
         base_cap = report.get("base_in_flight_cap", report.get("in_flight_cap", 0))

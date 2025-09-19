@@ -1,21 +1,22 @@
+from __future__ import annotations
+
+import copy
 import sys
 import types
+from collections import Counter
 from pathlib import Path
 
-# Ensure repository root is on the import path
+import numpy as np
+import pandas as pd
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
-
-import copy
-from collections import Counter
-
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
 
 import fitness  # noqa: E402
 
@@ -78,9 +79,7 @@ def _sequential_executor(monkeypatch):
             results, errors = self._evaluate_assets({"solution": vector})
             err_counts.update(errors)
             assets_map = {
-                ticker: results.get(
-                    ticker, self._build_evaluation_record()
-                )
+                ticker: results.get(ticker, self._build_evaluation_record())
                 for ticker in self._sorted_tickers
             }
             summary = self._score_assets(assets_map)
@@ -128,6 +127,7 @@ def _sequential_executor(monkeypatch):
         "_evaluate_population",
         _sync_population,
     )
+
 
 def test_near_zero_losses_winsorized():
     profit = 1000.0

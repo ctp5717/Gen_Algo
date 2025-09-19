@@ -1,7 +1,7 @@
-
 import csv
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -230,7 +230,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
         metrics_rows: list[dict[str, Any]] = []
         metrics_csv_path = Path(f"tuner_executor_metrics_{session_id}_run{idx}.csv")
 
-        def generation_callback(ga_instance):
+        def generation_callback(ga_instance, *, run_idx=idx, rows=metrics_rows) -> None:
             collector = getattr(fitness_evaluator, "collect_generation_report", None)
             report = collector() if callable(collector) else None
             if not report:
@@ -239,16 +239,19 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                 return
             report = dict(report)
             report["generation"] = ga_instance.generations_completed
-            report["run"] = idx
-            metrics_rows.append(report)
-            mean_latency_ms = float(
-                report.get("mean_latency", report.get("latency_mean", 0.0))
-            ) * 1000
-            p95_latency_ms = float(
-                report.get("p95_latency", report.get("latency_p95", 0.0))
-            ) * 1000
+            report["run"] = run_idx
+            rows.append(report)
+            mean_latency_ms = (
+                float(report.get("mean_latency", report.get("latency_mean", 0.0)))
+                * 1000
+            )
+            p95_latency_ms = (
+                float(report.get("p95_latency", report.get("latency_p95", 0.0))) * 1000
+            )
             pending_now = report.get("pending", report.get("queue_depth", 0))
-            max_pending = report.get("max_pending", report.get("queue_depth", pending_now))
+            max_pending = report.get(
+                "max_pending", report.get("queue_depth", pending_now)
+            )
             base_cap = report.get("base_in_flight_cap", report.get("in_flight_cap", 0))
             print(
                 (
@@ -256,7 +259,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     "pending={pending} max={max_pending} cap={cap}/{base} mean={mean:.2f}ms "
                     "p95={p95:.2f}ms batch={batch}->{next_batch}"
                 ).format(
-                    run=idx,
+                    run=run_idx,
                     gen=report["generation"],
                     thr=report.get("throughput", 0.0),
                     occ=report.get("occupancy", 0.0),
@@ -334,12 +337,15 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     prepared = dict(row)
                     prepared.setdefault("pending", prepared.get("queue_depth"))
                     prepared.setdefault("max_pending", prepared.get("queue_depth"))
-                    prepared.setdefault("base_in_flight_cap", prepared.get("in_flight_cap"))
+                    prepared.setdefault(
+                        "base_in_flight_cap", prepared.get("in_flight_cap")
+                    )
                     prepared["worker_seeds"] = ",".join(
                         str(seed) for seed in prepared.get("worker_seeds", [])
                     )
                     prepared["error_top"] = ";".join(
-                        f"{name}:{count}" for name, count in prepared.get("error_top", [])
+                        f"{name}:{count}"
+                        for name, count in prepared.get("error_top", [])
                     )
                     writer.writerow({key: prepared.get(key) for key in fieldnames})
             print(f"Executor metrics written to {metrics_csv_path}")

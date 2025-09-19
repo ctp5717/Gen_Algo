@@ -1,10 +1,21 @@
+from __future__ import annotations
+
+import concurrent.futures as cf
+import copy
+import itertools
 import sys
 import types
+from collections import Counter
 from pathlib import Path
 
-# Ensure repository root is on the import path
+import numpy as np
+import pandas as pd
+import pygad
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # Stub heavy optional dependencies
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
@@ -12,16 +23,6 @@ try:  # prefer real vectorbt
     import vectorbt  # noqa: F401
 except Exception:  # pragma: no cover
     sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
-
-import concurrent.futures as cf
-import copy
-import itertools
-from collections import Counter
-
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import pygad  # noqa: E402
-import pytest  # noqa: E402
 
 import analysis  # noqa: E402
 import config as cfg  # noqa: E402
@@ -92,7 +93,9 @@ def _make_evaluator(settings=None, stats_list=None):
             per_asset_stats = [next(stats_cycle) for _ in self._sorted_tickers]
             evaluation_results = {
                 ticker: self._build_evaluation_record(stats=dict(stat))
-                for ticker, stat in zip(self._sorted_tickers, per_asset_stats, strict=False)
+                for ticker, stat in zip(
+                    self._sorted_tickers, per_asset_stats, strict=False
+                )
             }
             summary = self._score_assets(evaluation_results)
             score = self._aggregate_scores(summary)
@@ -864,6 +867,8 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     ]
     scores = df["score"].tolist()
     assert scores == sorted(scores, reverse=True)
+
+
 def test_global_executor_batch_dispatch(monkeypatch):
     group_data = {
         "A": pd.DataFrame({"Close": [1, 2, 3]}),

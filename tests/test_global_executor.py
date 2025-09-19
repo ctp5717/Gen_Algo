@@ -23,8 +23,12 @@ def test_record_batch_metrics_respects_memory_target(monkeypatch):
         def shutdown(self, wait=True):  # pragma: no cover - cleanup hook
             return None
 
-    monkeypatch.setattr(global_executor, "cf", types.SimpleNamespace(ProcessPoolExecutor=DummyExecutor))
-    monkeypatch.setattr(global_executor.mp, "get_context", lambda method: types.SimpleNamespace())
+    monkeypatch.setattr(
+        global_executor, "cf", types.SimpleNamespace(ProcessPoolExecutor=DummyExecutor)
+    )
+    monkeypatch.setattr(
+        global_executor.mp, "get_context", lambda method: types.SimpleNamespace()
+    )
 
     global_executor.create(
         {
