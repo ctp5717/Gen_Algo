@@ -524,11 +524,20 @@ def get_group_data(
 
     aligned = {ticker: df.loc[common_index] for ticker, df in filtered.items()}
 
-    if not verbose:
-        used_sources = {t: sources[t] for t in aligned.keys()}
-        cache_count = sum(1 for s in used_sources.values() if s == "cache")
-        api_count = sum(1 for s in used_sources.values() if s == "API")
+    used_sources = {t: sources[t] for t in aligned.keys()}
+    cache_count = sum(1 for s in used_sources.values() if s == "cache")
+    api_count = sum(1 for s in used_sources.values() if s == "API")
+    if verbose:
         logger.info(
+            "Loaded %d assets from %s to %s [cache:%d, API:%d]",
+            len(aligned),
+            start_date,
+            end_date,
+            cache_count,
+            api_count,
+        )
+    else:
+        logger.debug(
             "Loaded %d assets from %s to %s [cache:%d, API:%d]",
             len(aligned),
             start_date,
