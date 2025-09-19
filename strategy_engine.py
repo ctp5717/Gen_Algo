@@ -27,6 +27,8 @@ import sys
 import warnings
 import weakref
 from collections import OrderedDict
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Callable
 
 import numpy as np
@@ -45,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 # Auto-registered indicator mapping from ``indicator_library``
 INDICATOR_MAPPING = {k.lower(): v for k, v in ind_lib.INDICATOR_REGISTRY.items()}
+INDICATOR_CANONICAL = {k.lower(): k.lower() for k in ind_lib.INDICATOR_REGISTRY}
 
 # Common shorthand aliases for indicators
 ALIASES = {
@@ -61,26 +64,14 @@ for alias, target in ALIASES.items():
     func = INDICATOR_MAPPING.get(target.lower())
     if func:
         INDICATOR_MAPPING[alias] = func
+        INDICATOR_CANONICAL[alias] = target.lower()
+
+# Ensure direct names map to themselves for canonical lookups.
+for name in list(INDICATOR_MAPPING):
+    INDICATOR_CANONICAL.setdefault(name, name)
 
 # Indicators that require a ``Volume`` column
 VOLUME_INDICATORS = {"obv", "mfi", "adl", "cmf"}
-
-# Cached column prefixes for common multi-output indicators to avoid repeated
-# DataFrame.filter calls.
-INDICATOR_COLUMN_PREFIXES = {
-    "bbands": {"upper": "BBU", "middle": "BBM", "lower": "BBL"},
-    "keltner": {"upper": "KCUe", "middle": "KCBe", "lower": "KCLe"},
-    "donchian": {"upper": "DCU", "middle": "DCM", "lower": "DCL"},
-    "ma_envelope": {"upper": "MAE_U", "middle": "MAE_M", "lower": "MAE_L"},
-    "adx": {"main": "ADX"},
-    "stoch": {"k": "STOCHk"},
-    "ichimoku": {"baseline": "IKS"},
-}
-
-MACD_HIST_PATTERN = re.compile(r"(?i)macdh(?:\b|_)|macd[_-]?hist(?:ogram)?")
-MACD_LINE_PATTERN = re.compile(r"(?i)^macd(?:\b|_)(?!h|s)")
-TRIX_LINE_PATTERN = re.compile(r"(?i)^TRIX(?!s)")
-
 
 # Global cache for indicator outputs keyed by
 # (indicator_name, params_tuple, data_id, columns). Each cache entry stores a
@@ -92,6 +83,25 @@ CacheVal = tuple[weakref.ReferenceType[pd.DataFrame], pd.Series | pd.DataFrame]
 _INDICATOR_CACHE: OrderedDict[CacheKey, CacheVal] = OrderedDict()
 _CACHE_HITS = 0
 _CACHE_MISSES = 0
+
+
+@dataclass(frozen=True)
+class CacheGuardrails:
+    max_keys: int
+    max_rows: int
+    clear_between: bool
+
+
+@dataclass(frozen=True)
+class EntrySettings:
+    combination_logic: str
+    vote_threshold: int | None
+    nan_policy: str
+    nan_policy_u: str
+    ffill_lookback: int
+    ffill_limit: int | None
+    strict_column: bool
+    conditions: list[dict]
 
 
 class IndicatorCallError(Exception):
@@ -206,235 +216,387 @@ def _generate_signal_from_value(
         return pd.Series(False, index=indicator_series.index)
 
 
-def _band_resolver(prefixes: dict[str, str], label: str) -> Callable:
-    """Create a resolver for band-based indicators."""
+def _resolve_cache_guardrails() -> CacheGuardrails:
+    guardrails: dict[str, Any] = {}
+    cfg_sys = sys.modules.get("config")
+    if cfg_sys and hasattr(cfg_sys, "CACHE_GUARDRAILS"):
+        guardrails.update(cfg_sys.CACHE_GUARDRAILS)  # noqa: B009
+    if hasattr(_ORIGINAL_CONFIG, "CACHE_GUARDRAILS"):
+        guardrails.update(_ORIGINAL_CONFIG.CACHE_GUARDRAILS)  # noqa: B009
+    max_cache_keys = max(0, int(guardrails.get("MAX_CACHE_KEYS", 0)))
+    max_cache_rows = max(0, int(guardrails.get("MAX_CACHE_ROWS", 0)))
+    clear_between = bool(guardrails.get("clear_cache_between_assets"))
+    return CacheGuardrails(max_cache_keys, max_cache_rows, clear_between)
 
-    def resolver(
-        output: pd.DataFrame,
-        condition_logic: dict,
-        condition_type: str,
-        choose_first: Callable,
-        _df_from_prefix: Callable[[str], pd.DataFrame],
-        _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-    ) -> pd.Series:
-        band = condition_logic.get("band")
-        if not band:
-            if "upper" in condition_type:
-                band = "upper"
-            elif "lower" in condition_type:
-                band = "lower"
-            else:
-                band = "middle"
-        else:
-            band = str(band).lower()
 
-        if band not in {"upper", "lower", "middle", "mid", "basis"}:
+def _resolve_entry_settings(rules: dict) -> EntrySettings:
+    entry_rules = rules.get("entry_rules", {}) or {}
+    conditions = entry_rules.get("conditions", []) or []
+    combination_logic = entry_rules.get("combination_logic", "AND")
+    if isinstance(combination_logic, dict):
+        combination_logic = combination_logic.get(
+            "low",
+            combination_logic.get("high", combination_logic.get("options", [None])[0]),
+        )
+    combination_logic = str(combination_logic).upper()
+    if combination_logic not in {"AND", "OR", "VOTE"}:
+        raise ValueError(
+            f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
+        )
+
+    vote_threshold = entry_rules.get("vote_threshold")
+    if isinstance(vote_threshold, dict):
+        vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
+
+    cfg_params = sys.modules.get("config") or _ORIGINAL_CONFIG
+    nan_policy = entry_rules.get(
+        "nan_policy",
+        (
+            cfg_params.NAN_POLICY
+            if hasattr(cfg_params, "NAN_POLICY")
+            else config.NAN_POLICY
+        ),
+    )
+    ffill_lookback = entry_rules.get(
+        "ffill_lookback",
+        (
+            cfg_params.NAN_FFILL_LOOKBACK
+            if hasattr(cfg_params, "NAN_FFILL_LOOKBACK")
+            else config.NAN_FFILL_LOOKBACK
+        ),
+    )
+    strict_column = entry_rules.get("strict_column", True)
+    if not isinstance(strict_column, bool):
+        raise TypeError("strict_column must be a boolean")
+    if not isinstance(nan_policy, str):
+        raise TypeError("nan_policy must be a string")
+    nan_policy_u = nan_policy.upper()
+    if nan_policy_u not in {"FALSE", "PROPAGATE", "FORWARD_FILL"}:
+        raise ValueError("nan_policy must be FALSE, PROPAGATE, or FORWARD_FILL")
+    if not isinstance(ffill_lookback, int):
+        raise TypeError("ffill_lookback must be an integer")
+    ffill_limit = None if ffill_lookback == 0 else ffill_lookback
+
+    active_conditions = [c for c in conditions if c.get("is_active", True)]
+    n_active = len(active_conditions)
+
+    if n_active == 1:
+        if combination_logic != "AND" or vote_threshold not in (None, 1):
             warnings.warn(
-                f"Unknown band '{band}' for {label}; defaulting to middle",
+                "Single active condition; normalized combination_logic to 'AND' and vote_threshold to 1",
+                RuntimeWarning,
                 stacklevel=2,
             )
-            band = "middle"
+        combination_logic = "AND"
+        vote_threshold = 1
+    elif combination_logic == "VOTE":
+        if vote_threshold is None:
+            vote_threshold = math.ceil(n_active / 2)
+        elif vote_threshold < 1:
+            vote_threshold = 1
+            warnings.warn(
+                "Normalized vote_threshold to 1 for VOTE combination",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if vote_threshold > n_active:
+            warnings.warn(
+                "vote_threshold exceeds active conditions; clamped to n",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            vote_threshold = n_active
 
-        key = band
-        if band in {"middle", "mid", "basis"}:
-            key = "middle"
+    if vote_threshold is not None and not isinstance(vote_threshold, int):
+        raise TypeError("vote_threshold must be an integer or None")
+    if vote_threshold is not None:
+        assert (
+            1 <= vote_threshold <= max(1, n_active)
+        ), "vote_threshold must be between 1 and the number of active conditions"
 
-        df = _df_from_prefix(prefixes[key])
-        msg = (
-            f"{key.capitalize()} band not found in {label} output; expected columns like "
-            f"'{prefixes[key]}_*'"
+    return EntrySettings(
+        combination_logic=combination_logic,
+        vote_threshold=vote_threshold,
+        nan_policy=nan_policy,
+        nan_policy_u=nan_policy_u,
+        ffill_lookback=ffill_lookback,
+        ffill_limit=ffill_limit,
+        strict_column=strict_column,
+        conditions=active_conditions,
+    )
+
+
+def _normalize_indicator_params(
+    indicator_name: str, params: Mapping[str, Any]
+) -> dict[str, Any]:
+    norm: dict[str, Any] = {}
+    for key, value in params.items():
+        val = value
+        if (
+            indicator_name == "ma_envelope"
+            and key == "percent"
+            and isinstance(val, (int, float))
+            and not isinstance(val, bool)
+        ):
+            val = val / 100 if val > 1 else val
+        if isinstance(val, float):
+            val = round(val, 10)
+        norm[key] = val
+    return norm
+
+
+def _invoke_indicator(
+    indicator_func: Callable[..., Any],
+    indicator_key: str,
+    contract_name: str,
+    ohlc_data: pd.DataFrame,
+    params: Mapping[str, Any],
+) -> pd.Series | pd.DataFrame:
+    try:
+        raw_output = indicator_func(ohlc_data, **params)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise IndicatorCallError(indicator_key, exc) from exc
+    return contracts.normalize_output(
+        contract_name, raw_output, params, index=ohlc_data.index
+    )
+
+
+def _compute_indicator_output(
+    indicator_key: str,
+    contract_name: str,
+    indicator_func: Callable[..., Any],
+    ohlc_data: pd.DataFrame,
+    params: Mapping[str, Any],
+    guardrails: CacheGuardrails,
+) -> pd.Series | pd.DataFrame:
+    global _CACHE_HITS, _CACHE_MISSES
+
+    params_tuple = tuple(sorted(params.items()))
+    cache_key: CacheKey = (
+        indicator_key,
+        params_tuple,
+        id(ohlc_data),
+        tuple(ohlc_data.columns),
+    )
+    use_cache = guardrails.max_keys > 0 and not guardrails.clear_between
+    cache_entry = _INDICATOR_CACHE.get(cache_key) if use_cache else None
+    if cache_entry is not None:
+        _CACHE_HITS += 1
+        data_ref, cached_output = cache_entry
+        if data_ref() is ohlc_data:
+            indicator_output = cached_output
+        else:
+            indicator_output = _invoke_indicator(
+                indicator_func, indicator_key, contract_name, ohlc_data, params
+            )
+            if use_cache and len(ohlc_data) <= guardrails.max_rows:
+                _INDICATOR_CACHE[cache_key] = (weakref.ref(ohlc_data), indicator_output)
+            else:
+                _INDICATOR_CACHE.pop(cache_key, None)
+        if use_cache:
+            _INDICATOR_CACHE.move_to_end(cache_key)
+        return indicator_output
+
+    _CACHE_MISSES += 1
+    indicator_output = _invoke_indicator(
+        indicator_func, indicator_key, contract_name, ohlc_data, params
+    )
+    if use_cache and len(ohlc_data) <= guardrails.max_rows:
+        _INDICATOR_CACHE[cache_key] = (weakref.ref(ohlc_data), indicator_output)
+        _INDICATOR_CACHE.move_to_end(cache_key)
+        if len(_INDICATOR_CACHE) > guardrails.max_keys:
+            _INDICATOR_CACHE.popitem(last=False)
+    return indicator_output
+
+
+def _normalise_band_hint(band: Any, condition_type: str | None) -> str | None:
+    if band is not None:
+        value = str(band).lower()
+    else:
+        cond = (condition_type or "").lower()
+        if "upper" in cond:
+            value = "upper"
+        elif "lower" in cond:
+            value = "lower"
+        elif "middle" in cond or "basis" in cond:
+            value = "middle"
+        else:
+            value = None
+    if value in {"mid", "basis"}:
+        value = "middle"
+    if value in {"upper", "lower", "middle"}:
+        return value
+    return None
+
+
+def _select_with_fallback(
+    output: pd.DataFrame, strict: bool, message: str
+) -> pd.Series:
+    columns = list(output.columns)
+    msg = f"{message}; available: {columns}"
+    if output.shape[1] == 0:
+        raise KeyError(msg + "; set strict_column=False to allow fallback")
+    if strict:
+        raise KeyError(msg + "; set strict_column=False to allow fallback")
+    warnings.warn(msg + "; using first available column", stacklevel=2)
+    return output.iloc[:, 0]
+
+
+def _build_condition_signal(
+    ohlc_data: pd.DataFrame,
+    indicator_series: pd.Series,
+    condition_logic: Mapping[str, Any],
+    nan_policy_u: str,
+    ffill_limit: int | None,
+) -> pd.Series:
+    condition_type = str(condition_logic.get("type") or "")
+    if "price" in condition_type:
+        signal = _generate_signal(ohlc_data, indicator_series, condition_logic)
+    elif "indicator" in condition_type:
+        signal = _generate_signal_from_value(indicator_series, condition_logic)
+    else:
+        signal = pd.Series(False, index=ohlc_data.index)
+    if nan_policy_u == "FORWARD_FILL":
+        signal = signal.ffill(limit=ffill_limit)
+    return signal
+
+
+def _evaluate_rule(
+    rule: dict,
+    ohlc_data: pd.DataFrame,
+    settings: EntrySettings,
+    guardrails: CacheGuardrails,
+    collect_counts: bool,
+) -> tuple[pd.Series | None, tuple[str, int] | None]:
+    indicator_raw = str(rule.get("indicator", "")).lower()
+    indicator_func = INDICATOR_MAPPING.get(indicator_raw)
+    if indicator_func is None:
+        warnings.warn(
+            f"Indicator '{indicator_raw}' not found. Skipping rule.",
+            stacklevel=2,
         )
-        return choose_first(df, msg, fallback=False)
+        return None, None
 
-    return resolver
-
-
-def _macd_resolver(
-    output: pd.DataFrame,
-    condition_logic: dict,
-    condition_type: str,
-    choose_first: Callable,
-    _df_from_prefix: Callable[[str], pd.DataFrame],
-    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-) -> pd.Series:
-    hist = _df_from_regex("macd_hist", MACD_HIST_PATTERN)
-    if hist.shape[1]:
-        return hist.iloc[:, 0]
-    macd_line = _df_from_regex("macd_line", MACD_LINE_PATTERN)
-    if macd_line.shape[1]:
-        return macd_line.iloc[:, 0]
-    if output.shape[1]:
-        return output.iloc[:, 0]
-    raise KeyError("No MACD columns found; available: " f"{list(output.columns)}")
-
-
-def _adx_resolver(
-    output: pd.DataFrame,
-    condition_logic: dict,
-    condition_type: str,
-    choose_first: Callable,
-    _df_from_prefix: Callable[[str], pd.DataFrame],
-    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-) -> pd.Series:
-    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["adx"]["main"])
-    return choose_first(df, "ADX column not found", fallback=False)
-
-
-def _stoch_resolver(
-    output: pd.DataFrame,
-    condition_logic: dict,
-    condition_type: str,
-    choose_first: Callable,
-    _df_from_prefix: Callable[[str], pd.DataFrame],
-    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-) -> pd.Series:
-    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["stoch"]["k"])
-    msg = "%K column not found in Stochastic output; expected columns like 'STOCHk_*'"
-    return choose_first(df, msg, fallback=False)
-
-
-def _ichimoku_resolver(
-    output: pd.DataFrame,
-    condition_logic: dict,
-    condition_type: str,
-    choose_first: Callable,
-    _df_from_prefix: Callable[[str], pd.DataFrame],
-    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-) -> pd.Series:
-    df = _df_from_prefix(INDICATOR_COLUMN_PREFIXES["ichimoku"]["baseline"])
-    msg = "Baseline column not found in Ichimoku output; expected columns like 'IKS_*'"
-    return choose_first(df, msg, fallback=False)
-
-
-def _pivot_resolver(
-    output: pd.DataFrame,
-    condition_logic: dict,
-    condition_type: str,
-    choose_first: Callable,
-    _df_from_prefix: Callable[[str], pd.DataFrame],
-    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-) -> pd.Series:
-    if "P" in output.columns:
-        return output["P"]
-    if output.shape[1]:
-        return output.iloc[:, 0]
-    raise KeyError(
-        "Pivot Points output produced no columns; available: " f"{list(output.columns)}"
+    canonical = INDICATOR_CANONICAL.get(indicator_raw, indicator_raw)
+    params = rule.get("params", {}) or {}
+    norm_params = _normalize_indicator_params(canonical, params)
+    indicator_output = _compute_indicator_output(
+        indicator_raw,
+        canonical,
+        indicator_func,
+        ohlc_data,
+        norm_params,
+        guardrails,
     )
 
-
-def _trix_resolver(
-    output: pd.DataFrame,
-    condition_logic: dict,
-    condition_type: str,
-    choose_first: Callable,
-    _df_from_prefix: Callable[[str], pd.DataFrame],
-    _df_from_regex: Callable[[str, re.Pattern], pd.DataFrame],
-) -> pd.Series:
-    df = _df_from_regex("trix_line", TRIX_LINE_PATTERN)
-    return choose_first(
-        df, "TRIX line not found; expected columns like 'TRIX_*'", fallback=False
+    condition_logic = rule.get("condition", {}) or {}
+    target_series = select_indicator_series(
+        canonical,
+        indicator_output,
+        condition_logic,
+        settings.strict_column,
+        norm_params,
+    )
+    signal = _build_condition_signal(
+        ohlc_data,
+        target_series,
+        condition_logic,
+        settings.nan_policy_u,
+        settings.ffill_limit,
     )
 
+    if not collect_counts:
+        return signal, None
 
-INDICATOR_SERIES_RESOLVERS: dict[str, Callable] = {
-    "bbands": _band_resolver(INDICATOR_COLUMN_PREFIXES["bbands"], "BBands"),
-    "keltner": _band_resolver(INDICATOR_COLUMN_PREFIXES["keltner"], "Keltner"),
-    "donchian": _band_resolver(INDICATOR_COLUMN_PREFIXES["donchian"], "Donchian"),
-    "ma_envelope": _band_resolver(
-        INDICATOR_COLUMN_PREFIXES["ma_envelope"], "MA Envelope"
-    ),
-    "macd": _macd_resolver,
-    "adx": _adx_resolver,
-    "stoch": _stoch_resolver,
-    "ichimoku": _ichimoku_resolver,
-    "pivot_points": _pivot_resolver,
-    "pivots": _pivot_resolver,
-    "trix": _trix_resolver,
-}
+    name = canonical_rule_label(rule)
+    values = signal.to_numpy(dtype=float, copy=False)
+    if settings.nan_policy_u != "PROPAGATE":
+        values = np.nan_to_num(values, nan=0.0)
+    count = int(np.nansum(values))
+    return signal, (name, count)
 
 
 def select_indicator_series(
     indicator_name: str,
     indicator_output: pd.Series | pd.DataFrame,
-    condition_logic: dict,
+    condition_logic: Mapping[str, Any],
     strict_column: bool,
+    indicator_params: Mapping[str, Any] | None = None,
 ) -> pd.Series:
     """Return the appropriate Series from ``indicator_output``."""
 
     if isinstance(indicator_output, pd.Series):
         return indicator_output
 
-    col_hint = condition_logic.get("column")
     rule_strict = condition_logic.get("strict_column", strict_column)
     if not isinstance(rule_strict, bool):
         raise TypeError("strict_column must be a boolean")
 
     columns = list(indicator_output.columns)
-    prefix_cache: dict[str, str | None] = {}
-    regex_cache: dict[str, str | None] = {}
+    if not columns:
+        raise KeyError("Indicator produced no columns; available: []")
 
-    def _df_from_prefix(prefix: str, cols=columns) -> pd.DataFrame:
-        col = prefix_cache.get(prefix)
-        if col is None:
-            col = next((c for c in cols if c.startswith(prefix)), None)
-            prefix_cache[prefix] = col
-        return indicator_output[[col]] if col else indicator_output.iloc[:, 0:0]
-
-    def _df_from_regex(name: str, pattern: re.Pattern, cols=columns) -> pd.DataFrame:
-        col = regex_cache.get(name)
-        if col is None:
-            col = next((c for c in cols if pattern.search(c)), None)
-            regex_cache[name] = col
-        return indicator_output[[col]] if col else indicator_output.iloc[:, 0:0]
-
-    def choose_first(
-        df: pd.DataFrame,
-        msg: str,
-        output: pd.DataFrame = indicator_output,
-        strict: bool = rule_strict,
-        fallback: bool = True,
-    ) -> pd.Series:
-        avail = list(output.columns)
-        msg = f"{msg}; available: {avail}"
-        if df.shape[1] == 0:
-            if strict:
-                raise KeyError(msg + "; set strict_column=False to allow fallback")
-            warnings.warn(msg + "; using first available column", stacklevel=2)
-            if output.shape[1] == 0:
-                raise KeyError(msg + "; set strict_column=False to allow fallback")
-            return output.iloc[:, 0]
-        if not fallback:
-            return df.iloc[:, 0]
-        if strict:
-            raise KeyError(msg + "; set strict_column=False to allow fallback")
-        warnings.warn(msg + "; using first available column", stacklevel=2)
-        return df.iloc[:, 0]
-
+    col_hint = condition_logic.get("column")
     if col_hint:
-        if col_hint in indicator_output.columns:
+        if col_hint in columns:
             return indicator_output[col_hint]
-        df = _df_from_regex(col_hint, re.compile(col_hint))
-        return choose_first(df, f"Requested column '{col_hint}' not found")
+        try:
+            pattern = re.compile(str(col_hint))
+        except re.error:
+            pattern = None
+        if pattern is not None:
+            for col in columns:
+                if pattern.search(col):
+                    return indicator_output[col]
+        return _select_with_fallback(
+            indicator_output,
+            rule_strict,
+            f"Requested column '{col_hint}' not found",
+        )
 
-    condition_type = condition_logic.get("type", "")
-
-    for key, resolver in INDICATOR_SERIES_RESOLVERS.items():
-        if key in indicator_name:
-            return resolver(
+    schema = contracts.describe_output(
+        indicator_name, indicator_params or {}
+    )
+    band = _normalise_band_hint(
+        condition_logic.get("band"), condition_logic.get("type")
+    )
+    if band:
+        target = schema.roles.get(band)
+        if target and target in columns:
+            return indicator_output[target]
+        if target:
+            return _select_with_fallback(
                 indicator_output,
-                condition_logic,
-                condition_type,
-                choose_first,
-                _df_from_prefix,
-                _df_from_regex,
+                rule_strict,
+                f"{band.capitalize()} band not found in {indicator_name} output; expected column '{target}'",
             )
+        return _select_with_fallback(
+            indicator_output,
+            rule_strict,
+            f"{band.capitalize()} band not supported for {indicator_name}",
+        )
 
-    if indicator_output.shape[1]:
+    preferred: list[str] = []
+    if schema.default and schema.default in columns:
+        preferred.append(schema.default)
+    for candidate in schema.priority:
+        if candidate in columns and candidate not in preferred:
+            preferred.append(candidate)
+    if preferred:
+        return indicator_output[preferred[0]]
+
+    if columns:
+        if rule_strict:
+            warnings.warn(
+                f"No default column defined for {indicator_name}; using first available column",
+                stacklevel=2,
+            )
         return indicator_output.iloc[:, 0]
 
-    raise KeyError(
-        "Indicator produced no columns; available: " f"{list(indicator_output.columns)}"
+    return _select_with_fallback(
+        indicator_output,
+        rule_strict,
+        f"No columns returned for {indicator_name}",
     )
 
 
@@ -585,243 +747,59 @@ def process_strategy_rules(
     pd.Series or (pd.Series, dict)
         Combined entry signals and optionally per-condition counts.
     """
-    global _CACHE_HITS, _CACHE_MISSES
-    cfg_sys = sys.modules.get("config")
-    guardrails: dict[str, int | bool] = {}
-    if cfg_sys and hasattr(cfg_sys, "CACHE_GUARDRAILS"):
-        guardrails.update(cfg_sys.CACHE_GUARDRAILS)  # noqa: B009
-    if hasattr(_ORIGINAL_CONFIG, "CACHE_GUARDRAILS"):
-        guardrails.update(_ORIGINAL_CONFIG.CACHE_GUARDRAILS)  # noqa: B009
-    max_cache_keys = max(0, int(guardrails.get("MAX_CACHE_KEYS", 0)))
-    max_cache_rows = max(0, int(guardrails.get("MAX_CACHE_ROWS", 0)))
-    clear_between = bool(guardrails.get("clear_cache_between_assets"))
-    if clear_between:
+    guardrails = _resolve_cache_guardrails()
+    if guardrails.clear_between:
         clear_indicator_cache()
-    entry_rules = rules.get("entry_rules", {})
-    conditions = entry_rules.get("conditions", [])
-    combination_logic = entry_rules.get("combination_logic", "AND")
-    if isinstance(combination_logic, dict):
-        combination_logic = combination_logic.get(
-            "low",
-            combination_logic.get("high", combination_logic.get("options", [None])[0]),
-        )
-    combination_logic = str(combination_logic).upper()
-    if combination_logic not in {"AND", "OR", "VOTE"}:
-        raise ValueError(
-            f"Invalid combination_logic '{combination_logic}'. Expected AND, OR, or VOTE."
-        )
 
-    vote_threshold = entry_rules.get("vote_threshold")
-    if isinstance(vote_threshold, dict):
-        vote_threshold = vote_threshold.get("low", vote_threshold.get("high"))
-    cfg_params = cfg_sys or _ORIGINAL_CONFIG
-    nan_policy = entry_rules.get(
-        "nan_policy",
-        (
-            cfg_params.NAN_POLICY
-            if hasattr(cfg_params, "NAN_POLICY")
-            else config.NAN_POLICY
-        ),
-    )
-    ffill_lookback = entry_rules.get(
-        "ffill_lookback",
-        (
-            cfg_params.NAN_FFILL_LOOKBACK
-            if hasattr(cfg_params, "NAN_FFILL_LOOKBACK")
-            else config.NAN_FFILL_LOOKBACK
-        ),
-    )
-    strict_column = entry_rules.get("strict_column", True)
-    if not isinstance(strict_column, bool):
-        raise TypeError("strict_column must be a boolean")
-    if not isinstance(nan_policy, str):
-        raise TypeError("nan_policy must be a string")
-    nan_policy_u = nan_policy.upper()
-    if nan_policy_u not in {"FALSE", "PROPAGATE", "FORWARD_FILL"}:
-        raise ValueError("nan_policy must be FALSE, PROPAGATE, or FORWARD_FILL")
-    if not isinstance(ffill_lookback, int):
-        raise TypeError("ffill_lookback must be an integer")
-    ffill_limit = None if ffill_lookback == 0 else ffill_lookback
-
-    active_conds = [c for c in conditions if c.get("is_active", True)]
-    used_inds = {c.get("indicator", "").lower() for c in active_conds}
+    settings = _resolve_entry_settings(rules)
+    active_conditions = settings.conditions
+    used_inds = {c.get("indicator", "").lower() for c in active_conditions}
     missing_inds = VOLUME_INDICATORS.intersection(used_inds)
     if missing_inds and "Volume" not in ohlc_data.columns:
         affected = [
             canonical_rule_label(c)
-            for c in active_conds
+            for c in active_conditions
             if c.get("indicator", "").lower() in missing_inds
         ]
         raise ValueError(
             f"Volume column required for indicators: {sorted(missing_inds)}; "
             f"affected rules: {affected}"
         )
-    n = len(active_conds)
 
-    if n == 1:
-        if combination_logic != "AND" or vote_threshold not in (None, 1):
-            warnings.warn(
-                "Single active condition; normalized combination_logic to 'AND' and vote_threshold to 1",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        combination_logic = "AND"
-        vote_threshold = 1
-    elif combination_logic == "VOTE":
-        if vote_threshold is None:
-            vote_threshold = math.ceil(n / 2)
-        elif vote_threshold < 1:
-            vote_threshold = 1
-            warnings.warn(
-                "Normalized vote_threshold to 1 for VOTE combination",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        if vote_threshold > n:
-            warnings.warn(
-                "vote_threshold exceeds active conditions; clamped to n",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            vote_threshold = n
+    signals: list[pd.Series] = []
+    counts: dict[str, int] | None = {} if collect_counts else None
 
-    if vote_threshold is not None and not isinstance(vote_threshold, int):
-        raise TypeError("vote_threshold must be an integer or None")
-
-    if vote_threshold is not None:
-        assert (
-            1 <= vote_threshold <= n
-        ), "vote_threshold must be between 1 and the number of active conditions"
-
-    signals = []
-    counts = {} if collect_counts else None
-
-    for rule in conditions:
-        if not rule.get("is_active", True):
-            continue
-
-        indicator_name_raw = rule.get("indicator", "")
-        indicator_name = indicator_name_raw.lower()
-        params = rule.get("params", {})
-        condition_logic = rule.get("condition", {})
-        indicator_func = INDICATOR_MAPPING.get(indicator_name)
-
-        if not indicator_func:
-            warnings.warn(
-                f"Indicator '{indicator_name}' not found. Skipping rule.",
-                stacklevel=2,
-            )
-            continue
-
-        norm_params: dict[str, float | int | str] = {}
-        for k, v in params.items():
-            if (
-                indicator_name == "ma_envelope"
-                and k == "percent"
-                and isinstance(v, (int, float))
-                and not isinstance(v, bool)
-            ):
-                v = v / 100 if v > 1 else v
-            if isinstance(v, float):
-                v = round(v, 10)
-            norm_params[k] = v
-        params_tuple = tuple(sorted(norm_params.items()))
-        key = (
-            indicator_name,
-            params_tuple,
-            id(ohlc_data),  # different data -> different cache bucket
-            tuple(ohlc_data.columns),
+    for rule in active_conditions:
+        signal, count_info = _evaluate_rule(
+            rule, ohlc_data, settings, guardrails, collect_counts
         )
-        use_cache = not clear_between and max_cache_keys > 0
-        cache_entry = _INDICATOR_CACHE.get(key) if use_cache else None
-        if cache_entry is not None:
-            _CACHE_HITS += 1
-            data_ref, cached_output = cache_entry
-            if data_ref() is ohlc_data:
-                indicator_output = cached_output
-            else:
-                try:
-                    raw_output = indicator_func(ohlc_data, **norm_params)
-                except Exception as e:  # pragma: no cover - defensive
-                    raise IndicatorCallError(indicator_name, e) from e
-                indicator_output = contracts.normalize_output(
-                    indicator_name, raw_output, norm_params, index=ohlc_data.index
-                )
-                if use_cache and len(ohlc_data) <= max_cache_rows:
-                    _INDICATOR_CACHE[key] = (
-                        weakref.ref(ohlc_data),
-                        indicator_output,
-                    )
-                else:
-                    _INDICATOR_CACHE.pop(key, None)
-            if use_cache:
-                _INDICATOR_CACHE.move_to_end(key)
-        else:
-            _CACHE_MISSES += 1
-            try:
-                raw_output = indicator_func(ohlc_data, **norm_params)
-            except Exception as e:  # pragma: no cover - defensive
-                raise IndicatorCallError(indicator_name, e) from e
-            indicator_output = contracts.normalize_output(
-                indicator_name, raw_output, norm_params, index=ohlc_data.index
-            )
-            if use_cache and len(ohlc_data) <= max_cache_rows:
-                _INDICATOR_CACHE[key] = (
-                    weakref.ref(ohlc_data),
-                    indicator_output,
-                )
-                _INDICATOR_CACHE.move_to_end(key)
-                if len(_INDICATOR_CACHE) > max_cache_keys:
-                    _INDICATOR_CACHE.popitem(last=False)
-        condition_type = condition_logic.get("type")
-
-        target_series = select_indicator_series(
-            indicator_name, indicator_output, condition_logic, strict_column
-        )
-
-        condition_type = condition_type or ""
-        if "price" in condition_type:
-            individual_signal = _generate_signal(
-                ohlc_data, target_series, condition_logic
-            )
-        elif "indicator" in condition_type:
-            individual_signal = _generate_signal_from_value(
-                target_series, condition_logic
-            )
-        else:
-            individual_signal = pd.Series(False, index=ohlc_data.index)
-
-        if nan_policy_u == "FORWARD_FILL":
-            individual_signal = individual_signal.ffill(limit=ffill_limit)
-
-        signals.append(individual_signal)
-        if collect_counts:
-            name = canonical_rule_label(rule)
-            values = individual_signal.to_numpy(dtype=float, copy=False)
-            if nan_policy_u != "PROPAGATE":
-                values = np.nan_to_num(values, nan=0.0)
-            counts[name] = int(np.nansum(values))
+        if signal is None:
+            continue
+        signals.append(signal)
+        if collect_counts and count_info is not None and counts is not None:
+            counts[count_info[0]] = count_info[1]
 
     if not signals:
         empty = pd.Series(False, index=ohlc_data.index)
-        result = (empty, {}) if collect_counts else empty
+        result = (empty, counts or {}) if collect_counts else empty
     elif len(signals) == 1:
         single = signals[0]
-        if nan_policy_u == "FORWARD_FILL":
-            single = single.fillna(False)
-        elif nan_policy_u == "FALSE":
+        if settings.nan_policy_u in {"FORWARD_FILL", "FALSE"}:
             single = single.fillna(False)
         else:
             single = single.astype("boolean")
         result = (single, counts) if collect_counts else single
     else:
         combined = _combine_signals(
-            signals, combination_logic, vote_threshold, nan_policy_u, ffill_lookback
+            signals,
+            settings.combination_logic,
+            settings.vote_threshold,
+            settings.nan_policy_u,
+            settings.ffill_lookback,
         )
         result = (combined, counts) if collect_counts else combined
 
-    # Ensure no indicator outputs leak across assets when the guardrail is enabled.
-    if clear_between:
+    if guardrails.clear_between:
         clear_indicator_cache()
 
     return result

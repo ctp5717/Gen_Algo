@@ -21,13 +21,21 @@ def check_indicator_contracts(ohlc: pd.DataFrame, rules: dict) -> None:
         if func is None:
             continue
         params = cond.get("params", {})
+        canonical = strategy_engine.INDICATOR_CANONICAL.get(name, name)
+        norm_params = strategy_engine._normalize_indicator_params(canonical, params)
         try:
-            output = func(ohlc, **params)
-            norm = contracts.normalize_output(name, output, params, index=ohlc.index)
+            output = func(ohlc, **norm_params)
+            norm = contracts.normalize_output(
+                canonical, output, norm_params, index=ohlc.index
+            )
             condition = cond.get("condition", {})
             try:
                 strategy_engine.select_indicator_series(
-                    name, norm, condition, strict_column=True
+                    canonical,
+                    norm,
+                    condition,
+                    strict_column=True,
+                    indicator_params=norm_params,
                 )
             except KeyError as ke:
                 col = condition.get("column")

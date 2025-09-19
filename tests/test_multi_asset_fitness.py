@@ -14,6 +14,7 @@ try:  # prefer real vectorbt
 except Exception:  # pragma: no cover
     sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
+import importlib  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pygad  # noqa: E402
@@ -130,6 +131,106 @@ def test_dispersion_math_sanity():
     lam = 0.25
     F = mu - lam * sigma
     assert np.isclose(F, 0.8775255, atol=1e-6)
+
+
+def test_multi_asset_composite_matches_single(monkeypatch):
+    # Some integration suites monkeypatch ``fitness.FitnessEvaluator`` with a
+    # lightweight stub.  Load a pristine copy of the module if needed so this
+    # regression test always exercises the real implementation.
+    evaluator_cls = fitness.FitnessEvaluator
+    modules_to_patch = {fitness}
+    if getattr(evaluator_cls, "__module__", "") != "fitness":
+        spec = importlib.util.spec_from_file_location(
+            "_fitness_impl", Path(fitness.__file__).resolve()
+        )
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)
+        evaluator_cls = fresh.FitnessEvaluator
+        modules_to_patch.add(fresh)
+
+    sortino = 0.8
+    profit_factor = 7.0
+    max_drawdown = 12.5
+
+    ohlc = pd.DataFrame({"Close": [1.0, 1.1, 1.2]})
+    entries = pd.Series([True, False, False], index=ohlc.index)
+
+    empty = pd.Series(False, index=ohlc.index)
+
+    def _fake_process(*a, **k):
+        return entries
+
+    def _fake_exit(*a, **k):
+        return (empty, None, None, None)
+
+    class DummyPortfolio:
+        def __init__(self):
+            self.trades = types.SimpleNamespace(count=lambda: 3)
+
+        @classmethod
+        def from_signals(cls, *args, **kwargs):
+            return cls()
+
+    payload = {
+        "sortino": sortino,
+        "profit_factor": profit_factor,
+        "max_drawdown": max_drawdown,
+    }
+
+    def _fake_metrics(portfolio):
+        return (payload, {}, [])
+
+    for mod in modules_to_patch:
+        monkeypatch.setattr(mod.engine, "process_strategy_rules", _fake_process)
+        monkeypatch.setattr(mod, "extract_exit_params", _fake_exit)
+        monkeypatch.setattr(mod.vbt, "Portfolio", DummyPortfolio)
+        monkeypatch.setattr(
+            mod.metrics_contract, "assert_metric_aliases", lambda *a, **k: None
+        )
+        monkeypatch.setattr(
+            mod.metrics_contract, "_provider_signature", lambda *a, **k: "dummy"
+        )
+        monkeypatch.setattr(mod.metrics_contract, "evaluate_metrics", _fake_metrics)
+
+    single_eval = evaluator_cls(ohlc, {}, {})
+    single_score = single_eval(None, [], 0)
+
+    stats = [
+        {
+            "sortino": sortino,
+            "profit_factor": profit_factor,
+            "max_drawdown": max_drawdown,
+            "total_return": 0.1,
+            "trades": 5,
+        }
+    ]
+    settings = {
+        "metric": "composite",
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "min_included_assets": 1,
+        "winsorize_pf_cap": cfg.MULTI_ASSET.get("winsorize_pf_cap", 5.0),
+        "coverage_penalty": 0.0,
+        "zero_trade_policy": "ignore",
+        "soft_penalty_strength": 0.0,
+    }
+    multi_eval = _make_evaluator(settings, stats)
+    multi_score = multi_eval(None, [], 0)
+
+    expected = fitness._composite_score(
+        sortino,
+        profit_factor,
+        max_drawdown,
+        weights=cfg.FITNESS_WEIGHTS,
+        pf_cap=settings["winsorize_pf_cap"],
+        nan_fallback=0.0,
+        max_drawdown_fallback=100.0,
+    )
+
+    assert single_score == pytest.approx(expected)
+    assert multi_score == pytest.approx(expected)
 
 
 def test_aggregation_math():
