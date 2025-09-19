@@ -1,52 +1,86 @@
 # Architecture
 
-**Audience:** Developers and maintainers extending the framework.
+**Audience:** developers and maintainers extending the framework or integrating it into a larger research stack.
 
-The project is organised as a set of small modules with clear inputs and outputs. Core relationships are shown below.
+The codebase is intentionally modular: configuration defines behaviour, dedicated loaders fetch data, the strategy engine builds entry/exit signals, and fitness evaluators own scoring. Downstream components (analysis, walk-forward, recommendation, final strategy) build on a shared metadata contract.
+
+## Component map
 
 ```mermaid
 graph LR
-    config.py --> data_loader.py
-    data_loader.py --> strategy_engine.py
-    indicator_library.py --> strategy_engine.py
-    strategy_rules.py --> strategy_engine.py
-    strategy_engine.py --> fitness.py
-    fitness.py --> analysis.py
+    config[config.py] --> data_loader[data_loader.py]
+    config --> strategy_rules[strategy_rules.py]
+    strategy_rules --> gene_parser[gene_parser.py]
+    data_loader --> strategy_engine[strategy_engine.py]
+    indicator_library[indicator_library.py] --> strategy_engine
+    strategy_engine --> fitness[fitness.py]
+    fitness --> analysis[analysis.py]
+    fitness --> walk_forward[walk_forward.py]
+    walk_forward --> recommendation[recommendation.py]
+    recommendation --> final_strategy[final_strategy.py]
+    analysis --> run_metadata[run_metadata.py]
+    walk_forward --> run_metadata
+    recommendation --> run_metadata
+    final_strategy --> run_metadata
 ```
 
-### Fitness Evaluation Example
+### Module responsibilities
 
-The `FitnessEvaluator` wraps the backtesting engine and composite score:
+| Module | Responsibility | Key details |
+| --- | --- | --- |
+| `config.py` | Centralised experiment settings | Derives training/validation windows, clamps GA gene ranges, handles environment overrides, and validates `FINAL_STRATEGY` payloads. `initialize_config()` must be called before accessing derived globals. |
+| `data_loader.py` | Data acquisition and caching | Normalises tickers (`BTC-USD → BTCUSDT` for Binance), saves Parquet caches, emits warnings when volume columns are missing, and exposes `get_group_data` for multi-asset alignment with coverage checks. |
+| `indicator_library.py` | Indicator implementations | Uses `pandas-ta`, auto-registers functions via the `@indicator` decorator, and declares parameter constraints. Ensures compatibility with both numpy and pandas versions. |
+| `strategy_engine.py` | Rule interpreter & indicator cache | Resolves indicator aliases, selects default columns/bands for multi-output indicators, enforces `strict_column` logic, combines signals under `AND`/`OR`/`VOTE`, and keeps a weak-ref cache of indicator outputs with guardrails defined in `config.CACHE_GUARDRAILS`. |
+| `fitness.py` | Fitness evaluation layer | Provides single-asset and multi-asset evaluators. Injects GA genes, executes vectorbt backtests, applies composite metrics with winsorisation, trade-floor scaling, zero-trade policies, and optional stability regularisers. |
+| `analysis.py` | Champion analysis & metadata writer | Re-runs the champion on validation data, saves plots, hashes cache files, records library versions, and merges metadata via `run_metadata.merge_run_metadata`. |
+| `walk_forward.py` | Rolling validation | Generates rolling training/testing windows, keeps a champion pool with cloning rules, rescales trade floors per window, and writes schema-validated CSV/JSON artifacts. |
+| `recommendation.py` | Strategy recommendation engine | Classifies assets (Stars/Stalwarts/Gambles/Drags), computes confidence scores from walk-forward folds, and records parameter stability diagnostics. |
+| `final_strategy.py` | Portfolio synthesis | Filters assets by recommendation confidence, applies weighting schemes (`risk_adjusted`, `equal`, `proportional`, or `override`), evaluates parameter robustness (RCV, multimodality), and emits final trade-ready payloads. |
+
+### Fitness evaluation flow
+
+The multi-asset evaluator aggregates per-asset backtests while enforcing dispersion and trade-floor policies:
 
 ```python
-portfolio = vbt.Portfolio.from_signals(
-    close=self.ohlc_data["Close"],
-    entries=entries,
-    exits=time_based_exit,
-    sl_stop=sl_stop,
-    tp_stop=tp_stop,
-    sl_trail=sl_trail,
-    fees=config.FEES,
-    freq=config.to_pandas_freq(config.TIMEFRAME),
+from fitness import MultiAssetFitnessEvaluator
+from strategy_rules import STRATEGY_RULES
+from params_resolver import resolve_effective_rules
+
+evaluator = MultiAssetFitnessEvaluator(
+    ohlc_data=training_data,            # dict[ticker, DataFrame]
+    base_rules=STRATEGY_RULES,
+    gene_map=gene_map,                  # produced by gene_parser
+    settings=config.MULTI_ASSET,
 )
-metrics, sources, missing = metrics_contract.evaluate_metrics(portfolio)
+score = evaluator(ga_instance, candidate_solution, solution_idx)
 ```
 
-Each module is designed for deterministic behaviour and should be accompanied by tests when modified.
+Key behaviours:
 
-### Metric Contract
+- `inject_genes_into_rules` applies GA chromosomes to a deep copy of `STRATEGY_RULES` before indicators are computed.
+- Metrics are normalised through `metrics_contract.evaluate_metrics`, which handles alias drift and missing fields by computing fallbacks.
+- Dispersion penalties subtract `lambda_dispersion * std(per-asset scores)` while respecting `coverage_penalty` and `zero_trade_policy`.
+- Trade floors are scaled to each evaluation window via `trade_floor.scale_floor`, ensuring minimum trades scale with elapsed years.
 
-`metrics_contract.py` centralises statistic aliases, unit normalisation, and fallback logic. The canonical metrics and fallbacks are:
+### Indicator selection & caching
 
-| Canonical key   | Accepted aliases (subset)                          | Unit            | Fallback formula                                      |
-|-----------------|-----------------------------------------------------|-----------------|------------------------------------------------------|
-| `sortino`       | `Sortino Ratio`, `sortino_ratio`, `Sortino`         | ratio           | Mean excess return ÷ downside deviation × √252       |
-| `profit_factor` | `Profit Factor`, `PF`, `profit_factor`              | ratio           | Σ positive returns ÷ Σ absolute negative returns     |
-| `max_drawdown`  | `Max Drawdown [%]`, `Max Drawdown`, `max_drawdown`  | percent (0–100) | Max peak-to-trough drop of cumulative returns        |
-| `total_return`  | `Total Return [%]`, `Return [%]`, `total_return`    | percent (0–100) | `(1 + returns).prod() - 1`                           |
+`strategy_engine` normalises indicator names, merges default bands/columns, and caches outputs keyed by `(indicator, params, data_id, columns)`. Cache guardrails (`MAX_CACHE_KEYS`, `MAX_CACHE_ROWS`) prevent excessive memory growth. Preflight routines in `preflight.py` call `indicator_library` and `indicator_contracts` to ensure each active rule has the expected columns before optimisation begins.
 
-`resolve_metrics` tries the fast-path labels, falls back to the cached alias map, and `_to_pct` harmonises fractional/percentage units. `compute_fallbacks` populates missing metrics from raw returns. Prefer `evaluate_metrics` for a single call returning the metrics, their sources (alias vs. `"computed"`), and any remaining missing keys.
+### Metadata contract
 
-Before large runs, `assert_metric_aliases` verifies that at least one alias per metric exists. Its behaviour is controlled via `config.METRICS_PREFLIGHT` (`mode`: `"warn"|"fail"`, `missing_threshold`: tolerated missing aliases). During evaluation the resolved mapping is logged once (e.g. `sortino→sortino_ratio`) and the first asset records `metric_sources` in `MultiAssetFitnessEvaluator.last_details`. When trades execute but metrics remain unavailable the evaluator surfaces `evaluation_reason="metrics_missing"` for that asset.
+All major stages call `run_metadata.merge_run_metadata(path, payload)` so downstream steps append to the same JSON artifact instead of overwriting it. Typical metadata keys include:
 
-Continuous integration runs the test suite across a pinned environment (`vectorbt==0.28.1`, `quantstats>=0.0.62`) and floating environments with and without QuantStats to catch alias drift early.
+- `artifact_version`, `start_time`, `end_time`, `wall_time`
+- `cache_files` with SHA-256 hashes for every dataset pulled from `data_cache/`
+- `library_versions` (`numpy`, `pandas`, `vectorbt`, `pygad`)
+- `recommendation`, `final_strategy`, and per-fold diagnostics when applicable
+
+Adhering to this contract keeps runs reproducible and enables external tooling to consume the outputs without parsing bespoke formats.
+
+### Contributing tips
+
+- Always call `config.initialize_config(force=True)` in tests when overriding globals.
+- Prefer extending `indicator_library.py` instead of inlining TA logic; the auto-registration keeps the strategy engine declarative.
+- When adding new metrics, update `metrics_contract.METRIC_ALIASES` and provide fallbacks so missing statistics do not crash the GA.
+- Any change that alters output structure should update the documentation and tests; CI enforces linting, coverage, and pre-commit hooks.

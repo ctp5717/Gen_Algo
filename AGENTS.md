@@ -23,6 +23,16 @@
 - [Hardware & runtime](#hardware--runtime)
 - [Foundational changes & overrides](#foundational-changes--overrides)
 
+## Documentation quick reference
+
+- `README.md` – high-level overview, workflow links, and run instructions.
+- `docs/getting_started.md` – environment setup and first optimisation walkthrough.
+- `docs/configuration.md` – detailed reference for `config.py` toggles and environment flags.
+- `docs/strategy_authoring.md` – schema, defaults, and tips for editing `STRATEGY_RULES`.
+- `docs/architecture.md` – module responsibilities and metadata contract.
+
+Keep these documents in sync with behaviour changes—tests and reviews assume they describe the current pipeline.
+
 ## 1) Project at a glance
 
 - **What this is**: A modular, GA-driven trading research framework in Python that:
@@ -33,9 +43,9 @@
   - Includes **auto-tuning**, **walk-forward**, and a **champion analysis** step that writes reproducibility metadata.
 
 - **Primary entry points**
-  - `python main.py` — standard GA optimization then champion analysis.
-  - `python tuner.py` — coarse hyperparameter sweep (GA and multi-asset lambda).
-  - `python walk_forward.py` — rolling train/test windows and metadata.
+  - `python main.py` — standard GA optimisation, champion analysis, and optional walk-forward/recommendation/final strategy synthesis.
+  - `tuner.find_best_hyperparameters(...)` — express GA tuner invoked automatically when `config.AUTO_TUNE_ENABLED` is true; call it manually from a Python session for bespoke sweeps.
+  - `walk_forward.run_walk_forward_validation(...)` — roll training/testing windows programmatically when you need to reuse cached champions without rerunning the GA.
 
 ---
 
