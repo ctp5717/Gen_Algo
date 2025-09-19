@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover
     sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
 import importlib  # noqa: E402
+
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pygad  # noqa: E402

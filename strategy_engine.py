@@ -554,9 +554,7 @@ def select_indicator_series(
             f"Requested column '{col_hint}' not found",
         )
 
-    schema = contracts.describe_output(
-        indicator_name, indicator_params or {}
-    )
+    schema = contracts.describe_output(indicator_name, indicator_params or {})
     band = _normalise_band_hint(
         condition_logic.get("band"), condition_logic.get("type")
     )

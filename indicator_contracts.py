@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, Callable, Dict, List, Mapping as TypingMapping
+from typing import Any, Callable, Dict, List
+from typing import Mapping as TypingMapping
 
 import pandas as pd
 
@@ -103,7 +104,11 @@ def _ma_envelope_contract(
         pct_display = round(pct_frac * 100, 10)
     else:  # pragma: no cover - fallback when percent cannot be coerced
         pct_display = pct_frac
-    percent_str = f"{pct_display:.10g}" if isinstance(pct_display, (int, float)) else str(pct_display)
+    percent_str = (
+        f"{pct_display:.10g}"
+        if isinstance(pct_display, (int, float))
+        else str(pct_display)
+    )
     if "." not in percent_str:
         percent_str += ".0"
     base = f"{period}_{percent_str}"
@@ -228,7 +233,9 @@ def describe_output(indicator: str, params: TypingMapping[str, Any]) -> OutputSc
             priority = [default]
 
     roles = {key: value for key, value in roles.items() if value}
-    return OutputSchema(columns=columns, default=default, roles=roles, priority=priority)
+    return OutputSchema(
+        columns=columns, default=default, roles=roles, priority=priority
+    )
 
 
 def normalize_output(

@@ -77,9 +77,7 @@ def _composite_score(
     max_drawdown_fallback: float,
 ) -> float:
     sortino_val = _sanitize_metric(sortino, nan_fallback)
-    pf_val = _sanitize_profit_factor(
-        profit_factor, cap=pf_cap, fallback=nan_fallback
-    )
+    pf_val = _sanitize_profit_factor(profit_factor, cap=pf_cap, fallback=nan_fallback)
     drawdown_val = _sanitize_metric(max_drawdown, max_drawdown_fallback)
     drawdown_score = 1 - (drawdown_val / 100.0)
     return (
@@ -612,9 +610,7 @@ class MultiAssetFitnessEvaluator:
             total_trades += trades
             weight = asset_weights_cfg.get(ticker, 1.0)
             pf_raw = stats.get("profit_factor")
-            pf_capped = _sanitize_profit_factor(
-                pf_raw, cap=cap, fallback=nan_fallback
-            )
+            pf_capped = _sanitize_profit_factor(pf_raw, cap=cap, fallback=nan_fallback)
 
             if trades < per_asset_min:
                 if self.settings.get("zero_trade_policy") == "penalize":
