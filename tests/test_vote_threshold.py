@@ -20,6 +20,11 @@ import indicator_library  # noqa: E402,F401
 import strategy_engine  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def reset_vote_logging(monkeypatch):
+    monkeypatch.setattr(strategy_engine, "_VOTE_LOG_SEEN", False)
+
+
 def _make_cond(name, series):
     def ind(ohlc, period=None):
         return pd.Series(series, index=ohlc.index)
@@ -58,17 +63,16 @@ def test_vote_threshold_none_and_casing(monkeypatch, comb_logic, caplog):
         }
     }
 
-    with caplog.at_level(logging.INFO):
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=strategy_engine.logger.name):
         res = strategy_engine.process_strategy_rules(data, rules)
 
-    record = next(r for r in caplog.records if r.levelno == logging.INFO)
-    payload = ast.literal_eval(record.getMessage())
-    assert payload == {
-        "logic": "VOTE",
-        "M": 2,
-        "k": 1,
-        "nan_policy": "FALSE",
-    }
+    info_payloads = [
+        ast.literal_eval(record.getMessage())
+        for record in caplog.records
+        if record.levelno == logging.INFO and "logic" in record.getMessage()
+    ]
+    assert info_payloads == [{"logic": "VOTE", "M": 2, "k": 1, "nan_policy": "FALSE"}]
 
     # Expect majority threshold (ceil(2/2) == 1) and sanitized logic
     assert captured["combination_logic"] == "VOTE"
@@ -133,25 +137,82 @@ def test_vote_threshold_exceeds_active(monkeypatch, caplog):
         }
     }
 
-    with caplog.at_level(logging.INFO):
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=strategy_engine.logger.name):
         with pytest.warns(
             RuntimeWarning, match="vote_threshold exceeds active conditions"
         ):
             res = strategy_engine.process_strategy_rules(data, rules)
 
-    record = next(r for r in caplog.records if r.levelno == logging.INFO)
-    payload = ast.literal_eval(record.getMessage())
-    assert payload == {
-        "logic": "VOTE",
-        "M": 2,
-        "k": 2,
-        "nan_policy": "FALSE",
-    }
+    info_payloads = [
+        ast.literal_eval(record.getMessage())
+        for record in caplog.records
+        if record.levelno == logging.INFO and "logic" in record.getMessage()
+    ]
+    assert info_payloads == [{"logic": "VOTE", "M": 2, "k": 2, "nan_policy": "FALSE"}]
 
     assert captured["combination_logic"] == "VOTE"
     assert captured["vote_threshold"] == 2
     expected = pd.Series([True, False], index=data.index, dtype=bool)
     pd.testing.assert_series_equal(res.astype(bool), expected)
+
+
+def test_vote_logging_emits_once_per_process(monkeypatch, caplog):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+    ind_a, cond_a = _make_cond("a", [1, 0])
+    ind_b, cond_b = _make_cond("b", [0, 1])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", ind_b)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "conditions": [cond_a, cond_b],
+        }
+    }
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=strategy_engine.logger.name):
+        first = strategy_engine.process_strategy_rules(data, rules)
+        second = strategy_engine.process_strategy_rules(data, rules)
+
+    info_payloads = [
+        ast.literal_eval(record.getMessage())
+        for record in caplog.records
+        if record.levelno == logging.INFO and "logic" in record.getMessage()
+    ]
+    assert info_payloads == [{"logic": "VOTE", "M": 2, "k": 1, "nan_policy": "FALSE"}]
+    pd.testing.assert_series_equal(first.astype(bool), second.astype(bool))
+
+
+def test_vote_logging_respects_debug_level(monkeypatch, caplog):
+    data = pd.DataFrame({"Close": [1, 1]}, index=pd.date_range("2020", periods=2))
+    ind_a, cond_a = _make_cond("a", [1, 0])
+    ind_b, cond_b = _make_cond("b", [0, 1])
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "a", ind_a)
+    monkeypatch.setitem(strategy_engine.INDICATOR_MAPPING, "b", ind_b)
+
+    rules = {
+        "entry_rules": {
+            "combination_logic": "VOTE",
+            "conditions": [cond_a, cond_b],
+        }
+    }
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger=strategy_engine.logger.name):
+        strategy_engine.process_strategy_rules(data, rules)
+
+    debug_payloads = [
+        ast.literal_eval(record.getMessage())
+        for record in caplog.records
+        if record.levelno == logging.DEBUG and "logic" in record.getMessage()
+    ]
+    assert debug_payloads == [{"logic": "VOTE", "M": 2, "k": 1, "nan_policy": "FALSE"}]
+    info_levels = [
+        record for record in caplog.records if record.levelno == logging.INFO
+    ]
+    assert not info_levels
 
 
 def test_invalid_threshold_raises(monkeypatch):
