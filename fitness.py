@@ -51,6 +51,42 @@ PenaltyDetail = str | dict[str, float | str] | None
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_metric(value: float | int | None, fallback: float) -> float:
+    if value is None or pd.isna(value):
+        return float(fallback)
+    return float(value)
+
+
+def _sanitize_profit_factor(
+    value: float | int | None, *, cap: float, fallback: float
+) -> float:
+    pf = _sanitize_metric(value, fallback)
+    if np.isinf(pf) or pf > cap:
+        return float(cap)
+    return pf
+
+
+def _composite_score(
+    sortino: float | int | None,
+    profit_factor: float | int | None,
+    max_drawdown: float | int | None,
+    *,
+    weights: Mapping[str, float],
+    pf_cap: float,
+    nan_fallback: float,
+    max_drawdown_fallback: float,
+) -> float:
+    sortino_val = _sanitize_metric(sortino, nan_fallback)
+    pf_val = _sanitize_profit_factor(profit_factor, cap=pf_cap, fallback=nan_fallback)
+    drawdown_val = _sanitize_metric(max_drawdown, max_drawdown_fallback)
+    drawdown_score = 1 - (drawdown_val / 100.0)
+    return (
+        sortino_val * weights["sortino_ratio"]
+        + pf_val * weights["profit_factor"]
+        + drawdown_score * weights["max_drawdown"]
+    )
+
+
 def print_floor_failures(counter: Counter):
     """Utility to print a consistent hard-floor failure summary."""
     if not counter or sum(counter.values()) == 0:
@@ -125,36 +161,19 @@ class FitnessEvaluator:
                 )
                 self._metric_mapping_logged = True
 
-            sortino = metrics.get("sortino")
-            profit_factor = metrics.get("profit_factor")
-            max_drawdown = metrics.get("max_drawdown")
-
-            cap = getattr(config, "MULTI_ASSET", {}).get("winsorize_pf_cap", 5.0)
-            if profit_factor is None or pd.isna(profit_factor):
-                profit_factor = 0.0
-            else:
-                profit_factor = float(profit_factor)
-                if np.isinf(profit_factor) or profit_factor > cap:
-                    profit_factor = cap
-            if sortino is None or pd.isna(sortino):
-                sortino = 0.0
-            else:
-                sortino = float(sortino)
-            if max_drawdown is None or pd.isna(max_drawdown):
-                max_drawdown = 100.0
-            else:
-                max_drawdown = float(max_drawdown)
-
-            drawdown_score = 1 - (max_drawdown / 100.0)
             weights = config.FITNESS_WEIGHTS
-
-            fitness_score = (
-                (sortino * weights["sortino_ratio"])
-                + (profit_factor * weights["profit_factor"])
-                + (drawdown_score * weights["max_drawdown"])
+            cap = getattr(config, "MULTI_ASSET", {}).get("winsorize_pf_cap", 5.0)
+            score = _composite_score(
+                metrics.get("sortino"),
+                metrics.get("profit_factor"),
+                metrics.get("max_drawdown"),
+                weights=weights,
+                pf_cap=cap,
+                nan_fallback=0.0,
+                max_drawdown_fallback=100.0,
             )
 
-            return fitness_score if not np.isnan(fitness_score) else -1.0
+            return score if np.isfinite(score) else -1.0
 
         except Exception as e:
             print(f"Error in fitness evaluation: {e}")
@@ -591,10 +610,7 @@ class MultiAssetFitnessEvaluator:
             total_trades += trades
             weight = asset_weights_cfg.get(ticker, 1.0)
             pf_raw = stats.get("profit_factor")
-            if pf_raw is None or pd.isna(pf_raw):
-                pf_capped = nan_fallback
-            else:
-                pf_capped = cap if np.isinf(pf_raw) else min(cap, float(pf_raw))
+            pf_capped = _sanitize_profit_factor(pf_raw, cap=cap, fallback=nan_fallback)
 
             if trades < per_asset_min:
                 if self.settings.get("zero_trade_policy") == "penalize":
@@ -654,31 +670,22 @@ class MultiAssetFitnessEvaluator:
                 continue
 
             if metric_type == "sortino":
-                val = stats.get("sortino")
-                if val is None or pd.isna(val):
-                    val = nan_fallback
+                val = _sanitize_metric(stats.get("sortino"), nan_fallback)
             elif metric_type == "profit_factor":
                 val = pf_capped
             elif metric_type == "return":
                 total_return = stats.get("total_return")
-                val = (
-                    nan_fallback
-                    if total_return is None or pd.isna(total_return)
-                    else total_return
-                )
+                val = _sanitize_metric(total_return, nan_fallback)
             else:
-                sortino_val = stats.get("sortino")
-                if sortino_val is None or pd.isna(sortino_val):
-                    sortino_val = nan_fallback
-                max_dd = stats.get("max_drawdown")
-                if max_dd is None or pd.isna(max_dd):
-                    max_dd = 100.0
-                drawdown_score = 1 - (max_dd / 100.0)
                 w = config.FITNESS_WEIGHTS
-                val = (
-                    sortino_val * w["sortino_ratio"]
-                    + pf_capped * w["profit_factor"]
-                    + drawdown_score * w["max_drawdown"]
+                val = _composite_score(
+                    stats.get("sortino"),
+                    pf_raw,
+                    stats.get("max_drawdown"),
+                    weights=w,
+                    pf_cap=cap,
+                    nan_fallback=nan_fallback,
+                    max_drawdown_fallback=100.0,
                 )
 
             per_asset_metrics.append(val)

@@ -31,7 +31,14 @@ def _base_df():
     )
 
 
-def _run_rule(df, indicator_name, output_df, condition, entry_extra=None):
+def _run_rule(
+    df,
+    indicator_name,
+    output_df,
+    condition,
+    entry_extra=None,
+    indicator_params=None,
+):
     def func(data, **p):
         return output_df
 
@@ -45,7 +52,7 @@ def _run_rule(df, indicator_name, output_df, condition, entry_extra=None):
             "conditions": [
                 {
                     "indicator": indicator_name,
-                    "params": {},
+                    "params": indicator_params or {},
                     "condition": condition,
                 }
             ],
@@ -154,6 +161,7 @@ def test_ma_envelope_defaults_to_middle_band():
         "ma_envelope",
         output,
         {"type": "price_is_above_indicator"},
+        indicator_params={"period": 2, "percent": 2.0},
     )
     assert entries.iloc[-1]
 
@@ -213,6 +221,7 @@ def test_trix_defaults_to_trix_line():
         "trix",
         output,
         {"type": "indicator_is_above_value", "value": 1},
+        indicator_params={"period": 15, "signal": 9},
     )
     assert entries.iloc[-1]
 
@@ -240,6 +249,7 @@ def test_band_hint_and_strict_column(indicator_name, params):
         df,
         {"type": "price_is_above_indicator", "band": "lower"},
         True,
+        params,
     )
     pd.testing.assert_series_equal(series, df[cols[0]])
 
@@ -249,6 +259,7 @@ def test_band_hint_and_strict_column(indicator_name, params):
             df.drop(columns=cols[2]),
             {"type": "price_is_above_indicator", "band": "upper"},
             True,
+            params,
         )
 
     with pytest.warns(UserWarning):
@@ -257,6 +268,7 @@ def test_band_hint_and_strict_column(indicator_name, params):
             df.drop(columns=cols[2]),
             {"type": "price_is_above_indicator", "band": "upper"},
             False,
+            params,
         )
     pd.testing.assert_series_equal(series_fb, df.drop(columns=cols[2]).iloc[:, 0])
 
@@ -269,8 +281,13 @@ def test_macd_hist_default_and_strict_column():
         },
         index=pd.date_range("2020-01-01", periods=4, freq="D"),
     )
+    macd_params = {"fast": 12, "slow": 26, "signal": 9}
     series = strategy_engine.select_indicator_series(
-        "macd", df, {"type": "indicator_is_above_value"}, True
+        "macd",
+        df,
+        {"type": "indicator_is_above_value"},
+        True,
+        macd_params,
     )
     pd.testing.assert_series_equal(series, df["MACDh_12_26_9"])
 
@@ -283,6 +300,7 @@ def test_macd_hist_default_and_strict_column():
                 "column": "bogus",
             },
             True,
+            macd_params,
         )
 
     with pytest.warns(UserWarning):
@@ -294,6 +312,7 @@ def test_macd_hist_default_and_strict_column():
                 "column": "bogus",
             },
             False,
+            macd_params,
         )
     pd.testing.assert_series_equal(series_fb, df.iloc[:, 0])
 

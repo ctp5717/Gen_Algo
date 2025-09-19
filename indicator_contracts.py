@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Callable, Dict, List
+from typing import Mapping as TypingMapping
 
 import pandas as pd
 
@@ -89,6 +91,30 @@ def _donchian_contract(
     return [f"DCL_{base}", f"DCM_{base}", f"DCU_{base}"]
 
 
+def _ma_envelope_contract(
+    period: int = 20, percent: float = 2.0, **_: Any
+) -> List[str]:
+    try:
+        pct = float(percent)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        pct = percent
+    pct_frac = pct / 100 if isinstance(pct, (int, float)) and pct > 1 else pct
+    if isinstance(pct_frac, (int, float)):
+        pct_frac = round(pct_frac, 10)
+        pct_display = round(pct_frac * 100, 10)
+    else:  # pragma: no cover - fallback when percent cannot be coerced
+        pct_display = pct_frac
+    percent_str = (
+        f"{pct_display:.10g}"
+        if isinstance(pct_display, (int, float))
+        else str(pct_display)
+    )
+    if "." not in percent_str:
+        percent_str += ".0"
+    base = f"{period}_{percent_str}"
+    return [f"MAE_L_{base}", f"MAE_M_{base}", f"MAE_U_{base}"]
+
+
 def _trix_contract(
     period: int = 15, signal: int | None = None, **_: Any
 ) -> List[str] | None:
@@ -117,9 +143,99 @@ CONTRACTS: Dict[str, Callable[..., List[str] | None]] = {
     "psar": _psar_contract,
     "keltner": _keltner_contract,
     "donchian": _donchian_contract,
+    "ma_envelope": _ma_envelope_contract,
     "trix": _trix_contract,
     "ichimoku": _ichimoku_contract,
 }
+
+
+@dataclass(frozen=True)
+class OutputSchema:
+    """Describe indicator output columns and semantic roles."""
+
+    columns: list[str] = field(default_factory=list)
+    default: str | None = None
+    roles: dict[str, str] = field(default_factory=dict)
+    priority: list[str] = field(default_factory=list)
+
+
+def describe_output(indicator: str, params: TypingMapping[str, Any]) -> OutputSchema:
+    """Return canonical column metadata for ``indicator`` given ``params``."""
+
+    name = indicator.lower()
+    contract = CONTRACTS.get(name)
+    expected = contract(**params) if contract else None
+    columns = list(expected) if expected else []
+    roles: dict[str, str] = {}
+    priority: list[str] = []
+    default: str | None = None
+
+    if name == "bbands" and len(columns) >= 3:
+        roles = {"lower": columns[0], "middle": columns[1], "upper": columns[2]}
+        default = columns[1]
+        priority = [columns[1], columns[0], columns[2]]
+    elif name == "keltner" and len(columns) >= 3:
+        roles = {"lower": columns[0], "middle": columns[1], "upper": columns[2]}
+        default = columns[1]
+        priority = [columns[1], columns[0], columns[2]]
+    elif name == "donchian" and len(columns) >= 3:
+        roles = {"lower": columns[0], "middle": columns[1], "upper": columns[2]}
+        default = columns[1]
+        priority = [columns[1], columns[0], columns[2]]
+    elif name == "ma_envelope" and len(columns) >= 3:
+        roles = {"lower": columns[0], "middle": columns[1], "upper": columns[2]}
+        default = columns[1]
+        priority = [columns[1], columns[0], columns[2]]
+    elif name == "macd" and len(columns) >= 3:
+        roles = {
+            "line": columns[0],
+            "histogram": columns[1],
+            "signal": columns[2],
+        }
+        default = columns[1]
+        priority = [columns[1], columns[0], columns[2]]
+    elif name == "stoch" and columns:
+        roles = {"k": columns[0]}
+        if len(columns) > 1:
+            roles["d"] = columns[1]
+        if len(columns) > 2:
+            roles["histogram"] = columns[2]
+        default = columns[0]
+        priority = [col for col in columns[:3] if col is not None]
+    elif name == "adx" and columns:
+        roles = {"main": columns[0]}
+        default = columns[0]
+        priority = [columns[0]]
+    elif name == "ichimoku" and columns:
+        roles = {"baseline": columns[0]}
+        if len(columns) > 1:
+            roles["conversion"] = columns[1]
+        if len(columns) > 2:
+            roles["span_a"] = columns[2]
+        if len(columns) > 3:
+            roles["span_b"] = columns[3]
+        default = columns[0]
+        priority = [columns[0]]
+    elif name == "trix" and columns:
+        roles = {"line": columns[0]}
+        default = columns[0]
+        priority = [columns[0]]
+        if len(columns) > 1:
+            roles["signal"] = columns[1]
+            priority.append(columns[1])
+    elif name in {"pivot_points", "pivots"}:
+        roles = {"pivot": "P"}
+        default = "P"
+        priority = ["P"]
+    else:
+        default = columns[0] if columns else None
+        if default:
+            priority = [default]
+
+    roles = {key: value for key, value in roles.items() if value}
+    return OutputSchema(
+        columns=columns, default=default, roles=roles, priority=priority
+    )
 
 
 def normalize_output(
