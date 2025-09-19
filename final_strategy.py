@@ -706,6 +706,25 @@ def _detect_missing_asset_weights(assets: AssetPayload) -> List[str]:
             LOGGER.warning("Asset %s missing weight; using 0.0", ticker)
             data["weight"] = 0.0
             missing.append(ticker)
+            continue
+        value = data["weight"]
+        try:
+            weight = float(value)
+        except (TypeError, ValueError):
+            LOGGER.warning(
+                "Asset %s has non-numeric weight %r; using 0.0", ticker, value
+            )
+            data["weight"] = 0.0
+            missing.append(ticker)
+            continue
+        if not math.isfinite(weight):
+            LOGGER.warning(
+                "Asset %s has non-finite weight %r; using 0.0", ticker, value
+            )
+            data["weight"] = 0.0
+            missing.append(ticker)
+            continue
+        data["weight"] = weight
     if missing and _strict_missing_weight_mode():
         joined = ", ".join(missing)
         raise FinalStrategyError(
