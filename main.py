@@ -6,6 +6,7 @@ Main Application Orchestrator for the GA Trading Framework
 """
 import argparse
 import copy
+import csv
 import json
 import logging
 import os
@@ -337,7 +338,9 @@ def main(argv: list[str] | None = None):
             f"Starting optimization for: {config.SELECTED_ASSET_NAME} ({config.TICKER})"
         )
     num_cores = os.cpu_count()
-    print(f"Detected {num_cores} CPU cores available for parallel processing.")
+    print(
+        f"Detected {num_cores} CPU cores available for the global executor."
+    )
     print("-" * 35)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -436,6 +439,67 @@ def main(argv: list[str] | None = None):
     )
     fitness_function = fitness_evaluator.__call__
 
+    metrics_rows: list[dict[str, Any]] = []
+    metrics_csv_path = run_dir / f"executor_metrics_{run_id}.csv"
+
+    def generation_callback(ga_instance):
+        on_generation(ga_instance)
+        collector = getattr(fitness_evaluator, "collect_generation_report", None)
+        report: dict[str, Any] = {}
+        if callable(collector):
+            report = collector() or {}
+        else:
+            report = getattr(fitness_evaluator, "instrumentation", {}) or {}
+
+        if not report:
+            return
+
+        report = dict(report)
+        report["generation"] = ga_instance.generations_completed
+        metrics_rows.append(report)
+
+        mean_latency_ms = float(
+            report.get("mean_latency", report.get("latency_mean", 0.0))
+        ) * 1000
+        p95_latency_ms = float(
+            report.get("p95_latency", report.get("latency_p95", 0.0))
+        ) * 1000
+        pending_now = report.get("pending", report.get("queue_depth", 0))
+        max_pending = report.get("max_pending", report.get("queue_depth", pending_now))
+        base_cap = report.get("base_in_flight_cap", report.get("in_flight_cap", 0))
+        LOGGER.info(
+            (
+                "gen %s executor submitted=%s completed=%s pending=%s max=%s cap=%s base=%s "
+                "mean=%.2fms p95=%.2fms thr=%.2f/s cpu=%.2fs occ=%.2f batch=%s→%s"
+            ),
+            report["generation"],
+            report.get("submitted", 0),
+            report.get("completed", 0),
+            pending_now,
+            max_pending,
+            report.get("in_flight_cap", 0),
+            base_cap,
+            mean_latency_ms,
+            p95_latency_ms,
+            report.get("throughput", 0.0),
+            report.get("cpu_time", 0.0),
+            report.get("occupancy", 0.0),
+            report.get("batch_size"),
+            report.get("next_batch_size"),
+        )
+
+        if report.get("occupancy", 0.0) < 0.9:
+            LOGGER.warning(
+                "executor occupancy below target: %.2f", report.get("occupancy", 0.0)
+            )
+        if report.get("reducer_timeouts"):
+            LOGGER.warning(
+                "Reducer observed %s timeout cycles", report.get("reducer_timeouts")
+            )
+        top_errors = report.get("error_top") or []
+        if top_errors:
+            LOGGER.info("Top indicator errors: %s", top_errors)
+
     if getattr(config, "AUTO_TUNE_ENABLED", False):
         tuned = tuner.find_best_hyperparameters(
             training_data, gene_space, gene_map, gene_types, validation_data
@@ -473,14 +537,66 @@ def main(argv: list[str] | None = None):
         gene_type=list(gene_types),
         mutation_num_genes=mutation_num_genes,
         fitness_func=fitness_function,
-        # Keep GA evaluations in-process to avoid pickling the large evaluator payload
-        # (vectorbt data + fitness evaluator state) for every candidate solution.
-        parallel_processing=["thread", num_cores],
+        # Delegate population fitness evaluations to the shared process pool.
+        fitness_batch_size=config.GLOBAL_EXECUTOR.get("batch_size"),
         # --- NEW: Pass the callback function to the GA instance ---
-        on_generation=on_generation,
+        on_generation=generation_callback,
     )
 
     ga_instance.run()
+
+    collector = getattr(fitness_evaluator, "collect_generation_report", None)
+    if callable(collector):
+        leftover = collector() or {}
+        if leftover:
+            leftover = dict(leftover)
+            leftover["generation"] = ga_instance.generations_completed
+            metrics_rows.append(leftover)
+
+    if metrics_rows:
+        fieldnames = [
+            "generation",
+            "submitted",
+            "completed",
+            "pending",
+            "max_pending",
+            "in_flight_cap",
+            "base_in_flight_cap",
+            "mean_latency",
+            "p95_latency",
+            "throughput",
+            "cpu_time",
+            "occupancy",
+            "queue_ratio",
+            "evaluations",
+            "serialization_bytes",
+            "rows_processed",
+            "latency_samples",
+            "batch_size",
+            "next_batch_size",
+            "bytes_avg",
+            "latency_ema",
+            "bytes_ema",
+            "reducer_timeouts",
+            "worker_count",
+            "worker_seeds",
+            "error_top",
+        ]
+        with metrics_csv_path.open("w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in metrics_rows:
+                prepared = dict(row)
+                prepared.setdefault("pending", prepared.get("queue_depth"))
+                prepared.setdefault("max_pending", prepared.get("queue_depth"))
+                prepared.setdefault("base_in_flight_cap", prepared.get("in_flight_cap"))
+                prepared["worker_seeds"] = ",".join(
+                    str(seed) for seed in prepared.get("worker_seeds", [])
+                )
+                prepared["error_top"] = ";".join(
+                    f"{name}:{count}" for name, count in prepared.get("error_top", [])
+                )
+                writer.writerow({key: prepared.get(key) for key in fieldnames})
 
     # Print a newline character to move off the progress line.
     print("\n" + "-" * 35)

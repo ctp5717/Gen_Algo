@@ -1,6 +1,10 @@
 import math
 from types import SimpleNamespace
 
+import copy
+from collections import Counter
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
@@ -12,6 +16,102 @@ import metrics_contract
 @pytest.fixture(autouse=True)
 def reset_metric_cache():
     metrics_contract.reset_cache()
+
+
+class _ImmediateFuture:
+    def __init__(self, result):
+        self._result = result
+
+    def result(self):
+        return self._result
+
+    def add_done_callback(self, fn):
+        fn(self)
+
+
+@pytest.fixture(autouse=True)
+def _sequential_executor(monkeypatch):
+    monkeypatch.setattr(
+        fitness.global_executor,
+        "submit",
+        lambda fn, *args, **kwargs: _ImmediateFuture(fn(*args, **kwargs)),
+    )
+    monkeypatch.setattr(
+        fitness.global_executor,
+        "metrics",
+        lambda: {
+            "submitted": 0,
+            "completed": 0,
+            "total_runtime": 0.0,
+            "pending": 0,
+            "max_pending": 0,
+            "in_flight_cap": 0,
+            "base_in_flight_cap": 0,
+            "bytes_avg": 0.0,
+        },
+    )
+
+    def _sync_population(self, solutions, indices):
+        if not solutions:
+            return [], Counter()
+
+        fitness_values: list[float] = []
+        err_counts: Counter = Counter()
+
+        for vector, idx in zip(solutions, indices, strict=False):
+            results, errors = self._evaluate_assets({"solution": vector})
+            err_counts.update(errors)
+            assets_map = {
+                ticker: results.get(
+                    ticker, self._build_evaluation_record()
+                )
+                for ticker in self._sorted_tickers
+            }
+            summary = self._score_assets(assets_map)
+            score = self._aggregate_scores(summary)
+            fitness_values.append(score)
+            self.batch_details[idx] = copy.deepcopy(self.last_details)
+
+        record = {
+            "tasks_submitted": 0,
+            "evaluations": len(fitness_values) * len(self._sorted_tickers),
+            "latency": [],
+            "latency_mean": 0.0,
+            "latency_p95": 0.0,
+            "latency_target": getattr(self, "_latency_target", 0.0),
+            "throughput": 0.0,
+            "cpu_time": 0.0,
+            "occupancy": 0.0,
+            "pending": 0,
+            "max_pending": 0,
+            "queue_depth": 0,
+            "queue_ratio": 0.0,
+            "serialization_bytes": 0,
+            "rows_processed": 0,
+            "submitted": 0,
+            "completed": 0,
+            "batch_size": getattr(self, "_batch_size", 1),
+            "next_batch_size": getattr(self, "_batch_size", 1),
+            "in_flight_cap": 0,
+            "base_in_flight_cap": 0,
+            "bytes_avg": 0.0,
+            "worker_count": 0,
+            "worker_seeds": [],
+            "reducer_timeouts": 0,
+            "error_counts": {},
+            "error_top": [],
+        }
+        self.instrumentation = record
+        if hasattr(self, "_generation_records"):
+            self._generation_records.append(dict(record))
+
+        return fitness_values, err_counts
+
+    monkeypatch.setattr(
+        fitness.MultiAssetFitnessEvaluator,
+        "_evaluate_population",
+        _sync_population,
+    )
 
 
 def _fake_process_rules(ohlc, rules, collect_counts=False):
@@ -62,7 +162,6 @@ def _multi_asset_settings():
         "lambda_dispersion": 0.0,
         "winsorize_pf_cap": 5.0,
         "zero_trade_policy": "ignore",
-        "parallel": {"enabled": False},
     }
 
 

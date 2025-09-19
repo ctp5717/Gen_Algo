@@ -476,7 +476,49 @@ FITNESS_WEIGHTS = {
     "min_trades": 0,
 }
 
-# --- 5a. MULTI-ASSET EVALUATION SETTINGS ---
+# --- 5a. GLOBAL EXECUTOR SETTINGS ---
+# A single process-based executor powers all multi-asset fitness evaluations.
+# ``max_workers`` defaults to ``os.cpu_count() - OS_RESERVE`` so that at least a
+# couple of cores remain available for the operating system and telemetry.  The
+# micro-batching controls below provide adaptive behaviour at runtime: the pool
+# starts with ``batch_size`` and grows/shrinks between ``min_batch_size`` and
+# ``max_batch_size`` based on observed latency and queue depth. ``latency_target_ms``
+# guides the expansion while ``queue_high_watermark``/``queue_low_watermark``
+# express the acceptable utilisation band of the executor queue (as a ratio of
+# the current in-flight cap). ``memory_target_gib`` clamps the effective
+# in-flight cap when batches are exceptionally large to avoid swapping.
+GLOBAL_EXECUTOR = {
+    "enabled": True,
+    "backend": "process",
+    "os_reserve": 2,
+    "max_workers": max(1, (os.cpu_count() or 1) - 2),
+    "batch_size": 8,
+    "min_batch_size": 4,
+    "max_batch_size": 64,
+    "batch_cooldown_submissions": 6,
+    "batch_step_ratio": 0.25,
+    "latency_target_ms": 200,
+    "queue_high_watermark": 0.85,
+    "queue_low_watermark": 0.35,
+    "reducer_timeout": 30.0,
+    "in_flight_cap": None,
+    "memory_target_gib": 4.0,
+    "start_method": "spawn",
+    "cpu_affinity": None,
+}
+
+# --- 5a.i DATA REGISTRY SETTINGS ---
+# The registry materialises OHLCV windows for workers. ``backend`` selects the
+# default representation (``"auto"`` chooses columnar layouts when wide frames
+# are detected). ``columnar_threshold`` is the minimum number of columns before
+# the columnar backend is preferred.
+DATA_REGISTRY = {
+    "backend": "auto",
+    "columnar_threshold": 12,
+    "schema_version": 1,
+}
+
+# --- 5b. MULTI-ASSET EVALUATION SETTINGS ---
 # These options control the behaviour of the multi-asset fitness evaluator.  By
 # default the framework behaves exactly as before (single asset) until
 # `MULTI_ASSET['enabled']` is set to True.
@@ -520,12 +562,6 @@ MULTI_ASSET = {
     "trading_days_per_year": 252,
     # Optional scaling of the group trade floor based on fold length (years)
     "min_total_trades_per_year": 50,
-    # Parallel evaluation of per-asset statistics
-    "parallel": {
-        "enabled": False,  # when True uses concurrent.futures
-        "backend": "thread",  # "thread" or "process"
-        "max_workers": None,
-    },
     # Verbose logging of per-asset evaluation errors (can be noisy)
     "verbose_asset_errors": False,
     # Fitness score returned when the hard floor triggers or an error occurs

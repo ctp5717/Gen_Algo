@@ -123,3 +123,27 @@ flowchart LR
 - **Metadata conflicts** – `run_metadata.merge_run_metadata` uses a file lock and
   preserves prior entries. If corruption occurs the function renames the file to
   `*.corrupt-<timestamp>.json` and starts fresh.
+
+## Executor heuristics & data registry
+
+- `config.GLOBAL_EXECUTOR` controls a single process pool that services every
+  multi-asset evaluation. The executor starts with `batch_size` candidates per
+  submission and adjusts in ±25% steps (bounded by
+  `min_batch_size`/`max_batch_size`). Adjustments only occur after
+  `batch_cooldown_submissions` batches to avoid oscillation. When the observed
+  latency (`latency_target_ms`) stays below target and the queue sits under
+  `queue_low_watermark`, the batch size increases; when the queue reaches
+  `queue_high_watermark` or latency blows past the target, it shrinks. Example:
+  with `batch_size=8` and the queue mostly empty, the next adjustment raises the
+  batch to `10` after at least six submissions; if latency spikes the following
+  cycle, the batch contracts back to `8`.
+- `memory_target_gib` caps the effective number of in-flight batches. The
+  executor maintains a moving average of batch sizes (`bytes_avg`) and reduces
+  the cap whenever `bytes_avg × in_flight_cap` would exceed the configured
+  memory budget. For instance, with `memory_target_gib=0.5` and 128 MiB batches,
+  the cap drops from `8` to `4` to keep working memory near the 512 MiB target.
+- `DATA_REGISTRY` governs how OHLCV frames are shared with workers. `backend=
+  "auto"` picks columnar memmaps when a window has many numeric columns while
+  falling back to structured records for mixed/object dtypes. The registry
+  exposes descriptors tagged with `schema_version` so future upgrades can detect
+  incompatible layouts without breaking existing workers.

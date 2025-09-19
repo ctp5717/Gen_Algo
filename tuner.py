@@ -1,4 +1,7 @@
-import os
+
+import csv
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -216,14 +219,60 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
         train_data, STRATEGY_RULES, gene_map
     )
     fitness_func = fitness_evaluator.__call__
-    num_cores = os.cpu_count()
-
     results = []
+
+    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     for idx, params in enumerate(config.HYPERPARAMETER_SEARCH_SPACE, 1):
         print(
             f"Tuning with config {idx} of {len(config.HYPERPARAMETER_SEARCH_SPACE)}: {params}"
         )
+        metrics_rows: list[dict[str, Any]] = []
+        metrics_csv_path = Path(f"tuner_executor_metrics_{session_id}_run{idx}.csv")
+
+        def generation_callback(ga_instance):
+            collector = getattr(fitness_evaluator, "collect_generation_report", None)
+            report = collector() if callable(collector) else None
+            if not report:
+                report = getattr(fitness_evaluator, "instrumentation", {}) or {}
+            if not report:
+                return
+            report = dict(report)
+            report["generation"] = ga_instance.generations_completed
+            report["run"] = idx
+            metrics_rows.append(report)
+            mean_latency_ms = float(
+                report.get("mean_latency", report.get("latency_mean", 0.0))
+            ) * 1000
+            p95_latency_ms = float(
+                report.get("p95_latency", report.get("latency_p95", 0.0))
+            ) * 1000
+            pending_now = report.get("pending", report.get("queue_depth", 0))
+            max_pending = report.get("max_pending", report.get("queue_depth", pending_now))
+            base_cap = report.get("base_in_flight_cap", report.get("in_flight_cap", 0))
+            print(
+                (
+                    "Run {run} Gen {gen}: thr={thr:.2f}/s occ={occ:.2f} "
+                    "pending={pending} max={max_pending} cap={cap}/{base} mean={mean:.2f}ms "
+                    "p95={p95:.2f}ms batch={batch}->{next_batch}"
+                ).format(
+                    run=idx,
+                    gen=report["generation"],
+                    thr=report.get("throughput", 0.0),
+                    occ=report.get("occupancy", 0.0),
+                    pending=pending_now,
+                    max_pending=max_pending,
+                    cap=report.get("in_flight_cap", 0),
+                    base=base_cap,
+                    mean=mean_latency_ms,
+                    p95=p95_latency_ms,
+                    batch=report.get("batch_size"),
+                    next_batch=report.get("next_batch_size"),
+                )
+            )
+            if report.get("error_top"):
+                print(f"  Error hot spots: {report['error_top']}")
+
         ga = pygad.GA(
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],
@@ -233,11 +282,67 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             gene_type=list(gene_types),
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
-            # Threads avoid expensive serialization of the GA instance per evaluation.
-            parallel_processing=["thread", num_cores],
+            fitness_batch_size=config.GLOBAL_EXECUTOR.get("batch_size"),
             random_seed=config.SEED,
+            on_generation=generation_callback,
         )
         ga.run()
+
+        collector = getattr(fitness_evaluator, "collect_generation_report", None)
+        if callable(collector):
+            leftover = collector() or {}
+            if leftover:
+                leftover = dict(leftover)
+                leftover["generation"] = ga.generations_completed
+                leftover["run"] = idx
+                metrics_rows.append(leftover)
+
+        if metrics_rows:
+            fieldnames = [
+                "run",
+                "generation",
+                "submitted",
+                "completed",
+                "pending",
+                "max_pending",
+                "in_flight_cap",
+                "base_in_flight_cap",
+                "mean_latency",
+                "p95_latency",
+                "throughput",
+                "cpu_time",
+                "occupancy",
+                "queue_ratio",
+                "evaluations",
+                "serialization_bytes",
+                "rows_processed",
+                "latency_samples",
+                "batch_size",
+                "next_batch_size",
+                "bytes_avg",
+                "latency_ema",
+                "bytes_ema",
+                "reducer_timeouts",
+                "worker_count",
+                "worker_seeds",
+                "error_top",
+            ]
+            with metrics_csv_path.open("w", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in metrics_rows:
+                    prepared = dict(row)
+                    prepared.setdefault("pending", prepared.get("queue_depth"))
+                    prepared.setdefault("max_pending", prepared.get("queue_depth"))
+                    prepared.setdefault("base_in_flight_cap", prepared.get("in_flight_cap"))
+                    prepared["worker_seeds"] = ",".join(
+                        str(seed) for seed in prepared.get("worker_seeds", [])
+                    )
+                    prepared["error_top"] = ";".join(
+                        f"{name}:{count}" for name, count in prepared.get("error_top", [])
+                    )
+                    writer.writerow({key: prepared.get(key) for key in fieldnames})
+            print(f"Executor metrics written to {metrics_csv_path}")
         best_solution, _, _ = ga.best_solution()
         score = _evaluate_on_validation(best_solution, gene_map, val_data)
         results.append({"params": params, "score": score})

@@ -1,4 +1,3 @@
-import concurrent.futures as cf
 import sys
 import types
 from pathlib import Path
@@ -14,6 +13,11 @@ try:  # prefer real vectorbt
 except Exception:  # pragma: no cover
     sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
+import concurrent.futures as cf
+import copy
+import itertools
+from collections import Counter
+
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pygad  # noqa: E402
@@ -23,19 +27,55 @@ import analysis  # noqa: E402
 import config as cfg  # noqa: E402
 import data_loader  # noqa: E402
 import fitness  # noqa: E402
+import fitness_worker  # noqa: E402
 import tuner  # noqa: E402
 from utils.math import weighted_mean_std  # noqa: E402
 
 cfg.initialize_config()
 
 
+@pytest.fixture(autouse=True)
+def _sync_executor(monkeypatch):
+    def submit(fn, *args, **kwargs):
+        fut = cf.Future()
+        try:
+            value = fn(*args, **kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            fut.set_exception(exc)
+        else:
+            fut.set_result(value)
+        return fut
+
+    def metrics():
+        return {
+            "submitted": 0,
+            "completed": 0,
+            "total_runtime": 0.0,
+            "pending": 0,
+            "max_pending": 0,
+            "in_flight_cap": 0,
+            "base_in_flight_cap": 0,
+            "bytes_avg": 0.0,
+            "worker_count": 0,
+            "worker_seeds": [],
+        }
+
+    monkeypatch.setattr(fitness.global_executor, "submit", submit)
+    monkeypatch.setattr(fitness.global_executor, "metrics", metrics)
+
+
 def _make_evaluator(settings=None, stats_list=None):
     """Utility to construct a MultiAssetFitnessEvaluator with patched stats."""
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [1, 2, 3]}),
-        "C": pd.DataFrame({"Close": [1, 2, 3]}),
-    }
+    base_frame = pd.DataFrame({"Close": [1, 2, 3]})
+    if stats_list is not None:
+        tickers = [chr(ord("A") + i) for i in range(len(stats_list))]
+        group_data = {ticker: base_frame.copy() for ticker in tickers}
+    else:
+        group_data = {
+            "A": base_frame.copy(),
+            "B": base_frame.copy(),
+            "C": base_frame.copy(),
+        }
     base = {
         "per_asset_min_trades": 1,
         "min_included_assets": 1,
@@ -46,12 +86,19 @@ def _make_evaluator(settings=None, stats_list=None):
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, base)
 
     if stats_list is not None:
-        stats_iter = iter(stats_list)
+        stats_cycle = itertools.cycle(stats_list)
 
-        def fake_eval(self, ohlc, rules):
-            return next(stats_iter)
+        def fake_population(self, solutions, indices):
+            per_asset_stats = [next(stats_cycle) for _ in self._sorted_tickers]
+            evaluation_results = {
+                ticker: self._build_evaluation_record(stats=dict(stat))
+                for ticker, stat in zip(self._sorted_tickers, per_asset_stats, strict=False)
+            }
+            summary = self._score_assets(evaluation_results)
+            score = self._aggregate_scores(summary)
+            return [score for _ in indices], Counter()
 
-        evaluator._evaluate_single_asset = types.MethodType(fake_eval, evaluator)
+        evaluator._evaluate_population = types.MethodType(fake_population, evaluator)
     return evaluator
 
 
@@ -686,312 +733,6 @@ def test_equity_curve_collection_opt_in(monkeypatch):
     pd.testing.assert_series_equal(stats["equity_curve"], equity)
 
 
-def test_handles_asset_error_gracefully():
-    """Evaluator should continue even if one asset raises an error."""
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame(),  # empty frame triggers error in evaluation
-    }
-
-    settings = {
-        "metric": "return",
-        "zero_trade_policy": "ignore",
-        "per_asset_min_trades": 1,
-        "trade_floor_policy": "hard_floor",
-        "min_total_trades": 0,
-        "lambda_dispersion": 0.0,
-        "coverage_penalty": 0.0,
-        "min_included_assets": 1,
-    }
-
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-
-    def fake_eval(self, ohlc, rules):
-        if ohlc.empty:
-            raise IndexError("single positional indexer is out-of-bounds")
-        return {"total_return": 1.0, "trades": 5}
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-    score = ev(None, [], 0)
-
-    # Only asset A contributes to the score
-    assert np.isclose(score, 1.0)
-    assert ev.last_details["assets_included"] == 1
-    assert ev.last_details["assets_ignored"] == 1
-
-
-def test_parallel_evaluation_basic():
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [1, 2, 3]}),
-        "C": pd.DataFrame({"Close": [1, 2, 3]}),
-    }
-    settings = {
-        "metric": "return",
-        "trade_floor_policy": "hard_floor",
-        "min_total_trades": 0,
-        "per_asset_min_trades": 1,
-        "lambda_dispersion": 0.0,
-        "coverage_penalty": 0.0,
-        "min_included_assets": 1,
-        "min_total_trades_per_year": 0,
-        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
-    }
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-    stats_map = {
-        id(group_data["A"]): {"total_return": 5.0, "trades": 2},
-        id(group_data["B"]): {"total_return": 5.0, "trades": 2},
-        id(group_data["C"]): {"total_return": 5.0, "trades": 2},
-    }
-
-    def fake_eval(self, ohlc, rules):
-        return stats_map[id(ohlc)]
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-    score = ev(None, [], 0)
-    assert np.isclose(score, 5.0)
-    assert ev.last_details["assets_included"] == 3
-
-
-def test_parallel_evaluation_handles_exception():
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [1, 2, 3]}),
-    }
-    settings = {
-        "metric": "return",
-        "trade_floor_policy": "hard_floor",
-        "min_total_trades": 0,
-        "per_asset_min_trades": 1,
-        "lambda_dispersion": 0.0,
-        "coverage_penalty": 0.0,
-        "min_included_assets": 1,
-        "min_total_trades_per_year": 0,
-        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
-    }
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-
-    def fake_eval(self, ohlc, rules):
-        if id(ohlc) == id(group_data["B"]):
-            raise ValueError("boom")
-        return {"total_return": 2.0, "trades": 2}
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-    score = ev(None, [], 0)
-    assert np.isclose(score, 2.0)
-    assert not ev.last_details["per_asset"]["B"]["included"]
-    assert ev.last_details["per_asset"]["B"]["reason"] == "evaluation_error"
-
-
-def test_sequential_evaluation_does_not_create_executor(monkeypatch):
-    created = {"thread": 0, "process": 0}
-
-    class SentinelThreadExecutor:
-        def __init__(self, *args, **kwargs):
-            created["thread"] += 1
-
-        def submit(self, *args, **kwargs):
-            raise AssertionError("submit should not be called in sequential mode")
-
-        def shutdown(self, *args, **kwargs):
-            created.setdefault("thread_shutdown", 0)
-            created["thread_shutdown"] += 1
-
-    class SentinelProcessExecutor:
-        def __init__(self, *args, **kwargs):
-            created["process"] += 1
-
-        def submit(self, *args, **kwargs):
-            raise AssertionError("submit should not be called in sequential mode")
-
-        def shutdown(self, *args, **kwargs):
-            created.setdefault("process_shutdown", 0)
-            created["process_shutdown"] += 1
-
-    monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", SentinelThreadExecutor)
-    monkeypatch.setattr(fitness.cf, "ProcessPoolExecutor", SentinelProcessExecutor)
-
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [4, 5, 6]}),
-    }
-    settings = {
-        "metric": "return",
-        "trade_floor_policy": "hard_floor",
-        "min_total_trades": 0,
-        "per_asset_min_trades": 1,
-        "lambda_dispersion": 0.0,
-        "coverage_penalty": 0.0,
-        "min_included_assets": 1,
-        "parallel": {"enabled": False},
-    }
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-
-    def fake_eval(self, ohlc, rules):
-        return {"total_return": 1.5, "trades": 2}
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-
-    for _ in range(2):
-        score = ev(None, [], 0)
-        assert np.isclose(score, 1.5)
-        assert ev.last_details["assets_included"] == 2
-
-    ev.close()
-    assert created["thread"] == 0
-    assert created["process"] == 0
-
-
-def test_parallel_executor_reused_across_calls(monkeypatch):
-    orig_thread = cf.ThreadPoolExecutor
-
-    class CountingThreadPoolExecutor(orig_thread):
-        creations = 0
-        shutdowns = 0
-
-        def __init__(self, *args, **kwargs):
-            type(self).creations += 1
-            super().__init__(*args, **kwargs)
-
-        def shutdown(self, *args, **kwargs):
-            type(self).shutdowns += 1
-            return super().shutdown(*args, **kwargs)
-
-    monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", CountingThreadPoolExecutor)
-
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [4, 5, 6]}),
-    }
-    settings = {
-        "metric": "return",
-        "trade_floor_policy": "hard_floor",
-        "min_total_trades": 0,
-        "per_asset_min_trades": 1,
-        "lambda_dispersion": 0.0,
-        "coverage_penalty": 0.0,
-        "min_included_assets": 1,
-        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
-    }
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-
-    call_count = 0
-
-    def fake_eval(self, ohlc, rules):
-        nonlocal call_count
-        call_count += 1
-        return {"total_return": 2.0, "trades": 3}
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-
-    first = ev(None, [], 0)
-    second = ev(None, [], 0)
-
-    assert np.isclose(first, 2.0)
-    assert np.isclose(second, 2.0)
-    assert call_count == len(group_data) * 2
-    assert CountingThreadPoolExecutor.creations == 1
-
-    ev.close()
-    assert CountingThreadPoolExecutor.shutdowns == 1
-
-
-def test_parallel_executor_reuse_handles_exceptions(monkeypatch):
-    orig_thread = cf.ThreadPoolExecutor
-
-    class CountingThreadPoolExecutor(orig_thread):
-        creations = 0
-
-        def __init__(self, *args, **kwargs):
-            type(self).creations += 1
-            super().__init__(*args, **kwargs)
-
-    monkeypatch.setattr(fitness.cf, "ThreadPoolExecutor", CountingThreadPoolExecutor)
-
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [4, 5, 6]}),
-    }
-    settings = {
-        "metric": "return",
-        "trade_floor_policy": "hard_floor",
-        "min_total_trades": 0,
-        "per_asset_min_trades": 1,
-        "lambda_dispersion": 0.0,
-        "coverage_penalty": 0.0,
-        "min_included_assets": 1,
-        "zero_trade_policy": "ignore",
-        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
-    }
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-
-    id_map = {id(df): ticker for ticker, df in group_data.items()}
-    should_raise = {"value": True}
-
-    def fake_eval(self, ohlc, rules):
-        ticker = id_map[id(ohlc)]
-        if should_raise["value"] and ticker == "B":
-            raise RuntimeError("boom")
-        return {"total_return": 3.0, "trades": 3}
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-
-    should_raise["value"] = True
-    first = ev(None, [], 0)
-    first_details = ev.last_details
-    assert np.isclose(first, 3.0)
-    assert not first_details["per_asset"]["B"]["included"]
-    assert first_details["per_asset"]["B"]["reason"] == "evaluation_error"
-
-    should_raise["value"] = False
-    second = ev(None, [], 0)
-    second_details = ev.last_details
-    assert np.isclose(second, 3.0)
-    assert second_details["assets_included"] == 2
-    assert second_details["per_asset"]["B"]["included"]
-    assert CountingThreadPoolExecutor.creations == 1
-
-    ev.close()
-
-
-def test_evaluate_assets_collects_errors():
-    group_data = {
-        "A": pd.DataFrame({"Close": [1, 2, 3]}),
-        "B": pd.DataFrame({"Close": [9, 9, 9]}),
-        "C": pd.DataFrame(),
-    }
-    settings = {
-        "parallel": {"enabled": True, "backend": "thread", "max_workers": 2},
-        "zero_trade_policy": "ignore",
-        "per_asset_min_trades": 1,
-    }
-    ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
-
-    def fake_eval(self, ohlc, rules):
-        if ohlc["Close"].iloc[0] == 9:
-            err = RuntimeError("boom")
-            err.indicator = "bad_indicator"
-            raise err
-        return {
-            "sortino": 0.5,
-            "profit_factor": 1.2,
-            "max_drawdown": 10.0,
-            "trades": 3,
-            "total_return": 4.0,
-            "equity_curve": pd.Series([1, 2, 3]),
-            "signal_counts": {"x": 1},
-        }
-
-    ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
-    results, err_counts = ev._evaluate_assets({})
-
-    assert results["A"]["trades"] == 3
-    assert results["B"]["evaluation_reason"] == "evaluation_error"
-    assert "boom" in results["B"].get("reason_detail", "")
-    assert err_counts["bad_indicator"] == 1
-    assert results["C"]["evaluation_reason"] == "insufficient_coverage"
-
-
 def test_score_assets_preserves_reason_details():
     settings = {
         "zero_trade_policy": "penalize",
@@ -1123,3 +864,306 @@ def test_csv_columns_and_sort(monkeypatch, tmp_path):
     ]
     scores = df["score"].tolist()
     assert scores == sorted(scores, reverse=True)
+def test_global_executor_batch_dispatch(monkeypatch):
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+    }
+
+    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    calls = []
+
+    def fake_submit(fn, *args, **kwargs):
+        fut = cf.Future()
+        try:
+            value = fn(*args, **kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            fut.set_exception(exc)
+        else:
+            calls.append(value)
+            fut.set_result(value)
+        return fut
+
+    metrics_calls = {"count": 0}
+
+    def fake_metrics():
+        metrics_calls["count"] += 1
+        if metrics_calls["count"] == 1:
+            return {
+                "submitted": 0,
+                "completed": 0,
+                "total_runtime": 0.0,
+                "pending": 0,
+                "max_pending": 0,
+                "in_flight_cap": 0,
+                "base_in_flight_cap": 0,
+                "bytes_avg": 0.0,
+                "worker_count": 0,
+                "worker_seeds": [],
+            }
+        return {
+            "submitted": 0,
+            "completed": 0,
+            "total_runtime": 1.0,
+            "pending": 3,
+            "max_pending": 3,
+            "in_flight_cap": 0,
+            "base_in_flight_cap": 0,
+            "bytes_avg": 0.0,
+            "worker_count": 0,
+            "worker_seeds": [],
+        }
+
+    def fake_worker(descriptor, base_rules, gene_map, candidates, worker_settings):
+        asset_id = descriptor.get("asset_id")
+        return {
+            "asset_id": asset_id,
+            "results": [
+                {
+                    "sol_idx": candidate["index"],
+                    "stats": {"total_return": 5.0, "trades": 3},
+                }
+                for candidate in candidates
+            ],
+            "latency": 0.05,
+            "rows": 3,
+            "bytes": 128,
+        }
+
+    monkeypatch.setattr(fitness_worker, "evaluate_batch", fake_worker)
+    monkeypatch.setattr(fitness.global_executor, "submit", fake_submit)
+    monkeypatch.setattr(fitness.global_executor, "metrics", fake_metrics)
+
+    score = evaluator(None, np.array([0.1, 0.2]), 0)
+    assert np.isclose(score, 5.0)
+    assert evaluator.last_details["assets_included"] == 2
+    assert len(calls) == 2
+    instr = evaluator.instrumentation
+    assert instr["evaluations"] == 2
+    assert instr["queue_depth"] == 3
+    evaluator.close()
+
+
+def test_worker_error_propagation(monkeypatch):
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [1, 2, 3]}),
+    }
+    settings = {
+        "metric": "return",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+    }
+
+    evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+
+    metrics_state = {
+        "submitted": 0,
+        "completed": 0,
+        "total_runtime": 0.0,
+        "pending": 0,
+        "max_pending": 0,
+        "in_flight_cap": 0,
+        "base_in_flight_cap": 0,
+        "bytes_avg": 0.0,
+        "worker_count": 0,
+        "worker_seeds": [],
+    }
+
+    def fake_submit(fn, *args, **kwargs):
+        fut = cf.Future()
+        metrics_state["submitted"] += 1
+        metrics_state["pending"] += 1
+        metrics_state["max_pending"] = max(
+            metrics_state["max_pending"], metrics_state["pending"]
+        )
+        try:
+            value = fn(*args, **kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            metrics_state["pending"] = max(0, metrics_state["pending"] - 1)
+            fut.set_exception(exc)
+        else:
+            metrics_state["pending"] = max(0, metrics_state["pending"] - 1)
+            metrics_state["completed"] += 1
+            metrics_state["total_runtime"] += float(value.get("latency", 0.0))
+            fut.set_result(value)
+        return fut
+
+    def fake_metrics():
+        return dict(metrics_state)
+
+    def fake_worker(descriptor, base_rules, gene_map, candidates, worker_settings):
+        asset_id = descriptor.get("asset_id")
+        if asset_id == "B":
+            return {
+                "asset_id": asset_id,
+                "results": [
+                    {
+                        "sol_idx": candidate["index"],
+                        "error": {
+                            "type": "ValueError",
+                            "message": "boom",
+                            "trace": "traceback",
+                            "indicator": "bad_indicator",
+                        },
+                    }
+                    for candidate in candidates
+                ],
+                "latency": 0.02,
+                "rows": 3,
+                "bytes": 64,
+            }
+        return {
+            "asset_id": asset_id,
+            "results": [
+                {
+                    "sol_idx": candidate["index"],
+                    "stats": {"total_return": 4.0, "trades": 3},
+                }
+                for candidate in candidates
+            ],
+            "latency": 0.02,
+            "rows": 3,
+            "bytes": 64,
+        }
+
+    monkeypatch.setattr(fitness_worker, "evaluate_batch", fake_worker)
+    monkeypatch.setattr(fitness.global_executor, "submit", fake_submit)
+    monkeypatch.setattr(fitness.global_executor, "metrics", fake_metrics)
+
+    score = evaluator(None, np.array([0.1, 0.2]), 0)
+    assert np.isclose(score, 4.0)
+    details = evaluator.last_details
+    asset_b = details["per_asset"]["B"]
+    assert asset_b.get("included") is False
+    assert asset_b.get("evaluation_reason") == "evaluation_error"
+    assert "bad_indicator" in (asset_b.get("reason_detail") or "")
+    instr = evaluator.instrumentation
+    assert instr["submitted"] == 2
+    assert instr["completed"] == 2
+    assert instr["pending"] == 0
+    assert metrics_state["submitted"] == 2
+    assert metrics_state["completed"] == 2
+    assert details["per_asset"]["B"]["reason"] == "evaluation_error"
+    evaluator.close()
+
+
+def test_parallel_sequential_parity(monkeypatch):
+    group_data = {
+        "A": pd.DataFrame({"Close": [1, 2, 3]}),
+        "B": pd.DataFrame({"Close": [2, 3, 4]}),
+    }
+    settings = {
+        "metric": "composite",
+        "trade_floor_policy": "hard_floor",
+        "min_total_trades": 0,
+        "per_asset_min_trades": 1,
+        "lambda_dispersion": 0.0,
+        "coverage_penalty": 0.0,
+        "min_included_assets": 1,
+    }
+
+    stats_payload = {
+        "sortino": 1.25,
+        "profit_factor": 1.4,
+        "max_drawdown": 12.0,
+        "trades": 4,
+        "total_return": 0.15,
+        "equity_curve": pd.Series([1.0, 1.1, 1.2]),
+        "signal_counts": {"entries": 2},
+        "metric_sources": {},
+        "missing_metrics": [],
+    }
+
+    def fake_submit(fn, *args, **kwargs):
+        fut = cf.Future()
+        try:
+            value = fn(*args, **kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            fut.set_exception(exc)
+        else:
+            fut.set_result(value)
+        return fut
+
+    def fake_metrics():
+        return {
+            "submitted": 0,
+            "completed": 0,
+            "total_runtime": 0.0,
+            "pending": 0,
+            "max_pending": 0,
+            "in_flight_cap": 2,
+            "base_in_flight_cap": 2,
+            "bytes_avg": 0.0,
+            "worker_count": 2,
+            "worker_seeds": [cfg.SEED, cfg.SEED + 1],
+        }
+
+    monkeypatch.setattr(fitness.global_executor, "submit", fake_submit)
+    monkeypatch.setattr(fitness.global_executor, "metrics", fake_metrics)
+    monkeypatch.setattr(
+        fitness.global_executor, "record_batch_metrics", lambda *a, **k: 2
+    )
+
+    def fake_worker(descriptor, base_rules, gene_map, candidates, worker_settings):
+        return {
+            "asset_id": descriptor.get("asset_id"),
+            "results": [
+                {"sol_idx": candidate["index"], "stats": dict(stats_payload)}
+                for candidate in candidates
+            ],
+            "latency": 0.02,
+            "rows": 3,
+            "bytes": 64,
+        }
+
+    def fake_single_asset(self, ohlc, rules):
+        return dict(stats_payload)
+
+    monkeypatch.setattr(fitness_worker, "evaluate_batch", fake_worker)
+    monkeypatch.setattr(
+        fitness.MultiAssetFitnessEvaluator,
+        "_evaluate_single_asset",
+        fake_single_asset,
+    )
+
+    evaluator_parallel = fitness.MultiAssetFitnessEvaluator(
+        group_data, {}, {}, settings
+    )
+    vector = [0.5, 0.25]
+    parallel_score = evaluator_parallel(None, vector, 0)
+    parallel_details = copy.deepcopy(evaluator_parallel.last_details)
+
+    evaluator_seq = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
+    results_seq, _ = evaluator_seq._evaluate_assets({"vector": vector})
+    assets_map = {
+        ticker: results_seq.get(ticker, evaluator_seq._build_evaluation_record())
+        for ticker in evaluator_seq._sorted_tickers
+    }
+    summary = evaluator_seq._score_assets(assets_map)
+    sequential_score = evaluator_seq._aggregate_scores(summary)
+    sequential_details = copy.deepcopy(evaluator_seq.last_details)
+
+    assert np.isclose(parallel_score, sequential_score)
+    for asset in evaluator_parallel._sorted_tickers:
+        par = parallel_details["per_asset"].get(asset, {})
+        seq = sequential_details["per_asset"].get(asset, {})
+        assert par.get("score") == seq.get("score")
+        assert par.get("evaluation_reason") == seq.get("evaluation_reason")
+
+    evaluator_parallel.close()
+    evaluator_seq.close()

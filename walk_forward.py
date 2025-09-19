@@ -1,5 +1,6 @@
 """Walk-Forward Validation Module."""
 
+import csv
 import hashlib
 import json
 import os
@@ -239,7 +240,9 @@ def run_walk_forward_validation(
     np.random.seed(config.SEED)
     num_cores = os.cpu_count()
     start_time = datetime.now(timezone.utc)
-    print(f"Using {num_cores} CPU cores for GA optimisation during each window.")
+    print(
+        f"Using {num_cores} CPU cores via the global executor during each window."
+    )
     wf_settings = getattr(config, "WALK_FORWARD_SETTINGS", {})
     date_range = wf_settings.get("total_data_range", {})
     start_date = date_range.get("start", config.TRAINING_PERIOD["start"])
@@ -382,6 +385,53 @@ def run_walk_forward_validation(
             evaluator = fitness.get_fitness_evaluator(
                 train_data, STRATEGY_RULES, gene_map
             )
+        metrics_rows: list[dict[str, Any]] = []
+        run_id = run_dir.name if hasattr(run_dir, "name") else str(run_dir)
+        metrics_csv_path = wf_dir / f"executor_metrics_{run_id}_window{idx}.csv"
+
+        def generation_callback(ga_instance):
+            collector = getattr(evaluator, "collect_generation_report", None)
+            report = collector() if callable(collector) else None
+            if not report:
+                report = getattr(evaluator, "instrumentation", {}) or {}
+            if not report:
+                return
+            report = dict(report)
+            report["generation"] = ga_instance.generations_completed
+            report["window"] = idx
+            metrics_rows.append(report)
+            mean_latency_ms = float(
+                report.get("mean_latency", report.get("latency_mean", 0.0))
+            ) * 1000
+            p95_latency_ms = float(
+                report.get("p95_latency", report.get("latency_p95", 0.0))
+            ) * 1000
+            pending_now = report.get("pending", report.get("queue_depth", 0))
+            max_pending = report.get("max_pending", report.get("queue_depth", pending_now))
+            base_cap = report.get("base_in_flight_cap", report.get("in_flight_cap", 0))
+            print(
+                (
+                    "Window {window} Gen {gen}: thr={thr:.2f}/s occ={occ:.2f} "
+                    "pending={pending} max={max_pending} cap={cap}/{base} mean={mean:.2f}ms "
+                    "p95={p95:.2f}ms batch={batch}->{next_batch}"
+                ).format(
+                    window=idx,
+                    gen=report["generation"],
+                    thr=report.get("throughput", 0.0),
+                    occ=report.get("occupancy", 0.0),
+                    pending=pending_now,
+                    max_pending=max_pending,
+                    cap=report.get("in_flight_cap", 0),
+                    base=base_cap,
+                    mean=mean_latency_ms,
+                    p95=p95_latency_ms,
+                    batch=report.get("batch_size"),
+                    next_batch=report.get("next_batch_size"),
+                )
+            )
+            if report.get("error_top"):
+                print(f"  Error hot spots: {report['error_top']}")
+
         ga_instance = pygad.GA(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
@@ -391,9 +441,10 @@ def run_walk_forward_validation(
             gene_type=gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
-            # Use threads so PyGAD keeps the evaluator and OHLCV data in-process.
-            parallel_processing=["thread", num_cores],
+            # Delegate evaluations to the shared process pool via micro-batches.
+            fitness_batch_size=config.GLOBAL_EXECUTOR.get("batch_size"),
             random_seed=config.SEED,
+            on_generation=generation_callback,
         )
         if champion_pool and hasattr(ga_instance, "population"):
             champs = np.array(champion_pool, dtype=float)
@@ -406,6 +457,76 @@ def run_walk_forward_validation(
                 if hasattr(ga_instance, "initial_population"):
                     ga_instance.initial_population[:num_champs] = champs[:num_champs]
         ga_instance.run()
+
+        collector = getattr(evaluator, "collect_generation_report", None)
+        if callable(collector):
+            leftover = collector() or {}
+            if leftover:
+                leftover = dict(leftover)
+                leftover["generation"] = ga_instance.generations_completed
+                leftover["window"] = idx
+                metrics_rows.append(leftover)
+
+        if metrics_rows:
+            fieldnames = [
+                "window",
+                "generation",
+                "submitted",
+                "completed",
+                "pending",
+                "max_pending",
+                "in_flight_cap",
+                "base_in_flight_cap",
+                "mean_latency",
+                "p95_latency",
+                "throughput",
+                "cpu_time",
+                "occupancy",
+                "queue_ratio",
+                "evaluations",
+                "serialization_bytes",
+                "rows_processed",
+                "latency_samples",
+                "batch_size",
+                "next_batch_size",
+                "bytes_avg",
+                "latency_ema",
+                "bytes_ema",
+                "reducer_timeouts",
+                "worker_count",
+                "worker_seeds",
+                "error_top",
+            ]
+            with metrics_csv_path.open("w", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in metrics_rows:
+                    prepared = dict(row)
+                    prepared.setdefault("pending", prepared.get("queue_depth"))
+                    prepared.setdefault("max_pending", prepared.get("queue_depth"))
+                    prepared.setdefault("base_in_flight_cap", prepared.get("in_flight_cap"))
+                    prepared["worker_seeds"] = ",".join(
+                        str(seed) for seed in prepared.get("worker_seeds", [])
+                    )
+                    prepared["error_top"] = ";".join(
+                        f"{name}:{count}" for name, count in prepared.get("error_top", [])
+                    )
+                    writer.writerow({key: prepared.get(key) for key in fieldnames})
+            print(f"Executor metrics written to {metrics_csv_path}")
+
+        summary = metrics_rows[-1] if metrics_rows else getattr(evaluator, "instrumentation", {})
+        if summary:
+            mean_latency_ms = float(
+                summary.get("mean_latency", summary.get("latency_mean", 0.0))
+            ) * 1000
+            print(
+                "Final executor summary: thr={:.2f}/s occ={:.2f} queue={} mean_latency={:.2f}ms".format(
+                    summary.get("throughput", 0.0),
+                    summary.get("occupancy", 0.0),
+                    summary.get("queue_depth", 0),
+                    mean_latency_ms,
+                )
+            )
         best_solution, best_fitness, _ = ga_instance.best_solution()
         print(f"Best training fitness: {best_fitness:.4f}")
 

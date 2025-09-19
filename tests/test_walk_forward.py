@@ -72,7 +72,6 @@ def test_config_walk_forward_start_date():
 
 def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
     """GA in walk-forward should leverage all available CPU cores"""
-    import os
     import types
 
     import pandas as pd
@@ -161,7 +160,10 @@ def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
 
     walk_forward.run_walk_forward_validation(tmp_path)
 
-    assert captured["parallel_processing"] == ["thread", os.cpu_count()]
+    assert (
+        captured["fitness_batch_size"]
+        == walk_forward.config.GLOBAL_EXECUTOR.get("batch_size")
+    )
 
 
 def test_walk_forward_returns_summary(monkeypatch, tmp_path):

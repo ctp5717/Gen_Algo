@@ -7,12 +7,15 @@ Fitness Function for Genetic Algorithm
 import concurrent.futures as cf
 import copy
 import logging
-import traceback
 import types
 import warnings
-import weakref
+import itertools
+import time
+import traceback
+import math
 from collections import Counter
 from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -39,9 +42,12 @@ else:  # pragma: no cover - inject stub attributes if minimal module present
         vbt.__file__ = getattr(vbt, "__file__", _vbt_file)
 
 import config
+import global_executor
 import metrics_contract
 import strategy_engine as engine
 import trade_floor
+from data_registry import registry as data_registry
+import fitness_worker
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
@@ -49,6 +55,8 @@ from utils.math import weighted_mean_std
 PenaltyDetail = str | dict[str, float | str] | None
 
 logger = logging.getLogger(__name__)
+
+_WINDOW_COUNTER = itertools.count()
 
 
 def print_floor_failures(counter: Counter):
@@ -195,9 +203,47 @@ class MultiAssetFitnessEvaluator:
         self.floor_failures = Counter()
         self._metrics_preflight_done = False
         self._metric_mapping_logged = False
-        self._executor = None
-        self._executor_signature = None
-        self._executor_finalizer = None
+        self._window_id = self.settings.get("window_id") or f"window-{next(_WINDOW_COUNTER)}"
+        self._window_released = False
+        self._descriptors = data_registry.register_window(self._window_id, group_data)
+        self._assets_with_data = [
+            ticker for ticker, desc in self._descriptors.items() if not desc.get("empty")
+        ]
+        self._assets_without_data = [
+            ticker for ticker, desc in self._descriptors.items() if desc.get("empty")
+        ]
+        self.instrumentation: dict[str, Any] = {}
+        self._generation_records: list[dict[str, Any]] = []
+        exec_cfg = dict(getattr(config, "GLOBAL_EXECUTOR", {}))
+        self._batch_size = max(1, int(exec_cfg.get("batch_size") or 1))
+        self._min_batch_size = max(1, int(exec_cfg.get("min_batch_size") or 1))
+        self._max_batch_size = max(self._min_batch_size, int(exec_cfg.get("max_batch_size") or self._batch_size))
+        self._batch_adjustment_rate = float(exec_cfg.get("batch_step_ratio", 0.25) or 0.25)
+        self._batch_adjustment_rate = min(0.5, max(0.05, self._batch_adjustment_rate))
+        self._batch_cooldown_submissions = max(
+            1, int(exec_cfg.get("batch_cooldown_submissions", 6) or 6)
+        )
+        self._submissions_since_adjustment = self._batch_cooldown_submissions
+        self._latency_target = max(0.01, float(exec_cfg.get("latency_target_ms", 200)) / 1000.0)
+        self._queue_high_watermark = float(exec_cfg.get("queue_high_watermark", 0.85) or 0.85)
+        self._queue_low_watermark = float(exec_cfg.get("queue_low_watermark", 0.35) or 0.35)
+        self._queue_high_watermark = min(0.99, max(0.0, self._queue_high_watermark))
+        self._queue_low_watermark = max(0.0, min(self._queue_high_watermark, self._queue_low_watermark))
+        self._reducer_timeout = float(exec_cfg.get("reducer_timeout", 30.0) or 30.0)
+        self._latency_ema = 0.0
+        self._bytes_ema = 0.0
+        self.batch_details: dict[int, dict[str, Any]] = {}
+
+        registry_backend = getattr(config, "DATA_REGISTRY", {}).get("backend", "auto")
+        logger.info(
+            "Window %s registered (%d assets: %d with data, %d without) initial_batch=%d registry_backend=%s",
+            self._window_id,
+            len(self._descriptors),
+            len(self._assets_with_data),
+            len(self._assets_without_data),
+            self._batch_size,
+            registry_backend,
+        )
 
         # Validate key configuration values to catch misconfiguration early.
         assert (
@@ -228,42 +274,19 @@ class MultiAssetFitnessEvaluator:
                 )
 
     # ------------------------------------------------------------------
-    @staticmethod
-    def _shutdown_executor_static(executor) -> None:
-        """Best-effort shutdown helper that tolerates older signatures."""
-
-        if executor is None:
-            return
-        try:
-            executor.shutdown(wait=True)
-        except TypeError:
-            executor.shutdown()
-        except Exception:  # pragma: no cover - defensive logging only
-            logger.debug("Failed to shutdown executor", exc_info=True)
-
-    # ------------------------------------------------------------------
-    def _shutdown_executor(self) -> None:
-        """Shut down and detach from the cached executor if present."""
-
-        executor = self._executor
-        if executor is None:
-            return
-        self._executor = None
-        self._executor_signature = None
-        finalizer = self._executor_finalizer
-        self._executor_finalizer = None
-        if finalizer is not None:
-            try:
-                finalizer.detach()
-            except Exception:  # pragma: no cover - best effort cleanup
-                logger.debug("Failed to detach executor finalizer", exc_info=True)
-        self._shutdown_executor_static(executor)
-
-    # ------------------------------------------------------------------
     def close(self) -> None:
-        """Public method to release the cached executor."""
+        """Release shared resources (registry descriptors)."""
 
-        self._shutdown_executor()
+        if not self._window_released:
+            logger.debug(
+                "Releasing registry window %s (%d assets: %d with data, %d without)",
+                self._window_id,
+                len(self._descriptors),
+                len(self._assets_with_data),
+                len(self._assets_without_data),
+            )
+            data_registry.release_window(self._window_id)
+            self._window_released = True
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
@@ -272,41 +295,11 @@ class MultiAssetFitnessEvaluator:
         self.close()
 
     # ------------------------------------------------------------------
-    def _get_executor(self):
-        """Return the cached executor, creating it lazily when required."""
-
-        parallel_cfg = self.settings.get("parallel", {}) or {}
-        if not parallel_cfg.get("enabled"):
-            if self._executor is not None:
-                self._shutdown_executor()
-            return None
-
-        backend = parallel_cfg.get("backend", "process")
-        max_workers = parallel_cfg.get("max_workers")
-        signature = (backend, max_workers)
-        if self._executor is not None and self._executor_signature != signature:
-            self._shutdown_executor()
-
-        if self._executor is None:
-            Executor = (
-                cf.ProcessPoolExecutor
-                if backend == "process"
-                else cf.ThreadPoolExecutor
-            )
-            executor = Executor(max_workers=max_workers)
-            self._executor = executor
-            self._executor_signature = signature
-            if self._executor_finalizer is not None:
-                try:
-                    self._executor_finalizer.detach()
-                except Exception:  # pragma: no cover - best effort cleanup
-                    logger.debug(
-                        "Failed to detach stale executor finalizer", exc_info=True
-                    )
-            self._executor_finalizer = weakref.finalize(
-                self, MultiAssetFitnessEvaluator._shutdown_executor_static, executor
-            )
-        return self._executor
+    def __del__(self):  # pragma: no cover - defensive cleanup
+        try:
+            self.close()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -326,6 +319,24 @@ class MultiAssetFitnessEvaluator:
         }
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _compose_reason_detail(
+        message: str | None, indicator: str | None = None
+    ) -> str | None:
+        """Combine indicator metadata and error text into a detail string."""
+
+        parts: list[str] = []
+        if indicator:
+            parts.append(str(indicator))
+        if message:
+            msg = str(message)
+            if msg:
+                parts.append(msg)
+        if not parts:
+            return None
+        return " | ".join(parts)
+
+    # ------------------------------------------------------------------
     def _build_evaluation_record(
         self,
         stats: dict | None = None,
@@ -343,6 +354,427 @@ class MultiAssetFitnessEvaluator:
         if trace:
             record["reason_trace"] = trace
         return record
+
+    # ------------------------------------------------------------------
+    def _adjust_batching(
+        self,
+        latencies: list[float],
+        max_pending: int,
+        avg_batch_bytes: float,
+        submitted_batches: int,
+    ) -> None:
+        """Adapt batch size based on latency, queue pressure, and cooldowns."""
+
+        self._submissions_since_adjustment += max(0, submitted_batches)
+
+        if latencies:
+            mean_latency = sum(latencies) / len(latencies)
+            if self._latency_ema <= 0:
+                self._latency_ema = mean_latency
+            else:
+                self._latency_ema = 0.6 * self._latency_ema + 0.4 * mean_latency
+        else:
+            self._latency_ema *= 0.9
+
+        if avg_batch_bytes > 0:
+            if self._bytes_ema <= 0:
+                self._bytes_ema = avg_batch_bytes
+            else:
+                self._bytes_ema = 0.7 * self._bytes_ema + 0.3 * avg_batch_bytes
+        else:
+            self._bytes_ema *= 0.9
+
+        in_flight_cap = max(1, global_executor.current_in_flight_cap())
+        high_water = max(1, int(self._queue_high_watermark * in_flight_cap))
+        low_water = max(0, int(self._queue_low_watermark * in_flight_cap))
+
+        desired = self._batch_size
+        direction = 0
+        step = max(1, math.ceil(self._batch_size * self._batch_adjustment_rate))
+
+        if max_pending >= high_water or self._latency_ema > self._latency_target * 1.5:
+            desired = max(self._min_batch_size, self._batch_size - step)
+            direction = -1 if desired < self._batch_size else 0
+        elif max_pending <= low_water and self._latency_ema < self._latency_target * 0.7:
+            desired = min(self._max_batch_size, self._batch_size + step)
+            direction = 1 if desired > self._batch_size else 0
+        elif (
+            self._latency_ema < self._latency_target * 0.5
+            and self._batch_size < self._max_batch_size
+        ):
+            desired = min(self._max_batch_size, self._batch_size + step)
+            direction = 1 if desired > self._batch_size else 0
+
+        if direction and desired != self._batch_size:
+            if self._submissions_since_adjustment < self._batch_cooldown_submissions:
+                logger.debug(
+                    "Skipping batch adjustment (cooldown %d/%d, pending=%d/%d)",
+                    self._submissions_since_adjustment,
+                    self._batch_cooldown_submissions,
+                    max_pending,
+                    in_flight_cap,
+                )
+                return
+            logger.debug(
+                "Adjusting batch size from %d to %d (latency=%.3fs pending=%d/%d)",
+                self._batch_size,
+                desired,
+                self._latency_ema,
+                max_pending,
+                in_flight_cap,
+            )
+            self._batch_size = desired
+            self._submissions_since_adjustment = 0
+
+    # ------------------------------------------------------------------
+    def collect_generation_report(self) -> dict[str, Any]:
+        """Aggregate instrumentation collected since the last generation."""
+
+        if not self._generation_records:
+            return {}
+
+        records = self._generation_records
+        self._generation_records = []
+
+        latencies: list[float] = []
+        total_latency = 0.0
+        for record in records:
+            sample = record.get("latency") or []
+            if sample:
+                latencies.extend(sample)
+                total_latency += sum(sample)
+
+        total_evaluations = sum(r.get("evaluations", 0) for r in records)
+        total_cpu = sum(r.get("cpu_time", 0.0) for r in records)
+        submitted = sum(r.get("submitted", 0) for r in records)
+        completed = sum(r.get("completed", 0) for r in records)
+        max_pending = max((r.get("max_pending", 0) for r in records), default=0)
+        serialization_bytes = sum(r.get("serialization_bytes", 0) for r in records)
+        rows_processed = sum(r.get("rows_processed", 0) for r in records)
+        reducer_timeouts = sum(r.get("reducer_timeouts", 0) for r in records)
+
+        mean_latency = sum(latencies) / len(latencies) if latencies else 0.0
+        p95_latency = float(np.percentile(latencies, 95)) if latencies else 0.0
+        throughput = (
+            total_evaluations / total_latency if total_latency > 0 else 0.0
+        )
+        occupancy = total_cpu / total_latency if total_latency > 0 else 0.0
+
+        error_counts = Counter()
+        for record in records:
+            error_counts.update(record.get("error_counts", {}))
+
+        last = records[-1]
+        return {
+            "submitted": submitted,
+            "completed": completed,
+            "queue_depth": max_pending,
+            "max_pending": max_pending,
+            "pending": records[-1].get("pending"),
+            "mean_latency": mean_latency,
+            "p95_latency": p95_latency,
+            "throughput": throughput,
+            "cpu_time": total_cpu,
+            "occupancy": occupancy,
+            "evaluations": total_evaluations,
+            "serialization_bytes": serialization_bytes,
+            "rows_processed": rows_processed,
+            "latency_samples": len(latencies),
+            "batch_size": last.get("batch_size"),
+            "next_batch_size": last.get("next_batch_size"),
+            "in_flight_cap": last.get("in_flight_cap"),
+            "base_in_flight_cap": last.get("base_in_flight_cap"),
+            "bytes_avg": last.get("bytes_avg"),
+            "worker_count": last.get("worker_count"),
+            "worker_seeds": list(last.get("worker_seeds", [])),
+            "latency_ema": last.get("latency_ema"),
+            "bytes_ema": last.get("bytes_ema"),
+            "reducer_timeouts": reducer_timeouts,
+            "error_top": error_counts.most_common(5),
+        }
+
+    # ------------------------------------------------------------------
+    def _evaluate_population(
+        self, solutions: list[list[Any]], indices: list[int]
+    ) -> tuple[list[float], Counter]:
+        """Evaluate a batch of candidate solutions across all assets."""
+
+        verbose = bool(self.settings.get("verbose_asset_errors"))
+        candidate_state: dict[int, dict[str, dict]] = {}
+        for idx in indices:
+            candidate_state[idx] = {"assets": {}}
+            for asset in self._assets_without_data:
+                candidate_state[idx]["assets"][asset] = self._build_evaluation_record(
+                    reason="insufficient_coverage"
+                )
+
+        payload = [
+            {"index": idx, "vector": sol}
+            for idx, sol in zip(indices, solutions, strict=False)
+        ]
+
+        current_batch_size = self._batch_size
+        futures: set[cf.Future] = set()
+        future_meta: dict[Any, dict[str, Any]] = {}
+        tasks_submitted = 0
+        serialization_volume = 0
+        latencies: list[float] = []
+        rows_processed = 0
+        evaluations_processed = 0
+        err_counts: Counter = Counter()
+        reducer_timeouts = 0
+
+        before_metrics = global_executor.metrics()
+        before_submitted = int(before_metrics.get("submitted", 0))
+        before_completed = int(before_metrics.get("completed", 0))
+        before_runtime = float(before_metrics.get("total_runtime", 0.0))
+
+        for asset in self._assets_with_data:
+            descriptor = self._descriptors[asset]
+            for start in range(0, len(payload), current_batch_size):
+                chunk = payload[start : start + current_batch_size]
+                if not chunk:
+                    continue
+                serialization_volume += sum(len(item["vector"]) for item in chunk) * 8
+                future = global_executor.submit(
+                    fitness_worker.evaluate_batch,
+                    descriptor,
+                    self.base_rules,
+                    self.gene_map,
+                    chunk,
+                    {"collect_equity_curve": self.settings.get("collect_equity_curve")},
+                )
+                futures.add(future)
+                future_meta[future] = {
+                    "asset": asset,
+                    "indices": [item["index"] for item in chunk],
+                }
+                tasks_submitted += 1
+
+        pending = set(futures)
+        while pending:
+            done, pending = cf.wait(
+                pending,
+                timeout=self._reducer_timeout,
+                return_when=cf.FIRST_COMPLETED,
+            )
+            if not done:
+                reducer_timeouts += 1
+                log_fn = logger.warning if reducer_timeouts == 1 else logger.error
+                log_fn(
+                    "Reducer timeout waiting for %d batches (window=%s, batch=%d, attempt=%d)",
+                    len(pending),
+                    self._window_id,
+                    current_batch_size,
+                    reducer_timeouts,
+                )
+                continue
+
+            for future in done:
+                meta = future_meta.get(future, {})
+                asset = meta.get("asset")
+                indices_chunk = meta.get("indices", [])
+                try:
+                    result = future.result()
+                except Exception as exc:  # pragma: no cover - executor exceptions
+                    detail = repr(exc)
+                    for idx in indices_chunk:
+                        candidate_state[idx]["assets"][asset] = self._build_evaluation_record(
+                            reason="evaluation_error",
+                            detail=detail,
+                        )
+                        if verbose:
+                            print(f"Error evaluating asset {asset}: {exc}")
+                    continue
+
+                latency_val = float(result.get("latency", 0.0))
+                if latency_val:
+                    latencies.append(latency_val)
+                rows_processed += int(result.get("rows", 0))
+                batch_bytes = int(result.get("bytes", 0))
+                serialization_volume += batch_bytes
+                global_executor.record_batch_metrics(batch_bytes)
+
+                for entry in result.get("results", []):
+                    sol_idx = entry.get("sol_idx")
+                    if sol_idx not in candidate_state:
+                        continue
+                    evaluations_processed += 1
+                    assets_map = candidate_state[sol_idx]["assets"]
+                    if entry.get("reason") == "insufficient_coverage":
+                        assets_map[asset] = self._build_evaluation_record(
+                            reason="insufficient_coverage"
+                        )
+                        continue
+                    error_payload = entry.get("error")
+                    if error_payload:
+                        if verbose:
+                            msg = error_payload.get("message", "")
+                            print(f"Error evaluating asset {asset}: {msg}")
+                        indicator = error_payload.get("indicator")
+                        if indicator:
+                            err_counts[indicator] += 1
+                        detail = self._compose_reason_detail(
+                            error_payload.get("message"), indicator
+                        )
+                        assets_map[asset] = self._build_evaluation_record(
+                            reason="evaluation_error",
+                            detail=detail,
+                            trace=error_payload.get("trace"),
+                        )
+                        continue
+
+                    stats_raw = entry.get("stats") or self._empty_stats()
+                    stats, reason, detail = self._prepare_metrics_record(stats_raw)
+                    assets_map[asset] = self._build_evaluation_record(
+                        stats,
+                        reason=reason,
+                        detail=detail,
+                    )
+
+        after_metrics = global_executor.metrics()
+        submitted = int(after_metrics.get("submitted", 0)) - before_submitted
+        completed = int(after_metrics.get("completed", 0)) - before_completed
+        cpu_time = float(after_metrics.get("total_runtime", 0.0)) - before_runtime
+        total_latency = sum(latencies)
+        throughput = (
+            evaluations_processed / total_latency if total_latency > 0 else 0.0
+        )
+        occupancy = cpu_time / total_latency if total_latency > 0 else 0.0
+        max_pending = int(after_metrics.get("max_pending", 0))
+        in_flight_cap = int(after_metrics.get("in_flight_cap", 0))
+        base_in_flight_cap = int(after_metrics.get("base_in_flight_cap", in_flight_cap))
+        pending_now = int(after_metrics.get("pending", max_pending))
+        bytes_avg = float(after_metrics.get("bytes_avg", 0.0))
+        mean_latency = sum(latencies) / len(latencies) if latencies else 0.0
+        p95_latency = float(np.percentile(latencies, 95)) if latencies else 0.0
+
+        self.instrumentation = {
+            "tasks_submitted": tasks_submitted,
+            "evaluations": evaluations_processed,
+            "latency": list(latencies),
+            "latency_mean": mean_latency,
+            "latency_p95": p95_latency,
+            "latency_target": self._latency_target,
+            "throughput": throughput,
+            "cpu_time": cpu_time,
+            "occupancy": occupancy,
+            "pending": pending_now,
+            "max_pending": max_pending,
+            "queue_depth": max_pending,
+            "queue_ratio": max_pending / max(1, in_flight_cap),
+            "serialization_bytes": serialization_volume,
+            "rows_processed": rows_processed,
+            "submitted": submitted,
+            "completed": completed,
+            "batch_size": current_batch_size,
+            "next_batch_size": self._batch_size,
+            "in_flight_cap": in_flight_cap,
+            "base_in_flight_cap": base_in_flight_cap,
+            "bytes_avg": bytes_avg,
+            "worker_count": after_metrics.get("worker_count"),
+            "worker_seeds": list(after_metrics.get("worker_seeds", [])),
+            "reducer_timeouts": reducer_timeouts,
+            "error_counts": dict(err_counts),
+            "error_top": err_counts.most_common(5),
+        }
+
+        self._adjust_batching(latencies, max_pending, bytes_avg, tasks_submitted)
+        self.instrumentation["next_batch_size"] = self._batch_size
+        self.instrumentation["latency_ema"] = self._latency_ema
+        self.instrumentation["bytes_ema"] = self._bytes_ema
+        record = dict(self.instrumentation)
+        record["latency"] = list(latencies)
+        self._generation_records.append(record)
+
+        fitness_values: list[float] = []
+        for idx in indices:
+            assets_map = candidate_state[idx]["assets"]
+            for ticker in self._sorted_tickers:
+                assets_map.setdefault(ticker, self._build_evaluation_record())
+            summary = self._score_assets(assets_map)
+            score = self._aggregate_scores(summary)
+            fitness_values.append(score)
+            self.batch_details[idx] = copy.deepcopy(self.last_details)
+
+        return fitness_values, err_counts
+
+    # ------------------------------------------------------------------
+    def _evaluate_assets(
+        self, overrides: dict | None = None
+    ) -> tuple[dict[str, dict], Counter]:
+        """Sequential compatibility layer for per-asset evaluation.
+
+        This method mirrors the pre-executor behaviour and is primarily used by
+        tests that patch :meth:`_evaluate_single_asset` directly.
+        """
+
+        overrides = overrides or {}
+        vector = overrides.get("vector")
+        if vector is None and "solution" in overrides:
+            vector = overrides["solution"]
+        rules_override = overrides.get("rules")
+
+        if vector is not None:
+            vector_list = np.asarray(vector).tolist()
+            rules = inject_genes_into_rules(
+                self.base_rules, self.gene_map, vector_list
+            )
+        elif rules_override is not None:
+            rules = rules_override
+        else:
+            rules = self.base_rules
+
+        results: dict[str, dict] = {}
+        err_counts: Counter = Counter()
+
+        for asset in self._sorted_tickers:
+            descriptor = self._descriptors.get(asset)
+            if descriptor and descriptor.get("empty"):
+                results[asset] = self._build_evaluation_record(
+                    reason="insufficient_coverage"
+                )
+                continue
+
+            try:
+                if descriptor:
+                    ohlc = data_registry.attach(descriptor)
+                else:
+                    ohlc = self.group_data.get(asset)
+            except Exception as exc:  # pragma: no cover - defensive path
+                trace = traceback.format_exception(
+                    exc.__class__, exc, exc.__traceback__
+                )
+                results[asset] = self._build_evaluation_record(
+                    reason="evaluation_error",
+                    detail=str(exc),
+                    trace="".join(trace),
+                )
+                continue
+
+            try:
+                stats = self._evaluate_single_asset(ohlc, rules)
+            except Exception as exc:  # noqa: BLE001 - propagate indicator info
+                indicator = getattr(exc, "indicator", None)
+                if indicator:
+                    err_counts[indicator] += 1
+                detail = self._compose_reason_detail(str(exc), indicator)
+                trace = traceback.format_exception(
+                    exc.__class__, exc, exc.__traceback__
+                )
+                results[asset] = self._build_evaluation_record(
+                    reason="evaluation_error",
+                    detail=detail,
+                    trace="".join(trace),
+                )
+                continue
+
+            stats, reason, detail = self._prepare_metrics_record(stats)
+            results[asset] = self._build_evaluation_record(
+                stats, reason=reason, detail=detail
+            )
+
+        return results, err_counts
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -485,84 +917,6 @@ class MultiAssetFitnessEvaluator:
         }
 
     # ------------------------------------------------------------------
-    def _evaluate_assets(self, rules: dict) -> tuple[dict[str, dict], Counter]:
-        """Evaluate every asset and return their raw statistics."""
-
-        results: dict[str, dict] = {}
-        err_counts: Counter = Counter()
-        verbose = bool(self.settings.get("verbose_asset_errors"))
-
-        executor = self._get_executor()
-        if executor is not None:
-            future_map = {}
-            for ticker in self._sorted_tickers:
-                ohlc = self.group_data[ticker]
-                if ohlc is None or ohlc.empty:
-                    results[ticker] = self._build_evaluation_record(
-                        reason="insufficient_coverage"
-                    )
-                    continue
-                future_map[
-                    executor.submit(self._evaluate_single_asset, ohlc, rules)
-                ] = ticker
-            for fut in cf.as_completed(future_map):
-                ticker = future_map[fut]
-                try:
-                    raw_stats = fut.result()
-                    stats, reason, detail = self._prepare_metrics_record(raw_stats)
-                    results[ticker] = self._build_evaluation_record(
-                        stats, reason=reason, detail=detail
-                    )
-                except Exception as e:
-                    if verbose:
-                        print(f"Error evaluating asset {ticker}: {e}")
-                        tb = traceback.format_exception(e.__class__, e, e.__traceback__)
-                        trace = (tb[0].strip(), tb[-1].strip())
-                    else:
-                        trace = None
-                    results[ticker] = self._build_evaluation_record(
-                        reason="evaluation_error",
-                        detail=repr(e),
-                        trace=trace,
-                    )
-                    ind = getattr(e, "indicator", None)
-                    if ind:
-                        err_counts[ind] += 1
-        else:
-            for ticker in self._sorted_tickers:
-                ohlc = self.group_data[ticker]
-                if ohlc is None or ohlc.empty:
-                    results[ticker] = self._build_evaluation_record(
-                        reason="insufficient_coverage"
-                    )
-                    continue
-                try:
-                    raw_stats = self._evaluate_single_asset(ohlc, rules)
-                    stats, reason, detail = self._prepare_metrics_record(raw_stats)
-                    results[ticker] = self._build_evaluation_record(
-                        stats, reason=reason, detail=detail
-                    )
-                except Exception as e:
-                    if verbose:
-                        print(f"Error evaluating asset {ticker}: {e}")
-                        tb = traceback.format_exception(e.__class__, e, e.__traceback__)
-                        trace = (tb[0].strip(), tb[-1].strip())
-                    else:
-                        trace = None
-                    results[ticker] = self._build_evaluation_record(
-                        reason="evaluation_error",
-                        detail=repr(e),
-                        trace=trace,
-                    )
-                    ind = getattr(e, "indicator", None)
-                    if ind:
-                        err_counts[ind] += 1
-
-        for ticker in self._sorted_tickers:
-            results.setdefault(ticker, self._build_evaluation_record())
-        return results, err_counts
-
-    # ------------------------------------------------------------------
     def _score_assets(self, evaluation_results: dict[str, dict]) -> dict:
         """Compute per-asset scores and bookkeeping from evaluation stats."""
 
@@ -614,6 +968,8 @@ class MultiAssetFitnessEvaluator:
                         details["reason_detail"] = reason_detail
                     if trace_str:
                         details["reason_trace"] = trace_str
+                    if reason is not None:
+                        details["evaluation_reason"] = reason
                     if metric_sources and not sources_recorded:
                         details["metric_sources"] = metric_sources
                         sources_recorded = True
@@ -645,6 +1001,8 @@ class MultiAssetFitnessEvaluator:
                         details["reason_detail"] = reason_detail
                     if trace_str:
                         details["reason_trace"] = trace_str
+                    if reason is not None:
+                        details["evaluation_reason"] = reason
                     if metric_sources and not sources_recorded:
                         details["metric_sources"] = metric_sources
                         sources_recorded = True
@@ -696,6 +1054,8 @@ class MultiAssetFitnessEvaluator:
                 details["reason_detail"] = reason_detail
             if trace_str:
                 details["reason_trace"] = trace_str
+            if reason is not None:
+                details["evaluation_reason"] = reason
             if metric_sources and not sources_recorded:
                 details["metric_sources"] = metric_sources
                 sources_recorded = True
@@ -917,14 +1277,21 @@ class MultiAssetFitnessEvaluator:
     def __call__(self, ga_instance, solution, sol_idx):
         config.initialize_config()
         try:
-            rules = inject_genes_into_rules(self.base_rules, self.gene_map, solution)
+            if isinstance(sol_idx, (list, tuple, np.ndarray)):
+                indices = list(np.asarray(sol_idx).astype(int))
+                solutions_arr = np.asarray(solution)
+                solutions_list = [np.asarray(row).tolist() for row in solutions_arr]
+                scores, err_counts = self._evaluate_population(solutions_list, indices)
+                if err_counts:
+                    logger.info("evaluation error counts: %s", dict(err_counts))
+                return scores
 
-            evaluation_results, err_counts = self._evaluate_assets(rules)
+            idx = int(sol_idx)
+            vector = np.asarray(solution).tolist()
+            scores, err_counts = self._evaluate_population([vector], [idx])
             if err_counts:
                 logger.info("evaluation error counts: %s", dict(err_counts))
-
-            summary = self._score_assets(evaluation_results)
-            return self._aggregate_scores(summary)
+            return scores[0]
 
         except Exception as e:
             print(f"Error in multi-asset fitness evaluation: {e}")
@@ -988,5 +1355,13 @@ def get_fitness_evaluator(ohlc_data, base_rules, gene_map):
             )
             settings["min_total_trades"] = floor
             settings["group_floor_info"] = info
-        return MultiAssetFitnessEvaluator(ohlc_data, base_rules, gene_map, settings)
+        if isinstance(ohlc_data, pd.DataFrame):
+            group_data = {"asset_0": ohlc_data}
+        elif isinstance(ohlc_data, Mapping):
+            group_data = dict(ohlc_data)
+        else:
+            raise TypeError(
+                "Multi-asset fitness requires a DataFrame or mapping of DataFrames"
+            )
+        return MultiAssetFitnessEvaluator(group_data, base_rules, gene_map, settings)
     return FitnessEvaluator(ohlc_data, base_rules, gene_map)
