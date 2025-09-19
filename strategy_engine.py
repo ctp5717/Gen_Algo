@@ -44,6 +44,21 @@ import indicator_contracts as contracts
 import indicator_library as ind_lib  # Import our toolbox of indicators
 
 logger = logging.getLogger(__name__)
+_VOTE_LOG_SEEN = False
+
+
+def _log_vote_payload(payload: Mapping[str, Any]) -> None:
+    """Emit vote diagnostics without flooding INFO logs."""
+
+    global _VOTE_LOG_SEEN
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(payload)
+        _VOTE_LOG_SEEN = True
+        return
+    if not _VOTE_LOG_SEEN and logger.isEnabledFor(logging.INFO):
+        logger.info(payload)
+        _VOTE_LOG_SEEN = True
+
 
 # Auto-registered indicator mapping from ``indicator_library``
 INDICATOR_MAPPING = {k.lower(): v for k, v in ind_lib.INDICATOR_REGISTRY.items()}
@@ -677,7 +692,7 @@ def _combine_signals(
                     "vote_threshold must be between 1 and the number of active conditions"
                 )
             payload = {"logic": "VOTE", "M": M, "k": threshold, "nan_policy": policy}
-            logger.info(payload)
+            _log_vote_payload(payload)
             votes = np.zeros(prepared[0].shape, dtype=np.int16)
             for arr in prepared:
                 votes += arr
@@ -714,7 +729,7 @@ def _combine_signals(
                 "vote_threshold must be between 1 and the number of active conditions"
             )
         payload = {"logic": "VOTE", "M": M, "k": threshold, "nan_policy": policy}
-        logger.info(payload)
+        _log_vote_payload(payload)
         votes = np.zeros(arrays[0].shape, dtype=float)
         for arr in arrays:
             votes += arr

@@ -213,3 +213,68 @@ def test_get_group_data_calls_warning_helper(monkeypatch):
     assert len(calls) == 1
     pd.testing.assert_frame_equal(calls[0][0], df)
     assert calls[0][1] is True
+
+
+def test_get_group_data_summary_respects_verbose_false(monkeypatch, caplog):
+    df = pd.DataFrame(
+        {"Close": [1], "Volume": [1]}, index=pd.date_range("2020-01-01", periods=1)
+    )
+
+    def fake_get_data(*, ticker, start_date, end_date, interval, verbose, logger):
+        assert verbose is False
+        return df.copy(), "cache"
+
+    monkeypatch.setattr(data_loader, "get_data", fake_get_data)
+    monkeypatch.setattr(data_loader, "_warn_missing_volume", lambda *a, **k: None)
+    monkeypatch.setattr(data_loader.config, "DATA_LOADER_MAX_WORKERS", 1, raising=False)
+
+    logger = logging.getLogger("data_loader_test.summary_false")
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        result = data_loader.get_group_data(
+            [("Asset", "AAA")],
+            start_date="2020-01-01",
+            end_date="2020-01-02",
+            interval="1d",
+            verbose=False,
+            logger=logger,
+        )
+
+    assert list(result.keys()) == ["AAA"]
+    info_records = [
+        record for record in caplog.records if record.levelno == logging.INFO
+    ]
+    assert not info_records
+
+
+def test_get_group_data_summary_logs_when_verbose_true(monkeypatch, caplog):
+    df = pd.DataFrame(
+        {"Close": [1], "Volume": [1]}, index=pd.date_range("2020-01-01", periods=1)
+    )
+
+    def fake_get_data(*, ticker, start_date, end_date, interval, verbose, logger):
+        assert verbose is True
+        return df.copy(), "cache"
+
+    monkeypatch.setattr(data_loader, "get_data", fake_get_data)
+    monkeypatch.setattr(data_loader, "_warn_missing_volume", lambda *a, **k: None)
+    monkeypatch.setattr(data_loader.config, "DATA_LOADER_MAX_WORKERS", 1, raising=False)
+
+    logger = logging.getLogger("data_loader_test.summary_true")
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        result = data_loader.get_group_data(
+            [("Asset", "AAA")],
+            start_date="2020-01-01",
+            end_date="2020-01-02",
+            interval="1d",
+            verbose=True,
+            logger=logger,
+        )
+
+    assert list(result.keys()) == ["AAA"]
+    info_records = [
+        record for record in caplog.records if record.levelno == logging.INFO
+    ]
+    assert len(info_records) == 1
+    assert "Loaded 1 assets" in info_records[0].getMessage()
