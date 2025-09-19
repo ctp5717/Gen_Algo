@@ -593,6 +593,66 @@ def test_generate_final_strategy_missing_weight_strict_mode_errors(
     assert not (tmp_path / "final_strategy.md").exists()
 
 
+@pytest.mark.parametrize(
+    "bad_weight, expected_log",
+    [
+        (None, "non-numeric weight"),
+        ("oops", "non-numeric weight"),
+        (float("nan"), "non-finite weight"),
+    ],
+)
+def test_generate_final_strategy_invalid_weight_warns_and_notes(
+    tmp_path, monkeypatch, caplog, bad_weight, expected_log
+):
+    _write_integration_files(tmp_path)
+    monkeypatch.setitem(config.FINAL_STRATEGY, "SHRINK_TO_EQUAL", 0.0)
+
+    original_compute = final_strategy._compute_asset_allocation
+
+    def compute_stub(*args, **kwargs):
+        assets, derivation, exclusions, notes = original_compute(*args, **kwargs)
+        for data in assets.values():
+            data["weight"] = bad_weight
+        return assets, derivation, exclusions, notes
+
+    monkeypatch.setattr(final_strategy, "_compute_asset_allocation", compute_stub)
+
+    with caplog.at_level(logging.WARNING, logger=final_strategy.LOGGER.name):
+        payload = final_strategy.generate_final_strategy({"run_dir": tmp_path})
+
+    assert expected_log in caplog.text
+    assert "Missing weights detected for assets" in payload["notes"]
+    md_text = (tmp_path / "final_strategy.md").read_text()
+    assert "Missing weights detected for assets" in md_text
+    for weight in (asset["weight"] for asset in payload["assets"].values()):
+        assert weight == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("bad_weight", [None, "oops", float("nan")])
+def test_generate_final_strategy_invalid_weight_strict_mode_errors(
+    tmp_path, monkeypatch, bad_weight
+):
+    _write_integration_files(tmp_path)
+    monkeypatch.setitem(config.FINAL_STRATEGY, "SHRINK_TO_EQUAL", 0.0)
+
+    original_compute = final_strategy._compute_asset_allocation
+
+    def compute_stub(*args, **kwargs):
+        assets, derivation, exclusions, notes = original_compute(*args, **kwargs)
+        for data in assets.values():
+            data["weight"] = bad_weight
+        return assets, derivation, exclusions, notes
+
+    monkeypatch.setattr(final_strategy, "_compute_asset_allocation", compute_stub)
+    monkeypatch.setenv("FSS_STRICT", "1")
+
+    with pytest.raises(final_strategy.FinalStrategyError) as exc:
+        final_strategy.generate_final_strategy({"run_dir": tmp_path})
+
+    assert "Missing asset weights detected in strict mode" in str(exc.value)
+    assert not (tmp_path / "final_strategy.md").exists()
+
+
 def test_generate_final_strategy_integration_snapshot(tmp_path, monkeypatch, caplog):
     _write_integration_files(tmp_path)
     monkeypatch.setitem(config.FINAL_STRATEGY, "SHRINK_TO_EQUAL", 0.0)
