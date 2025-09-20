@@ -154,6 +154,27 @@ def test_vote_threshold_gene_only_for_vote_or_option_logic():
     assert all(info["name"] != "vt" for info in gm_and.values())
 
 
+def test_trade_management_genes_present():
+    _, gene_map, _ = parse_genes_from_config(STRATEGY_RULES)
+    names = {info["name"] for info in gene_map.values()}
+    expected = {
+        "stop_loss_pct",
+        "num_tp_levels",
+        "tp_pct_1",
+        "tp_pct_2",
+        "tp_pct_3",
+        "tp_pct_4",
+        "tp_trailing_enabled",
+        "tp_trailing_pct",
+        "sl_break_even_mode",
+        "sl_timeout_enabled",
+        "sl_timeout_bars",
+        "sl_trailing_enabled",
+        "sl_trailing_pct",
+    }
+    assert expected.issubset(names)
+
+
 def test_vote_threshold_gene_bounds_update():
     rules = {
         "entry_rules": {

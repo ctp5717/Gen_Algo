@@ -34,7 +34,7 @@ def _make_evaluator(stats_list, settings=None, group_data=None):
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, base)
     stats_iter = iter(stats_list)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return next(stats_iter)
 
     evaluator._evaluate_single_asset = types.MethodType(fake_eval, evaluator)
@@ -149,7 +149,7 @@ def test_csv_and_json_include_exclusions(tmp_path, monkeypatch):
 
     stats_iter = iter(stats)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return next(stats_iter)
 
     monkeypatch.setattr(
@@ -203,7 +203,7 @@ def test_evaluation_error_reason(tmp_path, monkeypatch):
 
     stats_iter = iter(stats)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         val = next(stats_iter)
         if isinstance(val, Exception):
             raise val

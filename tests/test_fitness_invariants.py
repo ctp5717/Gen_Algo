@@ -81,7 +81,7 @@ def test_hard_floor_forbids_coverage_penalty(monkeypatch):
         },
     ]
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats_seq.pop(0)
 
     monkeypatch.setattr(
@@ -131,7 +131,7 @@ def test_zero_trade_penalize_includes_asset(monkeypatch):
         },
     ]
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats_seq.pop(0)
 
     monkeypatch.setattr(
@@ -181,7 +181,7 @@ def test_zero_trade_ignore_excludes_asset(monkeypatch):
         },
     ]
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats_seq.pop(0)
 
     monkeypatch.setattr(
@@ -231,7 +231,7 @@ def test_negative_weights_clipped_and_renormalized(monkeypatch):
         },
     ]
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats_seq.pop(0)
 
     monkeypatch.setattr(

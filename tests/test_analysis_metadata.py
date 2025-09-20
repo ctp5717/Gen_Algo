@@ -15,6 +15,7 @@ import analysis  # noqa: E402
 import config  # noqa: E402
 import data_loader  # noqa: E402
 import fitness  # noqa: E402
+from exits_nb import ExitReason  # noqa: E402
 
 config.initialize_config()
 
@@ -191,3 +192,97 @@ def test_write_run_metadata_external_absolute(tmp_path, monkeypatch):
     analysis._write_run_metadata(start, [str(external)])
     meta = json.loads((tmp_path / "run_metadata.json").read_text())
     assert meta["artifacts"] == [str(external.resolve())]
+
+
+def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(analysis, "_get_cache_hashes", lambda: {})
+    analysis.set_run_dir(tmp_path)
+    monkeypatch.setattr(config, "TIMEFRAME", "1d", raising=False)
+    monkeypatch.setattr(config, "SELECTED_ASSET_NAME", "Test", raising=False)
+    monkeypatch.setattr(config, "TICKER", "TEST", raising=False)
+    monkeypatch.setattr(config, "MAX_HOLD_PERIOD", 5, raising=False)
+    index = pd.date_range("2024-01-01", periods=3, freq="D")
+    validation = pd.DataFrame(
+        {
+            "Close": [100.0, 100.6, 100.0],
+            "High": [100.0, 100.6, 100.0],
+            "Low": [100.0, 100.0, 100.0],
+        },
+        index=index,
+    )
+    entries = pd.Series([True, False, False], index=index)
+    monkeypatch.setattr(
+        analysis.engine,
+        "process_strategy_rules",
+        lambda *args, **kwargs: (entries, {}),
+    )
+
+    class DummyPortfolio:
+        def __init__(self):
+            self.trades = types.SimpleNamespace(count=lambda: 1)
+
+        @classmethod
+        def from_signals(cls, *args, **kwargs):
+            return cls()
+
+        def stats(self):
+            return pd.Series(
+                {
+                    "Start": index[0],
+                    "End": index[-1],
+                    "Period": "3D",
+                    "Total Return [%]": 5.0,
+                    "Benchmark Return [%]": 1.0,
+                    "Max Drawdown [%]": 1.0,
+                    "Sortino Ratio": 1.0,
+                    "Sharpe Ratio": 1.0,
+                    "Profit Factor": 2.0,
+                    "Win Rate [%]": 50.0,
+                    "Total Trades": 1,
+                    "Avg Winning Trade [%]": 1.0,
+                    "Avg Losing Trade [%]": -1.0,
+                }
+            )
+
+        def plot(self, *args, **kwargs):
+            class _Fig:
+                def show(self_inner):
+                    return None
+
+            return _Fig()
+
+    monkeypatch.setattr(analysis.vbt, "Portfolio", DummyPortfolio)
+
+    def fake_savefig(path, *args, **kwargs):
+        Path(path).write_text("fig")
+
+    monkeypatch.setattr(analysis.plt, "savefig", fake_savefig)
+    monkeypatch.setattr(analysis.plt, "close", lambda *a, **k: None)
+    monkeypatch.setattr(analysis, "ensure_real_vectorbt", lambda *a, **k: None)
+
+    analysis.run_champion_analysis([], {}, validation)
+    meta_path = tmp_path / "run_metadata.json"
+    assert meta_path.exists()
+    metadata = json.loads(meta_path.read_text())
+    exit_meta = metadata.get("exit", {})
+    assert "params" in exit_meta
+    assert exit_meta["params"].get("sl_break_even_mode") in {
+        "none",
+        "breakeven",
+        "follow_tp",
+    }
+    breakdown = exit_meta.get("reason_breakdown", {})
+    assert breakdown.get(ExitReason.TP1.name, {}).get("fraction")
+    metrics = exit_meta.get("metrics", {})
+    assert "avg_tp_level_reached" in metrics
+    assert "avg_sl_timeout_bars" in metrics
+    assert "breakeven_touch_rate" in metrics
+    kpi = exit_meta.get("kpi_strip", {})
+    assert "breakeven_touch_pct" in kpi
+    csv_path = tmp_path / "exit_reason_breakdown.csv"
+    assert not csv_path.exists()
+    assert all(str(csv_path.name) not in art for art in metadata.get("artifacts", []))
+    kpi_path = tmp_path / "exit_kpi_strip.csv"
+    assert kpi_path.exists()
+    assert any(kpi_path.name in art for art in metadata.get("artifacts", []))

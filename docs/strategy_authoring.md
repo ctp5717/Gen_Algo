@@ -63,23 +63,102 @@ Additional controls:
 - `condition["column"]` overrides `condition["band"]` when both are provided.
 - Set `strict_column=False` globally or per-condition to fall back to the first available column instead of raising a `KeyError`. Fallbacks emit warnings so misconfigurations are visible in logs.
 
-## Exit rules
+## Trade-management exits
 
-Exit logic mirrors entry rules but focuses on percentage-based stops:
+`exit_rules` now describe a multi-gene trade-management block that feeds the
+Numba-accelerated simulator in `exits_nb.generate_dynamic_exit_signals_nb` when
+`config.USE_DYNAMIC_EXIT_SIMULATOR` is `True`:
 
 ```python
 "exit_rules": {
-    "stop_loss": {
-        "is_active": True,
-        "type": "percentage",
-        "params": {"value": {"gene": "stop_loss_pct", "low": 0.02, "high": 0.12, "step": 0.005}},
+    "stop_loss": {"type": "percentage", "params": {"value": {"gene": "stop_loss_pct"}}},
+    "trade_management": {
+        "num_tp_levels": {"gene": "num_tp_levels", "low": 1, "high": 4, "step": 1},
+        "tp_pct_1": {"gene": "tp_pct_1", "low": 0.005, "high": 0.50, "step": 0.005},
+        "tp_pct_2": {"gene": "tp_pct_2", "low": 0.010, "high": 0.50, "step": 0.005},
+        "tp_pct_3": {"gene": "tp_pct_3", "low": 0.015, "high": 0.50, "step": 0.005},
+        "tp_pct_4": {"gene": "tp_pct_4", "low": 0.020, "high": 0.50, "step": 0.005},
+        "tp_trailing_enabled": {"gene": "tp_trailing_enabled", "options": [0, 1]},
+        "tp_trailing_pct": {"gene": "tp_trailing_pct", "low": 0.002, "high": 0.10, "step": 0.001},
+        "sl_break_even_mode": {"gene": "sl_break_even_mode", "options": ["none", "breakeven", "follow_tp"]},
+        "sl_timeout_enabled": {"gene": "sl_timeout_enabled", "options": [0, 1]},
+        "sl_timeout_bars": {"gene": "sl_timeout_bars", "low": 1, "high": 12, "step": 1},
+        "sl_trailing_enabled": {"gene": "sl_trailing_enabled", "options": [0, 1]},
+        "sl_trailing_pct": {"gene": "sl_trailing_pct", "low": 0.005, "high": 0.20, "step": 0.001},
     },
-    "trailing_stop": {...},
-    "take_profit": {...},
 }
 ```
 
-Exit settings feed directly into `vectorbt.Portfolio.from_signals` via `fitness.FitnessEvaluator`. Time-based exits use `config.MAX_HOLD_PERIOD`, so ensure configuration is initialised before processing rules.
+Key behaviours:
+
+- Positions are split equally across `num_tp_levels` (1–4). Each level uses
+  `tp_pct_*` measured from the entry price and is repaired to be strictly
+  increasing on decode. Multiple TPs can fill on the same bar; the simulator
+  records fractional exits per reason so metadata captures the full breakdown.
+- Fractional exits are applied via `Portfolio.from_signals(..., size=exit_size,
+  accumulate=True)` so partial fills compound correctly.
+- After a TP fills, break-even adjustments apply immediately:
+  - `breakeven` moves the stop to entry once TP1 executes.
+  - `follow_tp` ratchets the stop to the most recent TP price.
+- Trailing stops (`sl_trailing_*`) only move in the favourable direction and are
+  distinguished from static stops via the `ExitReason.TSL` code.
+- When `tp_trailing_enabled` is set **and more than one TP level is active**
+  the final TP switches into trailing mode: once price reaches the static
+  target the remaining size is protected by a trailing take-profit
+  (`ExitReason.TTP`).
+- Stop-loss timeouts (`sl_timeout_*`) postpone exits for `N` bars after the
+  first stop breach; recovery above the stop cancels the timer. The global
+  hold timeout enforced by `config.MAX_HOLD_PERIOD` exits using
+  `ExitReason.SL` on the configured bar so no additional enum is required.
+
+Hierarchy rules applied during decode:
+
+- `tp_trailing_enabled` is forced to `0` when `num_tp_levels == 1` and
+  `tp_trailing_pct` is frozen at `0.0` whenever trailing is disabled.
+- `sl_timeout_bars` collapses to `0` when `sl_timeout_enabled` is disabled.
+- `sl_trailing_pct` is reset to `0.0` if `sl_trailing_enabled` is `0`.
+
+Per-bar precedence is deterministic:
+
+1. Evaluate TP levels (lowest → highest) using bar highs.
+2. Apply break-even / follow-TP adjustments.
+3. Update trailing stop and trailing TP ratchets.
+4. Check the hard stop using bar lows (respecting timeouts).
+5. Check the trailing take-profit trigger.
+
+Example: with `num_tp_levels=3`, the first TP fills one third of the
+position and activates break-even logic, the second TP can fill on the same bar
+leaving one third running, and the final slice either hits the static TP3 or
+switches into trailing mode when `tp_trailing_enabled=1`.
+
+Exit reasons are encoded as integers for telemetry. The primary values are:
+
+| Code | Meaning |
+| --- | --- |
+| 1–4 | `TP1`–`TP4` partial exits |
+| 5 | `SL` (static/break-even stop) |
+| 6 | `SL_TIMEOUT` |
+| 7 | `TSL` (trailing stop) |
+| 8 | `TTP` (trailing take-profit) |
+
+JSON summaries use the enum names (for example `"TP1"`, `"SL"`) and include the
+numeric `code` for compatibility with earlier analytics scripts.
+
+The simulator emits per-reason fraction arrays so downstream reporting can
+aggregate exact position sizing. `analysis` writes the aggregated breakdown to
+`exit_reason_breakdown.csv` when
+`config.EXIT_TELEMETRY["write_reason_breakdown_csv"]` is true (off by default to
+minimise I/O). Regardless of the toggle, both `analysis` and `fitness` capture
+the exit parameter snapshot, the per-reason fractions, and telemetry metrics
+such as the average TP level reached, breakeven-touch rate, timeout usage, and
+trailing-TP hit rate in `run_metadata.json`. Set
+`config.EXIT_TELEMETRY["collect_traces"] = False` (or the legacy
+`"enabled" = False` alias) to skip per-bar traces while keeping these
+aggregated summaries. The champion analysis step also writes `exit_kpi_strip.csv`
+with the headline metrics alongside the equity chart for quick inspection.
+
+Set `config.USE_DYNAMIC_EXIT_SIMULATOR = False` to fall back to the legacy
+percentage stops (`extract_exit_params`) when debugging.
 
 ## Genes and parsing
 

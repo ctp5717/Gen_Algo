@@ -147,6 +147,9 @@ def test_exit_rule_params(monkeypatch):
     monkeypatch.setattr(
         fitness.vbt.Portfolio, "from_signals", fake_from_signals, raising=False
     )
+    monkeypatch.setattr(
+        fitness.config, "USE_DYNAMIC_EXIT_SIMULATOR", False, raising=False
+    )
 
     rules = {
         "exit_rules": {
