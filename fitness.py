@@ -42,6 +42,12 @@ import config
 import metrics_contract
 import strategy_engine as engine
 import trade_floor
+from exits_nb import (
+    coerce_exit_params,
+    compute_exit_metrics,
+    generate_dynamic_exit_signals_nb,
+    summarise_exit_reasons,
+)
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
@@ -102,6 +108,9 @@ class FitnessEvaluator:
         self.gene_map = gene_map
         self._metrics_preflight_done = False
         self._metric_mapping_logged = False
+        self.last_exit_params: dict | None = None
+        self.last_exit_summary: dict | None = None
+        self.last_exit_metrics: dict | None = None
 
     def __call__(self, ga_instance, solution, sol_idx):
         config.initialize_config()
@@ -112,22 +121,72 @@ class FitnessEvaluator:
             if entries.sum() < config.FITNESS_WEIGHTS["min_trades"]:
                 return -1.0
 
-            # Extract parameters for exits and stop rules
             exit_rules = rules.get("exit_rules", {})
-            time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
-                entries, exit_rules, config.MAX_HOLD_PERIOD
-            )
-
-            portfolio = vbt.Portfolio.from_signals(
-                close=self.ohlc_data["Close"],
-                entries=entries,
-                exits=time_based_exit,
-                sl_stop=sl_stop,
-                tp_stop=tp_stop,
-                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
-                fees=config.FEES,
-                freq=config.to_pandas_freq(config.TIMEFRAME),
-            )
+            self.last_exit_params = None
+            self.last_exit_summary = None
+            self.last_exit_metrics = None
+            if config.USE_DYNAMIC_EXIT_SIMULATOR:
+                exit_params = coerce_exit_params(exit_rules, config.MAX_HOLD_PERIOD)
+                price_map = {
+                    "close": self.ohlc_data["Close"].to_numpy(dtype=float),
+                    "high": self.ohlc_data.get(
+                        "High", self.ohlc_data["Close"]
+                    ).to_numpy(dtype=float),
+                    "low": self.ohlc_data.get("Low", self.ohlc_data["Close"]).to_numpy(
+                        dtype=float
+                    ),
+                }
+                entry_array = entries.to_numpy(dtype=bool)
+                telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+                collect_traces = telemetry_cfg.get(
+                    "collect_traces", telemetry_cfg.get("enabled", True)
+                )
+                exit_result = generate_dynamic_exit_signals_nb(
+                    entry_array,
+                    price_map,
+                    exit_params,
+                    seed=getattr(config, "SEED", None),
+                    collect_traces=collect_traces,
+                )
+                exits_mask = np.asarray(exit_result.exits, dtype=bool)
+                residual_size = exit_result.exit_size[~exits_mask]
+                if residual_size.size and not np.allclose(
+                    residual_size, 0.0, atol=1e-12
+                ):
+                    raise AssertionError(
+                        "exit_size must be zero on bars without exit signals"
+                    )
+                exits_series = pd.Series(exit_result.exits, index=entries.index)
+                exit_size_series = pd.Series(exit_result.exit_size, index=entries.index)
+                asset_label = getattr(config, "TICKER", "asset")
+                summary = summarise_exit_reasons(exit_result, [asset_label])
+                metrics = compute_exit_metrics(exit_result, [asset_label])
+                self.last_exit_summary = summary
+                self.last_exit_metrics = metrics
+                self.last_exit_params = exit_params.as_dict()
+                portfolio = vbt.Portfolio.from_signals(
+                    close=self.ohlc_data["Close"],
+                    entries=entries,
+                    exits=exits_series,
+                    size=exit_size_series,
+                    accumulate=True,
+                    fees=config.FEES,
+                    freq=config.to_pandas_freq(config.TIMEFRAME),
+                )
+            else:
+                time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
+                    entries, exit_rules, config.MAX_HOLD_PERIOD
+                )
+                portfolio = vbt.Portfolio.from_signals(
+                    close=self.ohlc_data["Close"],
+                    entries=entries,
+                    exits=time_based_exit,
+                    sl_stop=sl_stop,
+                    tp_stop=tp_stop,
+                    sl_trail=sl_trail,
+                    fees=config.FEES,
+                    freq=config.to_pandas_freq(config.TIMEFRAME),
+                )
 
             signature = metrics_contract._provider_signature(portfolio)
 
@@ -393,6 +452,30 @@ class MultiAssetFitnessEvaluator:
         self._metric_mapping_logged = True
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _collect_exit_overview(
+        per_asset_details: Mapping[str, Mapping[str, object]],
+    ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
+        """Extract exit summaries, metrics, and parameter snapshots for metadata."""
+
+        summary: dict[str, dict] = {}
+        params: dict[str, dict] = {}
+        metrics: dict[str, dict] = {}
+        for ticker, detail in per_asset_details.items():
+            if not isinstance(detail, Mapping):
+                continue
+            exit_summary = detail.get("exit_summary")
+            if isinstance(exit_summary, Mapping) and exit_summary:
+                summary[ticker] = dict(exit_summary)
+            exit_params = detail.get("exit_params")
+            if isinstance(exit_params, Mapping) and exit_params:
+                params[ticker] = dict(exit_params)
+            exit_metrics = detail.get("exit_metrics")
+            if isinstance(exit_metrics, Mapping) and exit_metrics:
+                metrics[ticker] = dict(exit_metrics)
+        return summary, params, metrics
+
+    # ------------------------------------------------------------------
     def _prepare_metrics_record(
         self, stats: dict
     ) -> tuple[dict, str | None, str | None]:
@@ -417,7 +500,9 @@ class MultiAssetFitnessEvaluator:
         return record, reason, detail
 
     # ------------------------------------------------------------------
-    def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
+    def _evaluate_single_asset(
+        self, ohlc: pd.DataFrame, rules: dict, ticker: str | None = None
+    ) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
         # Empty or very short dataframes can cause downstream libraries to
         # raise ``IndexError`` when statistics are requested.  In walk forward
@@ -431,22 +516,66 @@ class MultiAssetFitnessEvaluator:
             ohlc, rules, collect_counts=True
         )
 
-        # Record the actual executed trades using vectorbt.
+        asset_label = ticker or getattr(ohlc, "name", "asset") or "asset"
         exit_rules = rules.get("exit_rules", {})
-        time_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
-            entries, exit_rules, config.MAX_HOLD_PERIOD
-        )
+        exit_summary: dict[str, dict[str, float]] = {}
+        exit_metrics: dict[str, float] = {}
+        exit_params_dict: dict | None = None
+        if config.USE_DYNAMIC_EXIT_SIMULATOR:
+            exit_params = coerce_exit_params(exit_rules, config.MAX_HOLD_PERIOD)
+            price_map = {
+                "close": ohlc["Close"].to_numpy(dtype=float),
+                "high": ohlc.get("High", ohlc["Close"]).to_numpy(dtype=float),
+                "low": ohlc.get("Low", ohlc["Close"]).to_numpy(dtype=float),
+            }
+            telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+            collect_traces = telemetry_cfg.get(
+                "collect_traces", telemetry_cfg.get("enabled", True)
+            )
+            exit_result = generate_dynamic_exit_signals_nb(
+                entries.to_numpy(dtype=bool),
+                price_map,
+                exit_params,
+                seed=getattr(config, "SEED", None),
+                collect_traces=collect_traces,
+            )
+            exits_mask = np.asarray(exit_result.exits, dtype=bool)
+            residual_size = exit_result.exit_size[~exits_mask]
+            if residual_size.size and not np.allclose(residual_size, 0.0, atol=1e-12):
+                raise AssertionError(
+                    "exit_size must be zero on bars without exit signals"
+                )
+            exits_series = pd.Series(exit_result.exits, index=entries.index)
+            exit_size_series = pd.Series(exit_result.exit_size, index=entries.index)
+            summary_map = summarise_exit_reasons(exit_result, [asset_label])
+            metrics_map = compute_exit_metrics(exit_result, [asset_label])
+            exit_summary = summary_map.get(asset_label, {})
+            exit_metrics = metrics_map.get(asset_label, {})
+            exit_params_dict = exit_params.as_dict()
+            portfolio = vbt.Portfolio.from_signals(
+                close=ohlc["Close"],
+                entries=entries,
+                exits=exits_series,
+                size=exit_size_series,
+                accumulate=True,
+                fees=config.FEES,
+                freq=config.to_pandas_freq(config.TIMEFRAME),
+            )
+        else:
+            time_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
+                entries, exit_rules, config.MAX_HOLD_PERIOD
+            )
 
-        portfolio = vbt.Portfolio.from_signals(
-            close=ohlc["Close"],
-            entries=entries,
-            exits=time_exit,
-            sl_stop=sl_stop,
-            tp_stop=tp_stop,
-            sl_trail=sl_trail,
-            fees=config.FEES,
-            freq=config.to_pandas_freq(config.TIMEFRAME),
-        )
+            portfolio = vbt.Portfolio.from_signals(
+                close=ohlc["Close"],
+                entries=entries,
+                exits=time_exit,
+                sl_stop=sl_stop,
+                tp_stop=tp_stop,
+                sl_trail=sl_trail,
+                fees=config.FEES,
+                freq=config.to_pandas_freq(config.TIMEFRAME),
+            )
 
         signature = metrics_contract._provider_signature(portfolio)
 
@@ -501,6 +630,9 @@ class MultiAssetFitnessEvaluator:
             "metric_sources": sources,
             "missing_metrics": list(missing),
             "metric_provider": signature,
+            "exit_summary": exit_summary,
+            "exit_metrics": exit_metrics,
+            "exit_params": exit_params_dict,
         }
 
     # ------------------------------------------------------------------
@@ -522,7 +654,7 @@ class MultiAssetFitnessEvaluator:
                     )
                     continue
                 future_map[
-                    executor.submit(self._evaluate_single_asset, ohlc, rules)
+                    executor.submit(self._evaluate_single_asset, ohlc, rules, ticker)
                 ] = ticker
             for fut in cf.as_completed(future_map):
                 ticker = future_map[fut]
@@ -556,7 +688,7 @@ class MultiAssetFitnessEvaluator:
                     )
                     continue
                 try:
-                    raw_stats = self._evaluate_single_asset(ohlc, rules)
+                    raw_stats = self._evaluate_single_asset(ohlc, rules, ticker)
                     stats, reason, detail = self._prepare_metrics_record(raw_stats)
                     results[ticker] = self._build_evaluation_record(
                         stats, reason=reason, detail=detail
@@ -729,6 +861,11 @@ class MultiAssetFitnessEvaluator:
         total_trades = summary["total_trades"]
         assets_traded = summary["assets_traded"]
         metric_sources = summary.get("metric_sources") or {}
+        (
+            exit_summary_map,
+            exit_params_map,
+            exit_metrics_map,
+        ) = self._collect_exit_overview(per_asset_details)
 
         if not per_asset_metrics:
             poor_score = self.settings.get("poor_score", -999.0)
@@ -753,6 +890,9 @@ class MultiAssetFitnessEvaluator:
                 "fitness": poor_score,
                 "asset_weights": {},
                 "metric_sources": metric_sources,
+                "exit_reason_breakdown": exit_summary_map,
+                "exit_params": exit_params_map,
+                "exit_metrics": exit_metrics_map,
             }
             return poor_score
 
@@ -844,6 +984,9 @@ class MultiAssetFitnessEvaluator:
                     "fitness": F,
                     "asset_weights": w_map,
                     "metric_sources": metric_sources,
+                    "exit_reason_breakdown": exit_summary_map,
+                    "exit_params": exit_params_map,
+                    "exit_metrics": exit_metrics_map,
                 }
                 return F
             else:
@@ -876,6 +1019,9 @@ class MultiAssetFitnessEvaluator:
                 "fitness": F,
                 "asset_weights": w_map,
                 "metric_sources": metric_sources,
+                "exit_reason_breakdown": exit_summary_map,
+                "exit_params": exit_params_map,
+                "exit_metrics": exit_metrics_map,
             }
             return F
         elif policy == "soft_penalty" and total_trades < min_trades:
@@ -916,6 +1062,9 @@ class MultiAssetFitnessEvaluator:
             "fitness": F,
             "asset_weights": w_map,
             "metric_sources": metric_sources,
+            "exit_reason_breakdown": exit_summary_map,
+            "exit_params": exit_params_map,
+            "exit_metrics": exit_metrics_map,
         }
 
         return F

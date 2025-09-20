@@ -23,7 +23,7 @@ def _make_evaluator(stats, settings=None):
     }
     evaluator = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings or {})
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats
 
     evaluator._evaluate_single_asset = types.MethodType(fake_eval, evaluator)
@@ -97,5 +97,6 @@ def test_nan_profit_factor_fallback():
     ev = _make_evaluator(stats, settings)
     ev(None, [], 0)
     details = ev.last_details["per_asset"]["A"]
-    assert np.isnan(details["profit_factor"])
+    value = details["profit_factor"]
+    assert value is None or np.isnan(value)
     assert details["profit_factor_capped"] == -1.0

@@ -167,6 +167,18 @@ SEED = int(os.environ.get("GA_SEED", 42))
 # constant rather than hard-coding fee rates.
 FEES = 0.001
 
+# Toggle for the advanced trade-management simulator. Disable to fall back to
+# legacy percentage stops and time-based exits.
+USE_DYNAMIC_EXIT_SIMULATOR = True
+
+# Telemetry capture for exit simulation. Disable to skip per-bar traces while
+# keeping aggregated summaries; CSV output remains gated by the explicit flag.
+EXIT_TELEMETRY = {
+    "enabled": True,
+    "collect_traces": True,
+    "write_reason_breakdown_csv": False,
+}
+
 # When True, preflight computes all indicators to surface latent errors.
 PREFLIGHT_ALL_INDICATORS = False
 
@@ -611,7 +623,15 @@ FINAL_STRATEGY = {
     "SHOW_PARAM_DISTS": True,
     "SHOW_RECENCY_HALFLIFE": True,
     # --- Parameter rounding ---
-    "PARAM_VALUE_DECIMALS": {"default": 3},
+    "PARAM_VALUE_DECIMALS": {
+        "default": 3,
+        "tp_pct_1": 3,
+        "tp_pct_2": 3,
+        "tp_pct_3": 3,
+        "tp_pct_4": 3,
+        "sl_trailing_pct": 3,
+        "tp_trailing_pct": 3,
+    },
 }
 
 validate_final_strategy_config(FINAL_STRATEGY)

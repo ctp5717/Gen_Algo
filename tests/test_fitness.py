@@ -40,6 +40,9 @@ def test_composite_score_matches_helper(monkeypatch):
     monkeypatch.setattr(
         fitness.engine, "process_strategy_rules", lambda *a, **k: entries
     )
+    monkeypatch.setattr(
+        fitness.config, "USE_DYNAMIC_EXIT_SIMULATOR", False, raising=False
+    )
     empty = pd.Series(False, index=ohlc.index)
     monkeypatch.setattr(
         fitness,

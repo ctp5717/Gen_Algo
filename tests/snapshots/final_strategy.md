@@ -50,7 +50,13 @@ Weight cap further relaxed to 0.500 for feasibility.
   "PARAM_RCV_WATCHLIST": 0.35,
   "PARAM_SENSITIVITY_THRESHOLD": 0.15,
   "PARAM_VALUE_DECIMALS": {
-    "default": 3
+    "default": 3,
+    "sl_trailing_pct": 3,
+    "tp_pct_1": 3,
+    "tp_pct_2": 3,
+    "tp_pct_3": 3,
+    "tp_pct_4": 3,
+    "tp_trailing_pct": 3
   },
   "SHOW_PARAM_DISTS": true,
   "SHOW_RECENCY_HALFLIFE": true,

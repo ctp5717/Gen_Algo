@@ -27,4 +27,8 @@ def test_integration_smoke():
     per_asset = details["per_asset"].get("A", {})
     assert per_asset.get("reason") != "evaluation_error"
     assert details.get("assets_included", 0) >= 1
+    assert "exit_reason_breakdown" in details
+    assert isinstance(details.get("exit_reason_breakdown"), dict)
+    assert "exit_metrics" in details
+    assert isinstance(details.get("exit_metrics"), dict)
     assert fitness != -999
