@@ -169,6 +169,17 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     num_clones = settings.get("num_clones", 0)
     mutation_rate = settings.get("clone_mutation_rate", 0.0)
 
+    def _coerce_like(reference, value):
+        if reference is None:
+            return value
+        if isinstance(reference, (np.bool_, bool)):
+            return bool(value)
+        if isinstance(reference, (np.integer, int)) and not isinstance(reference, bool):
+            return type(reference)(round(value))
+        if isinstance(reference, (np.floating, float)):
+            return type(reference)(value)
+        return value
+
     if validation_score < survival:
         print("Champion discarded due to poor performance.")
         return pool, "Discarded"
@@ -181,14 +192,28 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
             for idx in range(len(clone)):
                 if np.random.rand() < mutation_rate:
                     gs = gene_space[idx]
-                    low, high = gs["low"], gs["high"]
-                    step = gs.get("step")
-                    if step is not None:
-                        steps = int(round((high - low) / step))
-                        val = low + step * np.random.randint(0, steps + 1)
+                    original = clone[idx]
+                    candidate = None
+                    if isinstance(gs, dict):
+                        low = gs.get("low")
+                        high = gs.get("high")
+                        if low is None or high is None:
+                            continue
+                        step = gs.get("step")
+                        if step is not None:
+                            steps = int(round((high - low) / step))
+                            candidate = low + step * np.random.randint(0, steps + 1)
+                        else:
+                            candidate = np.random.uniform(low, high)
+                    elif isinstance(gs, (list, tuple, np.ndarray)):
+                        options = list(gs)
+                        if not options:
+                            continue
+                        idx_choice = np.random.randint(0, len(options))
+                        candidate = options[idx_choice]
                     else:
-                        val = np.random.uniform(low, high)
-                    clone[idx] = type(clone[idx])(val)
+                        continue
+                    clone[idx] = _coerce_like(original, candidate)
             pool.append(clone)
         status = "Elite"
     else:

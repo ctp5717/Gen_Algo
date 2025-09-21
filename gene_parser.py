@@ -4,19 +4,23 @@ Gene Parsing Utilities
 This module contains helper functions for working with strategy rules.
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
+
+GeneSpaceItem = Union[Dict[str, Any], List[Any]]
+GeneSpace = List[GeneSpaceItem]
+GeneMap = Dict[int, Dict[str, Any]]
 
 
 def parse_genes_from_config(
     rules: Dict[str, Any],
-) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]], List[type]]:
+) -> Tuple[GeneSpace, GeneMap, List[type]]:
     """Parse STRATEGY_RULES and return gene_space, gene_map, and gene_types.
 
     Only rules with ``is_active`` set to ``True`` will be considered when
     searching for genes.
     """
-    gene_space: List[Dict[str, Any]] = []
-    gene_map: Dict[int, Dict[str, Any]] = {}
+    gene_space: GeneSpace = []
+    gene_map: GeneMap = {}
     gene_types: List[type] = []
     gene_index = 0
 
@@ -60,12 +64,9 @@ def parse_genes_from_config(
                         continue
 
                     if "options" in gene_info:
-                        space_item = {"options": gene_info["options"]}
-                        gene_type = (
-                            type(gene_info["options"][0])
-                            if gene_info["options"]
-                            else str
-                        )
+                        options = list(gene_info["options"])
+                        space_item: GeneSpaceItem = options
+                        gene_type = type(options[0]) if options else str
                     else:
                         if key == "vote_threshold":
                             gene_type = int
@@ -77,9 +78,10 @@ def parse_genes_from_config(
                             )
                         high = gene_info.get("high")
                         low = gene_info.get("low", 1)
-                        space_item = {"low": low, "high": high}
+                        space_dict: Dict[str, Any] = {"low": low, "high": high}
                         if "step" in gene_info:
-                            space_item["step"] = gene_info["step"]
+                            space_dict["step"] = gene_info["step"]
+                        space_item = space_dict
 
                     gene_space.append(space_item)
                     gene_types.append(gene_type)
