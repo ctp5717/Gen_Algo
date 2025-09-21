@@ -107,13 +107,10 @@ def test_parse_top_level_combination_genes():
     assert str in gene_types and int in gene_types
 
 
-
-
 def test_option_genes_emit_sequence_space():
     space, _, _ = parse_genes_from_config(STRATEGY_RULES)
-    assert all(
-        not (isinstance(spec, dict) and "options" in spec) for spec in space
-    )
+    assert all(not (isinstance(spec, dict) and "options" in spec) for spec in space)
+
 
 def test_vote_threshold_gene_present():
     _, gene_map, _ = parse_genes_from_config(STRATEGY_RULES)
