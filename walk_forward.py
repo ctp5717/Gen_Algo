@@ -18,7 +18,7 @@ import config
 import data_loader
 import trade_floor
 from deps import ensure_real_vectorbt
-from gene_parser import parse_genes_from_config
+from gene_parser import decode_solution, parse_genes_from_config, prepare_ga_inputs
 from params_resolver import inject_genes_into_rules
 from run_metadata import merge_run_metadata
 from strategy_rules import STRATEGY_RULES
@@ -156,7 +156,9 @@ def _normalize_trade_floor_penalty(pen: Optional[Any]) -> Dict[str, Any]:
     return {"reason": pen} if pen is not None else {}
 
 
-def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
+def _update_champion_pool(
+    pool, best_solution, validation_score, ga_gene_space, settings
+):
     """Update champion pool based on validation fitness.
 
     Returns
@@ -191,7 +193,7 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
             clone = list(best_solution)
             for idx in range(len(clone)):
                 if np.random.rand() < mutation_rate:
-                    gs = gene_space[idx]
+                    gs = ga_gene_space[idx]
                     original = clone[idx]
                     candidate = None
                     if isinstance(gs, dict):
@@ -352,6 +354,9 @@ def run_walk_forward_validation(
         # fmt: on
 
         gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+        ga_gene_space, ga_gene_types = prepare_ga_inputs(
+            gene_space, gene_map, gene_types
+        )
         if multi:
             settings_train = dict(config.MULTI_ASSET)
             per_asset_base = settings_train.get("per_asset_min_trades")
@@ -411,9 +416,9 @@ def run_walk_forward_validation(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
             sol_per_pop=config.GA_POPULATION_SIZE,
-            num_genes=len(gene_space),
-            gene_space=gene_space,
-            gene_type=gene_types,
+            num_genes=len(ga_gene_space),
+            gene_space=ga_gene_space,
+            gene_type=ga_gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=["process", num_cores],
@@ -453,8 +458,10 @@ def run_walk_forward_validation(
                 msg += f" | reason={reason}"
             print(msg)
 
+        decoded_solution = decode_solution(best_solution, gene_map)
         winning_params = {
-            gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
+            gene_map[i]["name"]: decoded_solution[i]
+            for i in range(len(decoded_solution))
         }
         winning_params = _round_floats(winning_params)
 
@@ -592,7 +599,7 @@ def run_walk_forward_validation(
                 champion_pool,
                 best_solution,
                 validation_score,
-                gene_space,
+                ga_gene_space,
                 champion_settings,
             )
             results.append(
@@ -713,7 +720,7 @@ def run_walk_forward_validation(
             champion_pool,
             best_solution,
             validation_score,
-            gene_space,
+            ga_gene_space,
             champion_settings,
         )
 

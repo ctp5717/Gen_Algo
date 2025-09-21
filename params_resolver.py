@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 
+from gene_parser import decode_solution
 from indicator_library import INDICATOR_CONSTRAINTS
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 def inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) -> dict:
     """Inject gene values into a copy of strategy rules, resolving defaults."""
+
+    decoded_solution = decode_solution(solution, gene_map)
 
     def _resolve_defaults(obj):
         if isinstance(obj, dict):
@@ -27,7 +30,7 @@ def inject_genes_into_rules(base_rules: dict, gene_map: dict, solution: list) ->
         return obj
 
     injected_rules = _resolve_defaults(copy.deepcopy(base_rules))
-    for i, gene_value in enumerate(solution):
+    for i, gene_value in enumerate(decoded_solution):
         gene_info = gene_map.get(i)
         if not gene_info:
             continue

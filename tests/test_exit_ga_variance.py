@@ -1,7 +1,7 @@
 import numpy as np
 import pygad
 
-from gene_parser import parse_genes_from_config
+from gene_parser import decode_solution, parse_genes_from_config, prepare_ga_inputs
 from strategy_rules import STRATEGY_RULES
 
 
@@ -18,6 +18,7 @@ def _to_numeric(value):
 
 def test_exit_genes_exhibit_variance_after_ga_run():
     gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
     target_order = [
         "num_tp_levels",
         "tp_pct_1",
@@ -34,49 +35,15 @@ def test_exit_genes_exhibit_variance_after_ga_run():
     target_specs: list = []
     target_types: list[type] = []
     indices: dict[str, int] = {}
-    option_mappings: dict[int, dict[float, object]] = {}
 
     for idx, info in gene_map.items():
         name = info["name"]
         if name in target_order:
             gene_idx = len(target_specs)
-            spec = gene_space[idx]
-            mapping: dict[float, object] | None = None
-            if isinstance(spec, (list, tuple, np.ndarray)):
-                options = list(spec)
-                if all(
-                    isinstance(opt, (int, float, bool, np.bool_, np.number))
-                    for opt in options
-                ):
-                    normalized = [float(opt) for opt in options]
-                else:
-                    mapping = {float(i): opt for i, opt in enumerate(options)}
-                    normalized = list(mapping)
-            elif isinstance(spec, dict) and "options" in spec:
-                options = list(spec["options"])
-                if all(
-                    isinstance(opt, (int, float, bool, np.bool_, np.number))
-                    for opt in options
-                ):
-                    normalized = [float(opt) for opt in options]
-                else:
-                    mapping = {float(i): opt for i, opt in enumerate(options)}
-                    normalized = list(mapping)
-            elif isinstance(spec, dict):
-                low = spec.get("low")
-                high = spec.get("high")
-                if low is not None and high is not None:
-                    normalized = {"low": low, "high": high}
-                else:
-                    normalized = spec
-            else:
-                normalized = spec
-
+            spec = ga_gene_space[idx]
             indices[name] = gene_idx
-            target_specs.append(normalized)
-            target_types.append(float)
-            if mapping is not None:
-                option_mappings[gene_idx] = mapping
+            target_specs.append(spec)
+            target_types.append(ga_gene_types[idx])
 
     assert len(target_specs) == len(target_order)
 
@@ -103,13 +70,11 @@ def test_exit_genes_exhibit_variance_after_ga_run():
     population = ga.population
     assert population is not None and len(population) > 1
 
+    decoded_population = [decode_solution(chrom, gene_map) for chrom in population]
+
     for name in target_order:
         idx = indices[name]
-        values = [chrom[idx] for chrom in population]
-        if idx in option_mappings:
-            mapped = [option_mappings[idx].get(float(val), val) for val in values]
-            assert len(set(mapped)) > 1, f"GA failed to vary {name}"
-            continue
+        values = [chrom[idx] for chrom in decoded_population]
         if all(isinstance(v, str) for v in values):
             assert len(set(values)) > 1, f"GA failed to vary {name}"
         else:
