@@ -5,8 +5,8 @@ from __future__ import annotations
 import copy
 import logging
 
-from indicator_library import INDICATOR_CONSTRAINTS
 from gene_parser import decode_solution
+from indicator_library import INDICATOR_CONSTRAINTS
 
 logger = logging.getLogger(__name__)
 

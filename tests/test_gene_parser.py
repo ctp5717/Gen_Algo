@@ -12,11 +12,11 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
-from gene_parser import (
+from gene_parser import (  # noqa: E402
     decode_solution,
     parse_genes_from_config,
     prepare_ga_inputs,
-)  # noqa: E402
+)
 from strategy_rules import STRATEGY_RULES  # noqa: E402
 
 
@@ -120,7 +120,9 @@ def test_prepare_ga_inputs_encodes_string_options():
     gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
     ga_space, ga_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
 
-    idx = next(i for i, info in gene_map.items() if info["name"] == "sl_break_even_mode")
+    idx = next(
+        i for i, info in gene_map.items() if info["name"] == "sl_break_even_mode"
+    )
 
     assert ga_space[idx] == [0, 1, 2]
     assert ga_types[idx] is int

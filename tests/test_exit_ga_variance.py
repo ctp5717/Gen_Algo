@@ -18,9 +18,7 @@ def _to_numeric(value):
 
 def test_exit_genes_exhibit_variance_after_ga_run():
     gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
-    ga_gene_space, ga_gene_types = prepare_ga_inputs(
-        gene_space, gene_map, gene_types
-    )
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
     target_order = [
         "num_tp_levels",
         "tp_pct_1",

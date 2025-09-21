@@ -131,9 +131,7 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
     print("\n--- Express Hyperparameter Tuning ---")
     np.random.seed(config.SEED)
 
-    ga_gene_space, ga_gene_types = prepare_ga_inputs(
-        gene_space, gene_map, gene_types
-    )
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
 
     # Optional coarse tuning of lambda dispersion
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):

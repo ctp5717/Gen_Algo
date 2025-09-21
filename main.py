@@ -426,9 +426,7 @@ def main(argv: list[str] | None = None):
 
     print("Parsing strategy rules to identify genes for optimization...")
     gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
-    ga_gene_space, ga_gene_types = prepare_ga_inputs(
-        gene_space, gene_map, gene_types
-    )
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
     if not gene_space:
         print("No genes found. Exiting.")
         return

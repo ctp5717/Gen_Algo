@@ -156,7 +156,9 @@ def _normalize_trade_floor_penalty(pen: Optional[Any]) -> Dict[str, Any]:
     return {"reason": pen} if pen is not None else {}
 
 
-def _update_champion_pool(pool, best_solution, validation_score, ga_gene_space, settings):
+def _update_champion_pool(
+    pool, best_solution, validation_score, ga_gene_space, settings
+):
     """Update champion pool based on validation fitness.
 
     Returns

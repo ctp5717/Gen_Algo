@@ -147,7 +147,7 @@ def prepare_ga_inputs(
         if isinstance(spec, (list, tuple)):
             options = list(spec)
             if options and not all(_is_numeric_gene_value(opt) for opt in options):
-                decode_map = {i: opt for i, opt in enumerate(options)}
+                decode_map = dict(enumerate(options))
                 # Store both the original options and the decoder to allow
                 # downstream code to recover the categorical values.
                 gene_info.setdefault("options", options)
