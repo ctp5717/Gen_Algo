@@ -42,9 +42,22 @@ def test_exit_genes_exhibit_variance_after_ga_run():
             gene_idx = len(target_specs)
             spec = gene_space[idx]
             mapping: dict[float, object] | None = None
-            if isinstance(spec, dict) and "options" in spec:
+            if isinstance(spec, (list, tuple, np.ndarray)):
+                options = list(spec)
+                if all(
+                    isinstance(opt, (int, float, bool, np.bool_, np.number))
+                    for opt in options
+                ):
+                    normalized = [float(opt) for opt in options]
+                else:
+                    mapping = {float(i): opt for i, opt in enumerate(options)}
+                    normalized = list(mapping)
+            elif isinstance(spec, dict) and "options" in spec:
                 options = list(spec["options"])
-                if all(isinstance(opt, (int, float, bool)) for opt in options):
+                if all(
+                    isinstance(opt, (int, float, bool, np.bool_, np.number))
+                    for opt in options
+                ):
                     normalized = [float(opt) for opt in options]
                 else:
                     mapping = {float(i): opt for i, opt in enumerate(options)}

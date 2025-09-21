@@ -166,7 +166,7 @@ percentage stops (`extract_exit_params`) when debugging.
 
 - Use descriptive `gene` names; they appear in console summaries and metadata.
 - Provide `step` values for discrete ranges to avoid floating-point drift. For floats, `step` can be omitted when any value in `[low, high]` is valid.
-- Option genes (`{"options": [...]}`) accept strings, numbers, or booleans; the parser infers the correct `gene_type`.
+- Option genes (`{"options": [...]}`) accept strings, numbers, or booleans; the parser returns the option list in `gene_space` and infers the correct `gene_type`.
 
 ## Preflight and debugging
 

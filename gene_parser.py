@@ -60,7 +60,7 @@ def parse_genes_from_config(
                         continue
 
                     if "options" in gene_info:
-                        space_item = {"options": gene_info["options"]}
+                        space_item = list(gene_info["options"])
                         gene_type = (
                             type(gene_info["options"][0])
                             if gene_info["options"]
