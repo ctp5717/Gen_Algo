@@ -87,6 +87,24 @@ def test_load_wf_summary_missing_key(tmp_path):
         load_wf_summary(wf / "walk_forward_summary.json")
 
 
+def test_load_wf_summary_with_string_param(tmp_path):
+    wf = tmp_path / "walk_forward"
+    wf.mkdir()
+    summary = {
+        "metadata": {"schema_version": "1.0", "num_folds": 1, "asset_universe": []},
+        "folds": [
+            {
+                "fold_id": 0,
+                "validation_fitness": 1.0,
+                "params": {"sl_break_even_mode": "none", "tp_trailing_enabled": 1},
+            }
+        ],
+    }
+    (wf / "walk_forward_summary.json").write_text(json.dumps(summary))
+    result = load_wf_summary(wf / "walk_forward_summary.json")
+    assert result.folds[0].params["sl_break_even_mode"] == "none"
+
+
 def test_load_wf_summary_bad_champion_status(tmp_path):
     wf = tmp_path / "walk_forward"
     wf.mkdir()

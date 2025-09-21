@@ -24,7 +24,7 @@ class SchemaCsvError(ValueError):
 class Fold(BaseModel):
     fold_id: int
     validation_fitness: float
-    params: Dict[str, float]
+    params: Dict[str, float | int | str | bool | None]
     champion_status: Optional[Literal["Elite", "Viable", "Discarded"]] = None
 
     @field_validator("champion_status", mode="before")
