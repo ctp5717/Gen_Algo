@@ -26,7 +26,10 @@ import config
 import data_loader
 import strategy_engine
 from deps import ensure_real_vectorbt
-from gene_parser import parse_genes_from_config  # now defined in its own module
+from gene_parser import (
+    parse_genes_from_config,
+    prepare_ga_inputs,
+)
 from params_resolver import resolve_effective_rules
 from strategy_rules import STRATEGY_RULES
 
@@ -423,6 +426,9 @@ def main(argv: list[str] | None = None):
 
     print("Parsing strategy rules to identify genes for optimization...")
     gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(
+        gene_space, gene_map, gene_types
+    )
     if not gene_space:
         print("No genes found. Exiting.")
         return
@@ -468,9 +474,9 @@ def main(argv: list[str] | None = None):
         num_generations=config.GA_NUM_GENERATIONS,
         num_parents_mating=num_parents_mating,
         sol_per_pop=sol_per_pop,
-        num_genes=len(gene_space),
-        gene_space=gene_space,
-        gene_type=list(gene_types),
+        num_genes=len(ga_gene_space),
+        gene_space=ga_gene_space,
+        gene_type=list(ga_gene_types),
         mutation_num_genes=mutation_num_genes,
         fitness_func=fitness_function,
         parallel_processing=["process", num_cores],

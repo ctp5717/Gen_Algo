@@ -12,7 +12,11 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
-from gene_parser import parse_genes_from_config  # noqa: E402
+from gene_parser import (
+    decode_solution,
+    parse_genes_from_config,
+    prepare_ga_inputs,
+)  # noqa: E402
 from strategy_rules import STRATEGY_RULES  # noqa: E402
 
 
@@ -110,6 +114,20 @@ def test_parse_top_level_combination_genes():
 def test_option_genes_emit_sequence_space():
     space, _, _ = parse_genes_from_config(STRATEGY_RULES)
     assert all(not (isinstance(spec, dict) and "options" in spec) for spec in space)
+
+
+def test_prepare_ga_inputs_encodes_string_options():
+    gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+    ga_space, ga_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
+
+    idx = next(i for i, info in gene_map.items() if info["name"] == "sl_break_even_mode")
+
+    assert ga_space[idx] == [0, 1, 2]
+    assert ga_types[idx] is int
+
+    decoded = decode_solution([0] * len(gene_map), gene_map)
+    assert decoded[idx] == "none"
+    assert gene_map[idx]["option_decode_map"][1] == "breakeven"
 
 
 def test_vote_threshold_gene_present():

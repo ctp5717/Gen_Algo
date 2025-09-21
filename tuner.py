@@ -9,6 +9,7 @@ import config
 import fitness
 import strategy_engine as engine
 import trade_floor
+from gene_parser import prepare_ga_inputs
 from params_resolver import inject_genes_into_rules
 from strategy_rules import STRATEGY_RULES
 
@@ -130,6 +131,10 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
     print("\n--- Express Hyperparameter Tuning ---")
     np.random.seed(config.SEED)
 
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(
+        gene_space, gene_map, gene_types
+    )
+
     # Optional coarse tuning of lambda dispersion
     if getattr(config, "MULTI_ASSET", {}).get("enabled"):
         lam_grid = config.MULTI_ASSET.get("lambda_grid")
@@ -150,9 +155,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                     ),
                     num_parents_mating=2,
                     sol_per_pop=4,
-                    num_genes=len(gene_space),
-                    gene_space=gene_space,
-                    gene_type=list(gene_types),
+                    num_genes=len(ga_gene_space),
+                    gene_space=ga_gene_space,
+                    gene_type=list(ga_gene_types),
                     mutation_num_genes=1,
                     fitness_func=evaluator.__call__,
                     random_seed=config.SEED,
@@ -192,9 +197,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
                         ),
                         num_parents_mating=2,
                         sol_per_pop=4,
-                        num_genes=len(gene_space),
-                        gene_space=gene_space,
-                        gene_type=list(gene_types),
+                        num_genes=len(ga_gene_space),
+                        gene_space=ga_gene_space,
+                        gene_type=list(ga_gene_types),
                         fitness_func=evaluator.__call__,
                         random_seed=seed,
                         **mutation_kwargs,
@@ -228,9 +233,9 @@ def find_best_hyperparameters(train_data, gene_space, gene_map, gene_types, val_
             num_generations=config.GENERATIONS_PER_TUNE,
             num_parents_mating=params["num_parents_mating"],
             sol_per_pop=params["sol_per_pop"],
-            num_genes=len(gene_space),
-            gene_space=gene_space,
-            gene_type=list(gene_types),
+            num_genes=len(ga_gene_space),
+            gene_space=ga_gene_space,
+            gene_type=list(ga_gene_types),
             mutation_num_genes=params["mutation_num_genes"],
             fitness_func=fitness_func,
             parallel_processing=["process", num_cores],
