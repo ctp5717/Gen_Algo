@@ -171,11 +171,28 @@ FEES = 0.001
 # legacy percentage stops and time-based exits.
 USE_DYNAMIC_EXIT_SIMULATOR = True
 
+# Dynamic-exit sizing contract. ``DYNAMIC_EXIT_SIZE_MODE`` controls how the
+# simulator's fractional exit sizes are interpreted when building portfolio
+# orders and ``DYNAMIC_EXIT_ACCUMULATE`` determines whether positions are
+# accumulated or replaced inside ``Portfolio.from_signals``.
+DYNAMIC_EXIT_SIZE_MODE = "fraction_base"
+DYNAMIC_EXIT_ACCUMULATE = False
+
+# Take-profit ladder guardrails. ``MAX_TP_PCT`` acts as the universal fallback
+# cap while ``TP_CAP_BY_TIMEFRAME`` can narrow the ceiling for specific
+# timeframes where extreme ladders are impractical.
+MAX_TP_PCT = 0.80
+TP_CAP_BY_TIMEFRAME = {
+    "4h": 0.60,
+    "1h": 0.70,
+    "1d": 0.80,
+}
+
 # Telemetry capture for exit simulation. Disable to skip per-bar traces while
 # keeping aggregated summaries; CSV output remains gated by the explicit flag.
 EXIT_TELEMETRY = {
     "enabled": True,
-    "collect_traces": True,
+    "collect_traces": False,
     "write_reason_breakdown_csv": False,
 }
 
@@ -317,6 +334,41 @@ def _clamp_vote_threshold() -> None:
         _vt["high"] = max(1, min(_vt["high"], _active))
 
 
+def get_tp_cap_for_timeframe(timeframe: str | None) -> float:
+    """Return the TP ladder cap for a timeframe, falling back to ``MAX_TP_PCT``."""
+
+    cap_map = {k.lower(): float(v) for k, v in TP_CAP_BY_TIMEFRAME.items()}
+    if timeframe:
+        tf_norm = str(timeframe).strip().lower()
+        cap = cap_map.get(tf_norm)
+        if cap is not None:
+            return float(min(MAX_TP_PCT, cap))
+    return float(MAX_TP_PCT)
+
+
+def _apply_tp_caps(timeframe: str) -> None:
+    """Clamp TP gene bounds to match the active timeframe cap."""
+
+    cap = get_tp_cap_for_timeframe(timeframe)
+    trade_mgmt = STRATEGY_RULES.get("exit_rules", {}).get("trade_management", {})
+    for idx in range(1, 1 + 4):
+        spec = trade_mgmt.get(f"tp_pct_{idx}")
+        if isinstance(spec, dict):
+            low = float(spec.get("low", 0.0))
+            if low > cap:
+                spec["low"] = cap
+                low = cap
+            high_val = spec.get("high")
+            if high_val is None:
+                spec["high"] = cap
+            else:
+                try:
+                    high = float(high_val)
+                except (TypeError, ValueError):
+                    high = cap
+                spec["high"] = max(low, min(high, cap))
+
+
 def initialize_config(force: bool = False) -> None:
     """Populate derived configuration values lazily."""
 
@@ -331,6 +383,7 @@ def initialize_config(force: bool = False) -> None:
 
     tf = str(TIMEFRAME)
     tf_lower = tf.lower()
+    _apply_tp_caps(tf_lower)
     is_hour = tf_lower.endswith("h")
     is_minute = tf_lower.endswith("m") and not tf_lower.endswith("mo")
 
@@ -486,6 +539,17 @@ FITNESS_WEIGHTS = {
     "profit_factor": 0.3,
     "max_drawdown": 0.2,
     "min_trades": 0,
+}
+
+FITNESS_EXIT_USAGE = {
+    "timeout_weight": 0.06,
+    "timeout_target": 0.25,
+    "tp_hit_weight": 0.1,
+    "tp_hit_target": 0.55,
+    "avg_tp_level_weight": 0.05,
+    "avg_tp_level_target": 1.5,
+    "trailing_tp_weight": 0.05,
+    "trailing_tp_target": 0.05,
 }
 
 # --- 5a. MULTI-ASSET EVALUATION SETTINGS ---

@@ -1,0 +1,5 @@
+Fold,Ticker,Score,Trades,Included,Reason
+0,BTCUSDT,1.23,6,True,
+0,ETHUSDT,0.87,4,False,timeout dominated
+1,BTCUSDT,1.05,5,True,
+1,ETHUSDT,0.92,5,True,breakeven_follow_tp

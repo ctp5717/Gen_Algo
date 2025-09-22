@@ -9,6 +9,8 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+import config
+
 try:  # pragma: no cover - numba is optional in some environments
     from numba import njit
 except Exception:  # pragma: no cover - provide a no-op decorator
@@ -89,11 +91,13 @@ class ExitParams:
     sl_trailing_enabled: bool
     sl_trailing_pct: float
     max_hold_bars: int
+    tp_cap: float
+    timeframe: str | None = None
 
     def as_dict(self) -> dict:
         """Serialise the parameter payload for metadata snapshots."""
 
-        return {
+        payload = {
             "stop_loss_pct": float(self.stop_loss_pct),
             "num_tp_levels": int(self.num_tp_levels),
             "tp_pcts": [float(v) for v in self.tp_pcts[:MAX_TP_LEVELS]],
@@ -107,7 +111,10 @@ class ExitParams:
             "sl_trailing_enabled": bool(self.sl_trailing_enabled),
             "sl_trailing_pct": float(self.sl_trailing_pct),
             "max_hold_bars": int(self.max_hold_bars),
+            "tp_cap": float(self.tp_cap),
         }
+        payload["timeframe"] = self.timeframe
+        return payload
 
 
 @dataclass(slots=True)
@@ -805,7 +812,7 @@ def compute_exit_metrics(
 
 
 def coerce_exit_params(
-    exit_rules: Mapping[str, object], max_hold_bars: int
+    exit_rules: Mapping[str, object], max_hold_bars: int, timeframe: str | None = None
 ) -> ExitParams:
     """Resolve trade-management gene outputs into ``ExitParams``."""
 
@@ -830,18 +837,65 @@ def coerce_exit_params(
         tp_defaults[0] = float(tm_cfg.get("tp_pct_1", 0.02))
 
     repaired_tp: list[float] = []
-    min_gap = 1e-6
+    min_gap_abs = 0.005
+    tf_source = (
+        timeframe if timeframe is not None else getattr(config, "TIMEFRAME", None)
+    )
+    cap_resolver = getattr(config, "get_tp_cap_for_timeframe", None)
+    if callable(cap_resolver):
+        cap_default = float(cap_resolver(tf_source))
+    else:
+        cap_default = float(getattr(config, "MAX_TP_PCT", 0.8))
+    try:
+        max_tp_cap = tm_cfg.get("tp_pct_cap")
+    except AttributeError:  # pragma: no cover - defensive
+        max_tp_cap = None
+    cap_for_timeframe = cap_default
+    if max_tp_cap is None:
+        max_tp_cap = cap_for_timeframe
+    else:
+        try:
+            max_tp_cap = float(max_tp_cap)
+        except (TypeError, ValueError):
+            max_tp_cap = cap_for_timeframe
+        if not math.isfinite(max_tp_cap) or max_tp_cap <= 0:
+            max_tp_cap = cap_for_timeframe
+        else:
+            max_tp_cap = min(max_tp_cap, cap_for_timeframe)
     for idx, base in enumerate(tp_defaults):
         if idx == 0:
             val = float(base)
             if val <= 0:
-                val = min_gap
+                val = min_gap_abs
         else:
             prev = repaired_tp[-1]
             if idx < num_tp_levels:
-                val = max(float(base), prev + min_gap)
+                rel_gap = 0.1 * prev if prev > 0 else 0.0
+                required_gap = max(min_gap_abs, rel_gap)
             else:
-                val = max(float(base), prev)
+                required_gap = 0.0
+            if idx < num_tp_levels:
+                desired = max(float(base), prev + required_gap)
+            else:
+                desired = max(float(base), prev)
+            headroom = max_tp_cap - prev
+            if idx < num_tp_levels and headroom > 0:
+                max_allowed = prev + headroom
+                val = min(desired, max_allowed)
+                if val - prev < required_gap - 1e-12:
+                    val = prev + min(headroom, required_gap)
+            else:
+                val = min(desired, max_tp_cap)
+            if idx < num_tp_levels and val <= prev:
+                val = min(max_tp_cap, prev + required_gap)
+            if val <= prev:
+                val = prev
+        if idx == 0 and val > max_tp_cap:
+            val = max_tp_cap
+        if val < min_gap_abs and idx == 0:
+            val = min_gap_abs
+        if val > max_tp_cap:
+            val = max_tp_cap
         repaired_tp.append(val)
 
     tp_vals = tuple(repaired_tp)
@@ -886,6 +940,7 @@ def coerce_exit_params(
     if not sl_trailing_enabled:
         sl_trailing_pct = 0.0
 
+    timeframe_serialised = str(tf_source) if tf_source is not None else None
     return ExitParams(
         stop_loss_pct=stop_loss_pct,
         num_tp_levels=num_tp_levels,
@@ -898,4 +953,6 @@ def coerce_exit_params(
         sl_trailing_enabled=sl_trailing_enabled,
         sl_trailing_pct=sl_trailing_pct,
         max_hold_bars=int(max_hold_bars or 0),
+        tp_cap=float(max_tp_cap),
+        timeframe=timeframe_serialised,
     )

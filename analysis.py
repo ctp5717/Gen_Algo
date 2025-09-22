@@ -332,7 +332,11 @@ def run_champion_analysis(
         exit_metrics_summary: dict[str, dict[str, float]] = {}
         exit_kpi_values: dict[str, float] = {}
         if config.USE_DYNAMIC_EXIT_SIMULATOR:
-            exit_params = coerce_exit_params(exit_rules, config.MAX_HOLD_PERIOD)
+            exit_params = coerce_exit_params(
+                exit_rules,
+                config.MAX_HOLD_PERIOD,
+                getattr(config, "TIMEFRAME", None),
+            )
             price_map = {
                 "close": validation_data["Close"].to_numpy(dtype=float),
                 "high": validation_data.get("High", validation_data["Close"]).to_numpy(
@@ -354,19 +358,40 @@ def run_champion_analysis(
                 collect_traces=collect_traces,
             )
             exits_series = pd.Series(exit_result.exits, index=entries.index)
-            exit_size_series = pd.Series(exit_result.exit_size, index=entries.index)
+            exit_size_series = pd.Series(
+                exit_result.exit_size, index=entries.index, dtype=float
+            )
             exit_reason_summary = summarise_exit_reasons(exit_result, [config.TICKER])
             exit_metrics_summary = compute_exit_metrics(exit_result, [config.TICKER])
             _write_exit_reason_breakdown_csv(exit_reason_summary, artifacts)
             ticker_metrics = exit_metrics_summary.get(config.TICKER, {})
             exit_kpi_values = _render_exit_kpi_strip(ticker_metrics, artifacts)
             exit_params_snapshot = exit_params.as_dict()
+            timeframe_snapshot = getattr(config, "TIMEFRAME", None)
+            exit_params_snapshot.setdefault("timeframe", timeframe_snapshot)
+            if hasattr(config, "get_tp_cap_for_timeframe"):
+                exit_params_snapshot.setdefault(
+                    "tp_cap",
+                    config.get_tp_cap_for_timeframe(timeframe_snapshot),
+                )
+            base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
+            size_mode = getattr(config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base")
+            entries_active, exits_series, size_series = (
+                fitness.build_dynamic_exit_orders(
+                    entries=entries,
+                    exits_series=exits_series,
+                    exit_size_series=exit_size_series,
+                    base_entry_size=base_entry_size,
+                    mode=size_mode,
+                    asset_label=str(config.TICKER or "asset"),
+                )
+            )
             portfolio = vbt.Portfolio.from_signals(
                 close=validation_data["Close"],
-                entries=entries,
+                entries=entries_active,
                 exits=exits_series,
-                size=exit_size_series,
-                accumulate=True,
+                size=size_series,
+                accumulate=getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False),
                 fees=config.FEES,
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )

@@ -446,6 +446,9 @@ def test_final_strategy_markdown_snapshot(tmp_path, monkeypatch):
         "## Excluded Assets",
         "- None",
         "",
+        "## Exit Behaviour",
+        "_No exit telemetry available._",
+        "",
         "## Confidence & SRE Summary",
         "Inherited confidence: High (80).",
         (
@@ -798,3 +801,92 @@ def test_fitness_plot_non_blocking(monkeypatch):
     monkeypatch.setattr(main, "plt", FakePlt())
 
     main.main()
+
+
+def test_ga_banner_reports_repaired_tp_levels(monkeypatch, capsys):
+    _configure_minimal_main(monkeypatch)
+
+    exit_rules = {
+        "stop_loss": {
+            "is_active": True,
+            "type": "percentage",
+            "params": {"value": {"gene": "stop_loss_pct", "low": 0.01, "high": 0.05}},
+        },
+        "trade_management": {
+            "num_tp_levels": {"gene": "num_tp_levels", "low": 1, "high": 4, "step": 1},
+            "tp_pct_1": {"gene": "tp_pct_1", "low": 0.01, "high": 0.5, "step": 0.005},
+            "tp_pct_2": {"gene": "tp_pct_2", "low": 0.01, "high": 0.5, "step": 0.005},
+            "tp_pct_3": {"gene": "tp_pct_3", "low": 0.01, "high": 0.5, "step": 0.005},
+            "tp_pct_4": {"gene": "tp_pct_4", "low": 0.01, "high": 0.5, "step": 0.005},
+        },
+    }
+    strategy = {
+        "entry_rules": {"combination_logic": "AND", "conditions": []},
+        "exit_rules": exit_rules,
+    }
+    monkeypatch.setattr(main, "STRATEGY_RULES", strategy, raising=False)
+    monkeypatch.setattr(main.config, "STRATEGY_RULES", strategy, raising=False)
+
+    gene_space = [
+        {"low": 1, "high": 4, "step": 1},
+        {"low": 0.01, "high": 0.5, "step": 0.005},
+        {"low": 0.01, "high": 0.5, "step": 0.005},
+        {"low": 0.01, "high": 0.5, "step": 0.005},
+        {"low": 0.01, "high": 0.5, "step": 0.005},
+    ]
+    gene_map = {
+        0: {
+            "name": "num_tp_levels",
+            "path": ["exit_rules", "trade_management", "num_tp_levels"],
+            "type": int,
+        },
+        1: {
+            "name": "tp_pct_1",
+            "path": ["exit_rules", "trade_management", "tp_pct_1"],
+            "type": float,
+        },
+        2: {
+            "name": "tp_pct_2",
+            "path": ["exit_rules", "trade_management", "tp_pct_2"],
+            "type": float,
+        },
+        3: {
+            "name": "tp_pct_3",
+            "path": ["exit_rules", "trade_management", "tp_pct_3"],
+            "type": float,
+        },
+        4: {
+            "name": "tp_pct_4",
+            "path": ["exit_rules", "trade_management", "tp_pct_4"],
+            "type": float,
+        },
+    }
+    gene_types = [int, float, float, float, float]
+
+    def parse_stub(*_args, **_kwargs):
+        return gene_space, gene_map, gene_types
+
+    monkeypatch.setattr(main, "parse_genes_from_config", parse_stub)
+
+    solution = [4, 0.02, 0.02, 0.02, 0.02]
+
+    class BannerGA:
+        def __init__(self, *args, **kwargs):
+            self.num_generations = 1
+            self.generations_completed = 1
+            self.last_generation_fitness = [1.0]
+            self.best_solutions_fitness = [1.0]
+
+        def run(self):
+            return None
+
+        def best_solution(self, **kwargs):
+            return solution, 1.23, None
+
+    monkeypatch.setattr(main.pygad, "GA", BannerGA)
+
+    main.main([])
+    output = capsys.readouterr().out
+    assert "tp_pct_2: 0.025" in output
+    assert "tp_pct_3: 0.03" in output
+    assert "tp_pct_4: 0.035" in output

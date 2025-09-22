@@ -56,6 +56,7 @@ class PerAssetRow(BaseModel):
     score: Optional[float]
     trades: int
     included: bool
+    reason: Optional[str] = None
 
 
 class WalkForwardPerAssetV1(BaseModel):
@@ -126,6 +127,7 @@ def load_wf_per_asset(path: str | Path) -> tuple[WalkForwardPerAssetV1, List[str
         "Score": "score",
         "Trades": "trades",
         "Included": "included",
+        "Reason": "reason",
     }
     mapping_lowers = {k.lower() for k in mapping.keys()}
     rows: List[Dict[str, object]] = []
@@ -162,6 +164,7 @@ def load_wf_per_asset(path: str | Path) -> tuple[WalkForwardPerAssetV1, List[str
                     "score": score,
                     "trades": trades,
                     "included": str(norm["included"]).lower() in {"true", "1", "yes"},
+                    "reason": (str(norm.get("reason", "")).strip() or None),
                 }
             )
     if not rows:

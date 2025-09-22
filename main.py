@@ -26,6 +26,7 @@ import config
 import data_loader
 import strategy_engine
 from deps import ensure_real_vectorbt
+from exits_nb import coerce_exit_params
 from gene_parser import (
     parse_genes_from_config,
     prepare_ga_inputs,
@@ -494,6 +495,16 @@ def main(argv: list[str] | None = None):
     )
     print("Optimal Parameters Found:")
     resolved = resolve_effective_rules(STRATEGY_RULES, gene_map, best_solution)
+    exit_params_banner = None
+    try:
+        exit_rules = resolved.get("exit_rules", {})
+        exit_params_banner = coerce_exit_params(
+            exit_rules,
+            config.MAX_HOLD_PERIOD,
+            getattr(config, "TIMEFRAME", None),
+        )
+    except Exception:
+        exit_params_banner = None
     for i, gene_value in enumerate(best_solution):
         info = gene_map[i]
         gene_name = info["name"]
@@ -504,6 +515,13 @@ def main(argv: list[str] | None = None):
             for key in path:
                 node = node[key]
             value = node
+        if exit_params_banner and gene_name.startswith("tp_pct_"):
+            try:
+                idx = int(gene_name.rsplit("_", 1)[-1]) - 1
+            except ValueError:
+                idx = -1
+            if 0 <= idx < len(exit_params_banner.tp_pcts):
+                value = exit_params_banner.tp_pcts[idx]
         value = _roundish(value)
         print(f"  - {gene_name}: {value}")
     print("\nDisplaying GA fitness evolution plot...")
