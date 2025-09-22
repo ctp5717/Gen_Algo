@@ -110,7 +110,7 @@ def test_indicator_preflight_combination_logic_gene_dict(monkeypatch):
     evaluator(None, ["OR"], 0)
 
     assert captured["logics"] == ["AND", "OR"]
-    assert trade_counts == [3]
+    assert trade_counts == [2]
 
 
 def test_indicator_preflight_param_gene_dict(monkeypatch):

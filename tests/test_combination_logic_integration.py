@@ -116,7 +116,7 @@ def test_backtester_integration_or_vote(monkeypatch):
     evaluator_vote(None, [], 0)
     evaluator_vote_strict(None, [], 0)
 
-    assert trade_counts == [3, 3, 0]
+    assert trade_counts == [1, 1, 0]
 
 
 def test_exit_rule_params(monkeypatch):

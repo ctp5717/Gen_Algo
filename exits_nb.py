@@ -554,6 +554,13 @@ def generate_dynamic_exit_signals_nb(
         (stop levels, trailing triggers, and reason fractions) to reduce memory
         usage. Aggregated statistics are always produced so metadata remains
         available.
+
+    Notes
+    -----
+    The simulator initialises ``open_qty`` to ``1.0`` for every new position and
+    reports ``exit_size`` as the fraction of that baseline quantity.  Callers can
+    reinterpret the fractions as a portion of the base order, the remaining
+    position, or absolute units depending on their chosen sizing mode.
     """
 
     entries_arr = np.asarray(open_entries, dtype=np.bool_)
