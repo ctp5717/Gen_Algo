@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 vbt_stub = types.ModuleType("vectorbt")
 vbt_stub.__spec__ = importlib.machinery.ModuleSpec("vectorbt", loader=None)
@@ -218,12 +219,16 @@ def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
         lambda *args, **kwargs: (entries, {}),
     )
 
+    last_from_signals: dict[str, object] = {}
+
     class DummyPortfolio:
         def __init__(self):
             self.trades = types.SimpleNamespace(count=lambda: 1)
 
         @classmethod
         def from_signals(cls, *args, **kwargs):
+            last_from_signals.clear()
+            last_from_signals.update(kwargs)
             return cls()
 
         def stats(self):
@@ -254,6 +259,17 @@ def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
 
     monkeypatch.setattr(analysis.vbt, "Portfolio", DummyPortfolio)
 
+    def fake_build_dynamic_exit_orders(**kwargs):
+        fake_build_dynamic_exit_orders.called = True
+        return kwargs["entries"], kwargs["exits_series"], kwargs["exit_size_series"]
+
+    fake_build_dynamic_exit_orders.called = False
+    monkeypatch.setattr(
+        analysis.fitness,
+        "build_dynamic_exit_orders",
+        fake_build_dynamic_exit_orders,
+    )
+
     def fake_savefig(path, *args, **kwargs):
         Path(path).write_text("fig")
 
@@ -267,11 +283,15 @@ def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
     metadata = json.loads(meta_path.read_text())
     exit_meta = metadata.get("exit", {})
     assert "params" in exit_meta
-    assert exit_meta["params"].get("sl_break_even_mode") in {
+    params_snapshot = exit_meta["params"]
+    assert params_snapshot.get("sl_break_even_mode") in {
         "none",
         "breakeven",
         "follow_tp",
     }
+    assert params_snapshot.get("timeframe") == "1d"
+    cap_expected = config.get_tp_cap_for_timeframe("1d")
+    assert params_snapshot.get("tp_cap") == pytest.approx(cap_expected)
     breakdown = exit_meta.get("reason_breakdown", {})
     assert breakdown.get(ExitReason.TP1.name, {}).get("fraction")
     metrics = exit_meta.get("metrics", {})
@@ -286,3 +306,7 @@ def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
     kpi_path = tmp_path / "exit_kpi_strip.csv"
     assert kpi_path.exists()
     assert any(kpi_path.name in art for art in metadata.get("artifacts", []))
+    assert fake_build_dynamic_exit_orders.called is True
+    assert last_from_signals.get("accumulate") is getattr(
+        config, "DYNAMIC_EXIT_ACCUMULATE", False
+    )

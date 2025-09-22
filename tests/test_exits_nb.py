@@ -1,8 +1,12 @@
+import copy
+import math
 import time
 
 import numpy as np
 import pytest
 
+import config
+import strategy_rules
 from exits_nb import (
     BreakEvenMode,
     ExitParams,
@@ -27,6 +31,8 @@ def _make_params(**overrides):
         "sl_trailing_enabled": False,
         "sl_trailing_pct": 0.0,
         "max_hold_bars": 0,
+        "tp_cap": float(getattr(config, "MAX_TP_PCT", 0.8)),
+        "timeframe": getattr(config, "TIMEFRAME", None),
     }
     base.update(overrides)
     return ExitParams(**base)
@@ -259,6 +265,135 @@ def test_coerce_exit_params_enforces_hierarchy():
     assert params_multi.tp_pcts[0] < params_multi.tp_pcts[1]
     assert params_multi.tp_pcts[1] <= params_multi.tp_pcts[2]
     assert params_multi.tp_pcts[2] <= params_multi.tp_pcts[3]
+
+
+def test_coerce_exit_params_respects_spacing_and_cap():
+    rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 4,
+            "tp_pct_1": 0.02,
+            "tp_pct_2": 0.02,
+            "tp_pct_3": 0.02,
+            "tp_pct_4": 0.02,
+            "tp_pct_cap": 0.08,
+        },
+    }
+    params = coerce_exit_params(rules, max_hold_bars=10)
+    assert params.tp_pcts[0] >= 0.005 - 1e-9
+    assert params.tp_cap == pytest.approx(0.08)
+    levels = params.tp_pcts[: params.num_tp_levels]
+    for idx in range(1, params.num_tp_levels):
+        prev = levels[idx - 1]
+        current = levels[idx]
+        gap = current - prev
+        min_required = max(0.005, 0.1 * prev)
+        if math.isclose(current, 0.08, rel_tol=1e-6, abs_tol=1e-6):
+            assert current <= pytest.approx(0.08)
+            assert gap >= 0.0
+        else:
+            assert gap + 1e-9 >= min_required
+
+
+def test_coerce_exit_params_applies_timeframe_cap():
+    rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 2,
+            "tp_pct_1": 0.7,
+            "tp_pct_2": 0.9,
+        },
+    }
+    params = coerce_exit_params(rules, max_hold_bars=5, timeframe="4h")
+    levels = params.tp_pcts[: params.num_tp_levels]
+    cap = config.TP_CAP_BY_TIMEFRAME["4h"]
+    assert levels[0] == pytest.approx(cap)
+    assert levels[1] == pytest.approx(cap)
+    assert params.tp_cap == pytest.approx(cap)
+    assert params.timeframe == "4h"
+
+
+def test_coerce_exit_params_randomised_spacing(monkeypatch):
+    rng = np.random.default_rng(123)
+    base_cap = float(getattr(config, "MAX_TP_PCT", 0.8))
+    timeframes = [None, "4h", "1h", "1d", "2h"]
+    for tf in timeframes:
+        tf_source = tf if tf is not None else getattr(config, "TIMEFRAME", None)
+        cap_default = config.get_tp_cap_for_timeframe(tf_source)
+        for _ in range(100):
+            num_tp_levels = int(rng.integers(1, 5))
+            tm_cfg: dict[str, float] = {"num_tp_levels": num_tp_levels}
+            if rng.random() < 0.5:
+                tm_cfg["tp_pct_cap"] = float(rng.uniform(0.02, base_cap))
+            for idx in range(1, 5):
+                if rng.random() < 0.85:
+                    tm_cfg[f"tp_pct_{idx}"] = float(rng.uniform(0.0, base_cap * 1.5))
+            exit_rules = {
+                "stop_loss": {"params": {"value": float(rng.uniform(0.01, 0.1))}},
+                "trade_management": tm_cfg,
+            }
+            params = coerce_exit_params(exit_rules, max_hold_bars=25, timeframe=tf)
+            override_cap = tm_cfg.get("tp_pct_cap")
+            if override_cap is not None:
+                try:
+                    override_cap = float(override_cap)
+                except (TypeError, ValueError):
+                    override_cap = cap_default
+                if not math.isfinite(override_cap) or override_cap <= 0:
+                    override_cap = cap_default
+                expected_cap = min(override_cap, cap_default)
+            else:
+                expected_cap = cap_default
+            assert params.tp_cap == pytest.approx(expected_cap)
+            levels = tuple(params.tp_pcts[: params.num_tp_levels])
+            assert all(levels[i] >= levels[i - 1] for i in range(1, len(levels)))
+            assert all(level <= expected_cap + 1e-9 for level in levels)
+            if levels:
+                assert levels[0] >= 0.005 - 1e-9
+            for idx in range(1, len(levels)):
+                prev = levels[idx - 1]
+                current = levels[idx]
+                min_gap = max(0.005, 0.1 * prev)
+                if current >= expected_cap - 1e-9:
+                    assert current <= expected_cap + 1e-9
+                else:
+                    assert current - prev + 1e-9 >= min_gap
+
+
+def test_tp_gene_bounds_respect_caps(monkeypatch):
+    original_rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    original_timeframe = getattr(config, "TIMEFRAME", "4h")
+    original_initialized = getattr(config, "_INITIALIZED", False)
+    try:
+        cases = list(config.TP_CAP_BY_TIMEFRAME.keys()) + ["2h"]
+        for tf in cases:
+            with monkeypatch.context() as patcher:
+                shared_rules = copy.deepcopy(original_rules)
+                patcher.setattr(
+                    strategy_rules, "STRATEGY_RULES", shared_rules, raising=False
+                )
+                patcher.setattr(config, "STRATEGY_RULES", shared_rules, raising=False)
+                patcher.setattr(config, "TIMEFRAME", tf, raising=False)
+                config._INITIALIZED = False
+                config.initialize_config(force=True)
+                trade_mgmt = shared_rules.get("exit_rules", {}).get(
+                    "trade_management", {}
+                )
+                cap = config.get_tp_cap_for_timeframe(tf)
+                for idx in range(1, 5):
+                    spec = trade_mgmt.get(f"tp_pct_{idx}")
+                    if not isinstance(spec, dict):
+                        continue
+                    low = float(spec.get("low", 0.0))
+                    high = float(spec.get("high", 0.0))
+                    assert high >= low - 1e-12
+                    assert high <= cap + 1e-12
+    finally:
+        config._INITIALIZED = original_initialized
+        config.TIMEFRAME = original_timeframe
+        config.STRATEGY_RULES = original_rules
+        strategy_rules.STRATEGY_RULES = original_rules
+        config.initialize_config(force=True)
 
 
 def test_deterministic_output():

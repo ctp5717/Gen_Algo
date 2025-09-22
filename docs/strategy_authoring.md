@@ -74,10 +74,10 @@ Numba-accelerated simulator in `exits_nb.generate_dynamic_exit_signals_nb` when
     "stop_loss": {"type": "percentage", "params": {"value": {"gene": "stop_loss_pct"}}},
     "trade_management": {
         "num_tp_levels": {"gene": "num_tp_levels", "low": 1, "high": 4, "step": 1},
-        "tp_pct_1": {"gene": "tp_pct_1", "low": 0.005, "high": 0.50, "step": 0.005},
-        "tp_pct_2": {"gene": "tp_pct_2", "low": 0.010, "high": 0.50, "step": 0.005},
-        "tp_pct_3": {"gene": "tp_pct_3", "low": 0.015, "high": 0.50, "step": 0.005},
-        "tp_pct_4": {"gene": "tp_pct_4", "low": 0.020, "high": 0.50, "step": 0.005},
+        "tp_pct_1": {"gene": "tp_pct_1", "low": 0.005, "high": 0.80, "step": 0.005},
+        "tp_pct_2": {"gene": "tp_pct_2", "low": 0.010, "high": 0.80, "step": 0.005},
+        "tp_pct_3": {"gene": "tp_pct_3", "low": 0.015, "high": 0.80, "step": 0.005},
+        "tp_pct_4": {"gene": "tp_pct_4", "low": 0.020, "high": 0.80, "step": 0.005},
         "tp_trailing_enabled": {"gene": "tp_trailing_enabled", "options": [0, 1]},
         "tp_trailing_pct": {"gene": "tp_trailing_pct", "low": 0.002, "high": 0.10, "step": 0.001},
         "sl_break_even_mode": {"gene": "sl_break_even_mode", "options": ["none", "breakeven", "follow_tp"]},
@@ -95,8 +95,18 @@ Key behaviours:
   `tp_pct_*` measured from the entry price and is repaired to be strictly
   increasing on decode. Multiple TPs can fill on the same bar; the simulator
   records fractional exits per reason so metadata captures the full breakdown.
-- Fractional exits are applied via `Portfolio.from_signals(..., size=exit_size,
-  accumulate=True)` so partial fills compound correctly.
+- Fractional exits are applied via
+  `Portfolio.from_signals(..., size=exit_size,
+  accumulate=config.DYNAMIC_EXIT_ACCUMULATE)` so partial fills align with the
+  simulator's position book (the default contract sets `accumulate` to `False`).
+- `config.DYNAMIC_EXIT_SIZE_MODE` controls how simulator fractions are
+  interpreted when building orders. The default, "fraction_base", treats each
+  exit as a proportion of the configured base entry size.
+- Take-profit ladders are repaired to enforce a minimum separation of 0.5% or
+  10% of the previous level (whichever is larger) and are capped at 60% on 4h,
+  70% on 1h, and 80% on 1d timeframes (others fall back to 80%). The GA gene
+  bounds are clamped to these caps during `config.initialize_config()` so the
+  search space matches the repair policy.
 - After a TP fills, break-even adjustments apply immediately:
   - `breakeven` moves the stop to entry once TP1 executes.
   - `follow_tp` ratchets the stop to the most recent TP price.

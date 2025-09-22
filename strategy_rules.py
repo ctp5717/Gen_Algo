@@ -634,25 +634,25 @@ STRATEGY_RULES = {
             "tp_pct_1": {
                 "gene": "tp_pct_1",
                 "low": 0.005,
-                "high": 0.50,
+                "high": 0.80,
                 "step": 0.005,
             },
             "tp_pct_2": {
                 "gene": "tp_pct_2",
                 "low": 0.010,
-                "high": 0.50,
+                "high": 0.80,
                 "step": 0.005,
             },
             "tp_pct_3": {
                 "gene": "tp_pct_3",
                 "low": 0.015,
-                "high": 0.50,
+                "high": 0.80,
                 "step": 0.005,
             },
             "tp_pct_4": {
                 "gene": "tp_pct_4",
                 "low": 0.020,
-                "high": 0.50,
+                "high": 0.80,
                 "step": 0.005,
             },
             "tp_trailing_enabled": {

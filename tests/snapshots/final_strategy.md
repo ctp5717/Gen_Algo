@@ -25,6 +25,12 @@ Note: displayed weights are rounded for readability; the internal sum remains ex
 ## Excluded Assets
 - CCC: class=Gambles not in INCLUDE_CLASSES
 
+## Exit Behaviour
+TP hit rate: 60.0%
+Average TP level reached: 2.00
+Timeout share: 10.0%
+Trailing TP usage: 5.0%
+
 ## Confidence & SRE Summary
 Inherited confidence: Medium (71).
 FSS stability classifications use relative coefficient of variation (RCV; IQR/median) while SRE reports coefficient of variation (CoV), so labels may diverge.

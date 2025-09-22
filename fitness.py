@@ -279,16 +279,57 @@ def _composite_score(
     pf_cap: float,
     nan_fallback: float,
     max_drawdown_fallback: float,
+    exit_usage: Mapping[str, float] | None = None,
+    exit_weights: Mapping[str, float] | None = None,
 ) -> float:
     sortino_val = _sanitize_metric(sortino, nan_fallback)
     pf_val = _sanitize_profit_factor(profit_factor, cap=pf_cap, fallback=nan_fallback)
     drawdown_val = _sanitize_metric(max_drawdown, max_drawdown_fallback)
     drawdown_score = 1 - (drawdown_val / 100.0)
-    return (
+    base_score = (
         sortino_val * weights["sortino_ratio"]
         + pf_val * weights["profit_factor"]
         + drawdown_score * weights["max_drawdown"]
     )
+    if exit_usage and exit_weights:
+        trades = float(exit_usage.get("trades_evaluated", 0.0) or 0.0)
+        tp_events = float(exit_usage.get("tp_trades_evaluated", 0.0) or 0.0)
+        tp_rate = tp_events / trades if trades > 0 else 0.0
+        timeout_rate = float(exit_usage.get("sl_timeout_usage_rate", 0.0) or 0.0)
+        avg_tp_level = float(exit_usage.get("avg_tp_level_reached", 0.0) or 0.0)
+        trailing_rate = float(exit_usage.get("trailing_tp_hit_rate", 0.0) or 0.0)
+
+        timeout_penalty = max(
+            0.0,
+            timeout_rate - float(exit_weights.get("timeout_target", 1.0) or 0.0),
+        )
+        timeout_penalty *= float(exit_weights.get("timeout_weight", 0.0) or 0.0)
+
+        tp_shortfall = max(
+            0.0,
+            float(exit_weights.get("tp_hit_target", 0.0) or 0.0) - tp_rate,
+        )
+        tp_penalty = tp_shortfall * float(exit_weights.get("tp_hit_weight", 0.0) or 0.0)
+
+        level_shortfall = max(
+            0.0,
+            float(exit_weights.get("avg_tp_level_target", 0.0) or 0.0) - avg_tp_level,
+        )
+        level_penalty = level_shortfall * float(
+            exit_weights.get("avg_tp_level_weight", 0.0) or 0.0
+        )
+
+        trailing_shortfall = max(
+            0.0,
+            float(exit_weights.get("trailing_tp_target", 0.0) or 0.0) - trailing_rate,
+        )
+        trailing_penalty = trailing_shortfall * float(
+            exit_weights.get("trailing_tp_weight", 0.0) or 0.0
+        )
+
+        base_score -= timeout_penalty + tp_penalty + level_penalty + trailing_penalty
+
+    return base_score
 
 
 def print_floor_failures(counter: Counter):
@@ -323,8 +364,13 @@ class FitnessEvaluator:
             self.last_exit_params = None
             self.last_exit_summary = None
             self.last_exit_metrics = None
+            exit_usage_metrics: Mapping[str, float] | None = None
             if config.USE_DYNAMIC_EXIT_SIMULATOR:
-                exit_params = coerce_exit_params(exit_rules, config.MAX_HOLD_PERIOD)
+                exit_params = coerce_exit_params(
+                    exit_rules,
+                    config.MAX_HOLD_PERIOD,
+                    getattr(config, "TIMEFRAME", None),
+                )
                 price_map = {
                     "close": self.ohlc_data["Close"].to_numpy(dtype=float),
                     "high": self.ohlc_data.get(
@@ -373,16 +419,17 @@ class FitnessEvaluator:
                     asset_label=asset_label,
                 )
                 summary = summarise_exit_reasons(exit_result, [asset_label])
-                metrics = compute_exit_metrics(exit_result, [asset_label])
+                exit_metrics_map = compute_exit_metrics(exit_result, [asset_label])
                 self.last_exit_summary = summary
-                self.last_exit_metrics = metrics
+                self.last_exit_metrics = exit_metrics_map
                 self.last_exit_params = exit_params.as_dict()
+                exit_usage_metrics = exit_metrics_map.get(asset_label)
                 portfolio = vbt.Portfolio.from_signals(
                     close=self.ohlc_data["Close"],
                     entries=entries_active,
                     exits=exits_series,
                     size=size_series,
-                    accumulate=False,
+                    accumulate=getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False),
                     fees=config.FEES,
                     freq=config.to_pandas_freq(config.TIMEFRAME),
                 )
@@ -435,6 +482,7 @@ class FitnessEvaluator:
 
             weights = config.FITNESS_WEIGHTS
             cap = getattr(config, "MULTI_ASSET", {}).get("winsorize_pf_cap", 5.0)
+            exit_weights = getattr(config, "FITNESS_EXIT_USAGE", None)
             score = _composite_score(
                 metrics.get("sortino"),
                 metrics.get("profit_factor"),
@@ -443,6 +491,8 @@ class FitnessEvaluator:
                 pf_cap=cap,
                 nan_fallback=0.0,
                 max_drawdown_fallback=100.0,
+                exit_usage=exit_usage_metrics,
+                exit_weights=exit_weights,
             )
 
             return score if np.isfinite(score) else -1.0
@@ -736,7 +786,11 @@ class MultiAssetFitnessEvaluator:
         exit_metrics: dict[str, float] = {}
         exit_params_dict: dict | None = None
         if config.USE_DYNAMIC_EXIT_SIMULATOR:
-            exit_params = coerce_exit_params(exit_rules, config.MAX_HOLD_PERIOD)
+            exit_params = coerce_exit_params(
+                exit_rules,
+                config.MAX_HOLD_PERIOD,
+                getattr(config, "TIMEFRAME", None),
+            )
             price_map = {
                 "close": ohlc["Close"].to_numpy(dtype=float),
                 "high": ohlc.get("High", ohlc["Close"]).to_numpy(dtype=float),
@@ -785,7 +839,7 @@ class MultiAssetFitnessEvaluator:
                 entries=entries_active,
                 exits=exits_series,
                 size=size_series,
-                accumulate=False,
+                accumulate=getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False),
                 fees=config.FEES,
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )
@@ -957,6 +1011,7 @@ class MultiAssetFitnessEvaluator:
         cap = self.settings.get("winsorize_pf_cap", 5.0)
         sources_recorded = False
         run_metric_sources: dict[str, str] | None = None
+        exit_weights = getattr(config, "FITNESS_EXIT_USAGE", None)
 
         for ticker in self._sorted_tickers:
             stats_raw = evaluation_results.get(ticker, self._empty_stats())
@@ -971,6 +1026,9 @@ class MultiAssetFitnessEvaluator:
             weight = asset_weights_cfg.get(ticker, 1.0)
             pf_raw = stats.get("profit_factor")
             pf_capped = _sanitize_profit_factor(pf_raw, cap=cap, fallback=nan_fallback)
+            exit_usage = stats.get("exit_metrics")
+            if not isinstance(exit_usage, Mapping):
+                exit_usage = None
 
             if trades < per_asset_min:
                 if self.settings.get("zero_trade_policy") == "penalize":
@@ -1046,6 +1104,8 @@ class MultiAssetFitnessEvaluator:
                     pf_cap=cap,
                     nan_fallback=nan_fallback,
                     max_drawdown_fallback=100.0,
+                    exit_usage=exit_usage,
+                    exit_weights=exit_weights,
                 )
 
             per_asset_metrics.append(val)
