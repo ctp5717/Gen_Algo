@@ -46,7 +46,9 @@ class _GeneAccumulator:
         self.gene_map[idx] = entry
 
 
-def _traverse_rules(config: Any, path: List[Any], accumulator: _GeneAccumulator) -> None:
+def _traverse_rules(
+    config: Any, path: List[Any], accumulator: _GeneAccumulator
+) -> None:
     """Depth-first traversal that collects gene declarations."""
 
     if isinstance(config, Mapping):
