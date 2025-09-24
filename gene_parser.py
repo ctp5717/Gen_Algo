@@ -1,11 +1,9 @@
 # gene_parser.py
-"""
-Gene Parsing Utilities
-This module contains helper functions for working with strategy rules.
-"""
+"""Gene Parsing Utilities used to discover GA genes from strategy rules."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from numbers import Number
 from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
 
@@ -14,101 +12,140 @@ GeneSpace = List[GeneSpaceItem]
 GeneMap = Dict[int, Dict[str, Any]]
 
 
+class _GeneAccumulator:
+    """State container that records discovered gene definitions."""
+
+    def __init__(self, vote_enabled: bool) -> None:
+        self.vote_enabled = vote_enabled
+        self.gene_space: GeneSpace = []
+        self.gene_map: GeneMap = {}
+        self.gene_types: List[type] = []
+        self._index = 0
+
+    def add_gene(
+        self,
+        *,
+        path: List[Any],
+        key: Any,
+        gene_info: Mapping[str, Any],
+    ) -> None:
+        space_item, gene_type, options = _normalise_gene_spec(key, gene_info)
+        idx = self._index
+        self._index += 1
+
+        self.gene_space.append(space_item)
+        self.gene_types.append(gene_type)
+
+        entry: Dict[str, Any] = {
+            "name": gene_info["gene"],
+            "path": path,
+            "type": gene_type,
+        }
+        if options is not None:
+            entry["options"] = options
+        self.gene_map[idx] = entry
+
+
+def _traverse_rules(
+    config: Any, path: List[Any], accumulator: _GeneAccumulator
+) -> None:
+    """Depth-first traversal that collects gene declarations."""
+
+    if isinstance(config, Mapping):
+        if config.get("is_active") is False:
+            return
+        for key, value in config.items():
+            current_path = path + [key]
+            if _is_gene_declaration(value):
+                if key == "vote_threshold" and not accumulator.vote_enabled:
+                    continue
+                accumulator.add_gene(path=current_path, key=key, gene_info=value)
+                continue
+            if isinstance(value, (Mapping, list, tuple)):
+                _traverse_rules(value, current_path, accumulator)
+        return
+
+    if isinstance(config, (list, tuple)):
+        for index, item in enumerate(config):
+            _traverse_rules(item, path + [index], accumulator)
+
+
+def _is_gene_declaration(candidate: Any) -> bool:
+    return (
+        isinstance(candidate, Mapping)
+        and candidate.get("is_active", True) is not False
+        and "gene" in candidate
+    )
+
+
+def _combination_allows_vote(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.upper() == "VOTE"
+    if isinstance(value, Mapping):
+        return bool(value.get("gene") or value.get("options"))
+    return False
+
+
+def _count_active_conditions(entry_rules: Mapping[str, Any]) -> int:
+    conditions = entry_rules.get("conditions", [])
+    active = [c for c in conditions if c.get("is_active", True)]
+    return len(active) or 1
+
+
+def _clamp_vote_threshold_gene(entry_rules: Mapping[str, Any], n_active: int) -> None:
+    if n_active <= 0:
+        n_active = 1
+
+    vt_gene = entry_rules.get("vote_threshold")
+    if not isinstance(vt_gene, Mapping) or not vt_gene.get("gene"):
+        return
+
+    vt_copy = dict(vt_gene)
+    raw_high = vt_copy.get("high")
+    high = n_active if raw_high is None else min(raw_high, n_active)
+    low = vt_copy.get("low", 1)
+    low = max(1, min(low, high))
+
+    vt_copy["high"] = high
+    vt_copy["low"] = low
+    entry_rules["vote_threshold"] = vt_copy
+
+
+def _normalise_gene_spec(
+    key: Any, gene_info: Mapping[str, Any]
+) -> Tuple[GeneSpaceItem, type, List[Any] | None]:
+    if "options" in gene_info:
+        options = list(gene_info["options"])
+        gene_type = type(options[0]) if options else str
+        return options, gene_type, options
+
+    if key == "vote_threshold":
+        gene_type = int
+    else:
+        gene_type = int if isinstance(gene_info.get("step", 1.0), int) else float
+
+    space_dict: Dict[str, Any] = {
+        "low": gene_info.get("low", 1),
+        "high": gene_info.get("high"),
+    }
+    if "step" in gene_info:
+        space_dict["step"] = gene_info["step"]
+    return space_dict, gene_type, None
+
+
 def parse_genes_from_config(
     rules: Dict[str, Any],
 ) -> Tuple[GeneSpace, GeneMap, List[type]]:
-    """Parse STRATEGY_RULES and return gene_space, gene_map, and gene_types.
-
-    Only rules with ``is_active`` set to ``True`` will be considered when
-    searching for genes.
-    """
-    gene_space: GeneSpace = []
-    gene_map: GeneMap = {}
-    gene_types: List[type] = []
-    gene_index = 0
+    """Parse ``STRATEGY_RULES`` and return ``gene_space``, ``gene_map`` and types."""
 
     entry_rules = rules.get("entry_rules", {})
-    active_conditions = [
-        c for c in entry_rules.get("conditions", []) if c.get("is_active", True)
-    ]
-    n_active = len(active_conditions) or 1
-    comb_logic = entry_rules.get("combination_logic", "AND")
-    if str(comb_logic).upper() == "VOTE" or (
-        isinstance(comb_logic, dict)
-        and (comb_logic.get("gene") or comb_logic.get("options"))
-    ):
-        vt_gene = entry_rules.get("vote_threshold")
-        if isinstance(vt_gene, dict) and vt_gene.get("gene"):
-            high = vt_gene.get("high", n_active)
-            vt_gene["high"] = min(high, n_active)
-            vt_gene["low"] = max(1, min(vt_gene.get("low", 1), n_active))
-            entry_rules["vote_threshold"] = vt_gene
+    vote_enabled = _combination_allows_vote(entry_rules.get("combination_logic"))
+    if vote_enabled:
+        _clamp_vote_threshold_gene(entry_rules, _count_active_conditions(entry_rules))
 
-    def find_genes(sub_config: Any, path: List[Any]) -> None:
-        nonlocal gene_index
-        # Skip entire branch if rule is explicitly inactive
-        if isinstance(sub_config, dict) and sub_config.get("is_active") is False:
-            return
-
-        if isinstance(sub_config, dict):
-            for key, value in sub_config.items():
-                current_path = path + [key]
-                if (
-                    isinstance(value, dict)
-                    and value.get("is_active", True) is not False
-                    and "gene" in value
-                ):
-                    gene_info = value
-                    gene_name = gene_info["gene"]
-
-                    if key == "vote_threshold" and not (
-                        str(comb_logic).upper() == "VOTE"
-                        or (
-                            isinstance(comb_logic, dict)
-                            and (comb_logic.get("gene") or comb_logic.get("options"))
-                        )
-                    ):
-                        continue
-
-                    if "options" in gene_info:
-                        options = list(gene_info["options"])
-                        space_item: GeneSpaceItem = options
-                        gene_type = type(options[0]) if options else str
-                    else:
-                        if key == "vote_threshold":
-                            gene_type = int
-                        else:
-                            gene_type = (
-                                int
-                                if isinstance(gene_info.get("step", 1.0), int)
-                                else float
-                            )
-                        high = gene_info.get("high")
-                        low = gene_info.get("low", 1)
-                        space_dict: Dict[str, Any] = {"low": low, "high": high}
-                        if "step" in gene_info:
-                            space_dict["step"] = gene_info["step"]
-                        space_item = space_dict
-
-                    gene_space.append(space_item)
-                    gene_types.append(gene_type)
-                    gene_map[gene_index] = {
-                        "name": gene_name,
-                        "path": current_path,
-                        "type": gene_type,
-                    }
-                    if "options" in gene_info:
-                        gene_map[gene_index]["options"] = options
-                    gene_index += 1
-                elif isinstance(value, dict) or isinstance(value, list):
-                    find_genes(value, current_path)
-        elif isinstance(sub_config, list):
-            for i, item in enumerate(sub_config):
-                current_path = path + [i]
-                find_genes(item, current_path)
-
-    find_genes(rules, [])
-    return gene_space, gene_map, gene_types
+    accumulator = _GeneAccumulator(vote_enabled)
+    _traverse_rules(rules, [], accumulator)
+    return accumulator.gene_space, accumulator.gene_map, accumulator.gene_types
 
 
 def _is_numeric_gene_value(value: Any) -> bool:
