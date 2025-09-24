@@ -192,12 +192,9 @@ def test_trade_management_genes_present():
         "tp_pct_2",
         "tp_pct_3",
         "tp_pct_4",
-        "tp_trailing_enabled",
         "tp_trailing_pct",
         "sl_break_even_mode",
-        "sl_timeout_enabled",
         "sl_timeout_bars",
-        "sl_trailing_enabled",
         "sl_trailing_pct",
     }
     assert expected.issubset(names)

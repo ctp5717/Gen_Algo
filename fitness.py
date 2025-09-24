@@ -60,6 +60,9 @@ logger = logging.getLogger(__name__)
 DynamicExitSizeMode = Literal["fraction_base", "fraction_current", "absolute"]
 
 
+ConfigError = getattr(config, "ConfigurationError", RuntimeError)
+
+
 def build_dynamic_exit_orders(
     *,
     entries: pd.Series,
@@ -366,32 +369,45 @@ class FitnessEvaluator:
             self.last_exit_metrics = None
             exit_usage_metrics: Mapping[str, float] | None = None
             if config.USE_DYNAMIC_EXIT_SIMULATOR:
-                exit_params = coerce_exit_params(
-                    exit_rules,
-                    config.MAX_HOLD_PERIOD,
-                    getattr(config, "TIMEFRAME", None),
+                base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
+                size_mode: DynamicExitSizeMode = getattr(
+                    config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base"
                 )
-                price_map = {
-                    "close": self.ohlc_data["Close"].to_numpy(dtype=float),
-                    "high": self.ohlc_data.get(
-                        "High", self.ohlc_data["Close"]
-                    ).to_numpy(dtype=float),
-                    "low": self.ohlc_data.get("Low", self.ohlc_data["Close"]).to_numpy(
-                        dtype=float
-                    ),
-                }
-                entry_array = entries.to_numpy(dtype=bool)
-                telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
-                collect_traces = telemetry_cfg.get(
-                    "collect_traces", telemetry_cfg.get("enabled", True)
-                )
-                exit_result = generate_dynamic_exit_signals_nb(
-                    entry_array,
-                    price_map,
-                    exit_params,
-                    seed=getattr(config, "SEED", None),
-                    collect_traces=collect_traces,
-                )
+                raw_label = getattr(config, "TICKER", "asset")
+                asset_label = str(raw_label or "asset")
+                try:
+                    exit_params = coerce_exit_params(
+                        exit_rules,
+                        config.MAX_HOLD_PERIOD,
+                        getattr(config, "TIMEFRAME", None),
+                    )
+                    price_map = {
+                        "close": self.ohlc_data["Close"].to_numpy(dtype=float),
+                        "high": self.ohlc_data.get(
+                            "High", self.ohlc_data["Close"]
+                        ).to_numpy(dtype=float),
+                        "low": self.ohlc_data.get("Low", self.ohlc_data["Close"]).to_numpy(
+                            dtype=float
+                        ),
+                    }
+                    entry_array = entries.to_numpy(dtype=bool)
+                    telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+                    collect_traces = telemetry_cfg.get(
+                        "collect_traces", telemetry_cfg.get("enabled", True)
+                    )
+                    exit_result = generate_dynamic_exit_signals_nb(
+                        entry_array,
+                        price_map,
+                        exit_params,
+                        seed=getattr(config, "SEED", None),
+                        collect_traces=collect_traces,
+                    )
+                except ValueError as exc:
+                    logger.debug("Invalid exit configuration for %s: %s", asset_label, exc)
+                    self.last_exit_summary = None
+                    self.last_exit_metrics = None
+                    self.last_exit_params = None
+                    return -999.0
                 exits_mask = np.asarray(exit_result.exits, dtype=bool)
                 residual_size = exit_result.exit_size[~exits_mask]
                 if residual_size.size and not np.allclose(
@@ -404,12 +420,6 @@ class FitnessEvaluator:
                 exit_size_series = pd.Series(
                     exit_result.exit_size, index=entries.index, dtype=float
                 )
-                base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
-                size_mode: DynamicExitSizeMode = getattr(
-                    config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base"
-                )
-                raw_label = getattr(config, "TICKER", "asset")
-                asset_label = str(raw_label or "asset")
                 entries_active, exits_series, size_series = build_dynamic_exit_orders(
                     entries=entries,
                     exits_series=exits_series,
@@ -424,12 +434,21 @@ class FitnessEvaluator:
                 self.last_exit_metrics = exit_metrics_map
                 self.last_exit_params = exit_params.as_dict()
                 exit_usage_metrics = exit_metrics_map.get(asset_label)
+                accumulate_flag = bool(
+                    getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False)
+                )
+                if not accumulate_flag:
+                    raise ConfigError(
+                        "Dynamic exit simulator requires"
+                        " config.DYNAMIC_EXIT_ACCUMULATE=True for staged exits"
+                    )
                 portfolio = vbt.Portfolio.from_signals(
                     close=self.ohlc_data["Close"],
                     entries=entries_active,
                     exits=exits_series,
                     size=size_series,
-                    accumulate=getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False),
+                    accumulate=accumulate_flag,
+                    size_type="amount",
                     fees=config.FEES,
                     freq=config.to_pandas_freq(config.TIMEFRAME),
                 )
@@ -786,11 +805,19 @@ class MultiAssetFitnessEvaluator:
         exit_metrics: dict[str, float] = {}
         exit_params_dict: dict | None = None
         if config.USE_DYNAMIC_EXIT_SIMULATOR:
-            exit_params = coerce_exit_params(
-                exit_rules,
-                config.MAX_HOLD_PERIOD,
-                getattr(config, "TIMEFRAME", None),
-            )
+            try:
+                exit_params = coerce_exit_params(
+                    exit_rules,
+                    config.MAX_HOLD_PERIOD,
+                    getattr(config, "TIMEFRAME", None),
+                )
+            except ValueError as exc:
+                logger.debug(
+                    "Invalid exit configuration for %s: %s", asset_label, exc
+                )
+                return self._build_evaluation_record(
+                    reason="invalid_exit_config", detail=str(exc)
+                )
             price_map = {
                 "close": ohlc["Close"].to_numpy(dtype=float),
                 "high": ohlc.get("High", ohlc["Close"]).to_numpy(dtype=float),
@@ -834,12 +861,21 @@ class MultiAssetFitnessEvaluator:
             exit_summary = summary_map.get(asset_label, {})
             exit_metrics = metrics_map.get(asset_label, {})
             exit_params_dict = exit_params.as_dict()
+            accumulate_flag = bool(
+                getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False)
+            )
+            if not accumulate_flag:
+                raise ConfigError(
+                    "Dynamic exit simulator requires"
+                    " config.DYNAMIC_EXIT_ACCUMULATE=True for staged exits"
+                )
             portfolio = vbt.Portfolio.from_signals(
                 close=ohlc["Close"],
                 entries=entries_active,
                 exits=exits_series,
                 size=size_series,
-                accumulate=getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False),
+                accumulate=accumulate_flag,
+                size_type="amount",
                 fees=config.FEES,
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )

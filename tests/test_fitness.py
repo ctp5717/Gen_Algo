@@ -33,6 +33,36 @@ def test_exception_logging(capsys, monkeypatch):
     assert score == -999.0
 
 
+def test_invalid_exit_config_penalised(monkeypatch):
+    ohlc = pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+    entries = pd.Series([True, False, False], index=ohlc.index)
+
+    monkeypatch.setattr(
+        fitness.engine, "process_strategy_rules", lambda *a, **k: entries
+    )
+    monkeypatch.setitem(fitness.config.FITNESS_WEIGHTS, "min_trades", 0)
+    monkeypatch.setattr(
+        fitness.config, "USE_DYNAMIC_EXIT_SIMULATOR", True, raising=False
+    )
+    monkeypatch.setattr(fitness.config, "MAX_HOLD_PERIOD", 10, raising=False)
+    monkeypatch.setattr(fitness.config, "TIMEFRAME", "1h", raising=False)
+
+    invalid_rules = {
+        "exit_rules": {
+            "stop_loss": {"params": {"value": 0.05}},
+            "trade_management": {
+                "num_tp_levels": 4,
+                "tp_pct_cap": 0.01,
+            },
+        }
+    }
+
+    evaluator = fitness.FitnessEvaluator(ohlc, invalid_rules, {})
+    score = evaluator(None, [], 0)
+
+    assert score == -999.0
+
+
 def test_composite_score_matches_helper(monkeypatch):
     ohlc = pd.DataFrame({"Close": [1.0, 1.1, 1.2]})
     entries = pd.Series([True, False, False], index=ohlc.index)

@@ -25,10 +25,9 @@ def test_exit_genes_exhibit_variance_after_ga_run():
         "tp_pct_2",
         "tp_pct_3",
         "tp_pct_4",
+        "tp_trailing_pct",
         "sl_timeout_bars",
-        "sl_timeout_enabled",
         "sl_trailing_pct",
-        "sl_trailing_enabled",
         "sl_break_even_mode",
     ]
 

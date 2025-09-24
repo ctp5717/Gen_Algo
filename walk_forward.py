@@ -464,6 +464,7 @@ def run_walk_forward_validation(
             for i in range(len(decoded_solution))
         }
         winning_params = _round_floats(winning_params)
+        resolved_params: dict | None = None
 
         rules = inject_genes_into_rules(STRATEGY_RULES, gene_map, best_solution)
         if multi:
@@ -520,6 +521,8 @@ def run_walk_forward_validation(
             )
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
+            if isinstance(details, dict):
+                resolved_params = details.get("exit_params")
             if policy_val == "soft_penalty":
                 pen = _normalize_trade_floor_penalty(
                     details.get("penalties", {}).get("trade_floor")
@@ -602,6 +605,23 @@ def run_walk_forward_validation(
                 ga_gene_space,
                 champion_settings,
             )
+            resolved_snapshot = (
+                _round_floats(resolved_params) if resolved_params else None
+            )
+            if resolved_snapshot:
+                print("Resolved Exit Params:")
+                if isinstance(resolved_snapshot, dict):
+                    for asset in sorted(resolved_snapshot):
+                        payload = resolved_snapshot[asset]
+                        print(f"  [{asset}]")
+                        if isinstance(payload, dict):
+                            for key in sorted(payload):
+                                value = payload[key]
+                                print(f"    {key}: {value}")
+                        else:
+                            print(f"    {payload}")
+                else:
+                    print(f"  {resolved_snapshot}")
             results.append(
                 {
                     "Window": idx,
@@ -616,6 +636,7 @@ def run_walk_forward_validation(
                     "Assets Traded": details.get("assets_traded"),
                     "Coverage Penalty": cov_pen,
                     "Params": winning_params,
+                    "Resolved Params": resolved_snapshot,
                     "champion_status": champ_status,
                 }
             )
@@ -715,6 +736,7 @@ def run_walk_forward_validation(
         # Evaluate champion on validation data using composite fitness
         val_evaluator = fitness.FitnessEvaluator(test_data, STRATEGY_RULES, gene_map)
         validation_score = val_evaluator(None, best_solution, 0)
+        resolved_params = val_evaluator.last_exit_params
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
         champion_pool, champ_status = _update_champion_pool(
             champion_pool,
@@ -723,6 +745,16 @@ def run_walk_forward_validation(
             ga_gene_space,
             champion_settings,
         )
+
+        resolved_snapshot = _round_floats(resolved_params) if resolved_params else None
+        if resolved_snapshot:
+            print("Resolved Exit Params:")
+            if isinstance(resolved_snapshot, dict):
+                for key in sorted(resolved_snapshot):
+                    value = resolved_snapshot[key]
+                    print(f"  {key}: {value}")
+            else:
+                print(f"  {resolved_snapshot}")
 
         per_asset_records.append(
             {
@@ -745,6 +777,7 @@ def run_walk_forward_validation(
                 "Win Rate [%]": win_rate,
                 "Fitness": validation_score,
                 "Params": winning_params,
+                "Resolved Params": resolved_snapshot,
                 "champion_status": champ_status,
             }
         )
@@ -777,6 +810,7 @@ def run_walk_forward_validation(
                 "Assets Traded",
                 "Coverage Penalty",
                 "Params",
+                "Resolved Params",
             ]
         else:
             cols = [
@@ -787,6 +821,7 @@ def run_walk_forward_validation(
                 "Sortino Ratio",
                 "Win Rate [%]",
                 "Params",
+                "Resolved Params",
             ]
         print(results_df[cols].to_string(index=False))
 
@@ -817,6 +852,7 @@ def run_walk_forward_validation(
                 "fold_id": r.get("Window"),
                 "validation_fitness": r.get("Fitness"),
                 "params": r.get("Params"),
+                "resolved_params": r.get("Resolved Params"),
                 "champion_status": r.get("champion_status"),
             }
             for r in raw_folds
@@ -869,6 +905,7 @@ def run_walk_forward_validation(
             "fold_id": r.get("Window"),
             "validation_fitness": r.get("Fitness"),
             "params": r.get("Params"),
+            "resolved_params": r.get("Resolved Params"),
             "champion_status": r.get("champion_status"),
         }
         for r in raw_folds

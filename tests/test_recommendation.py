@@ -96,13 +96,15 @@ def test_load_wf_summary_with_string_param(tmp_path):
             {
                 "fold_id": 0,
                 "validation_fitness": 1.0,
-                "params": {"sl_break_even_mode": "none", "tp_trailing_enabled": 1},
+                "params": {"sl_break_even_mode": "none", "tp_trailing_pct": 0.02},
+                "resolved_params": {"tp_trailing_pct": 0.02},
             }
         ],
     }
     (wf / "walk_forward_summary.json").write_text(json.dumps(summary))
     result = load_wf_summary(wf / "walk_forward_summary.json")
     assert result.folds[0].params["sl_break_even_mode"] == "none"
+    assert result.folds[0].resolved_params == {"tp_trailing_pct": 0.02}
 
 
 def test_load_wf_summary_bad_champion_status(tmp_path):

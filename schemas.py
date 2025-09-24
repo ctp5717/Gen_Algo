@@ -6,7 +6,7 @@ import ast
 import csv
 import json
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, TypeAdapter, field_validator
 
@@ -26,6 +26,7 @@ class Fold(BaseModel):
     validation_fitness: float
     params: Dict[str, float | int | str | bool | None]
     champion_status: Optional[Literal["Elite", "Viable", "Discarded"]] = None
+    resolved_params: Optional[Dict[str, Any]] = None
 
     @field_validator("champion_status", mode="before")
     @classmethod
@@ -100,12 +101,21 @@ def load_wf_summary(path: str | Path) -> WalkForwardSummaryV1:
                     params = {}
             else:
                 params = p or {}
+        resolved = f.get("resolved_params")
+        if resolved is None:
+            resolved = f.get("Resolved Params")
+        if isinstance(resolved, str):
+            try:
+                resolved = ast.literal_eval(resolved)
+            except Exception:
+                resolved = {}
         mapped.append(
             {
                 "fold_id": fold_id,
                 "validation_fitness": validation_fitness,
                 "params": params,
                 "champion_status": f.get("champion_status"),
+                "resolved_params": resolved,
             }
         )
     raw["folds"] = mapped

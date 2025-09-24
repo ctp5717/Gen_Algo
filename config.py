@@ -174,26 +174,35 @@ USE_DYNAMIC_EXIT_SIMULATOR = True
 # Dynamic-exit sizing contract. ``DYNAMIC_EXIT_SIZE_MODE`` controls how the
 # simulator's fractional exit sizes are interpreted when building portfolio
 # orders and ``DYNAMIC_EXIT_ACCUMULATE`` determines whether positions are
-# accumulated or replaced inside ``Portfolio.from_signals``.
+# accumulated or replaced inside ``Portfolio.from_signals``. Order sizes are
+# forwarded to vectorbt as raw unit amounts using ``size_type="amount"`` so
+# ``BASE_ENTRY_SIZE`` sets the literal quantity for each entry.
 DYNAMIC_EXIT_SIZE_MODE = "fraction_base"
-DYNAMIC_EXIT_ACCUMULATE = False
+DYNAMIC_EXIT_ACCUMULATE = True
+VALID_DYNAMIC_EXIT_SIZE_MODES = frozenset({"fraction_base", "fraction_current", "absolute"})
 
 # Take-profit ladder guardrails. ``MAX_TP_PCT`` acts as the universal fallback
 # cap while ``TP_CAP_BY_TIMEFRAME`` can narrow the ceiling for specific
 # timeframes where extreme ladders are impractical.
-MAX_TP_PCT = 0.80
+MAX_TP_PCT = 0.50
 TP_CAP_BY_TIMEFRAME = {
-    "4h": 0.60,
-    "1h": 0.70,
-    "1d": 0.80,
+    "4h": 0.50,
+    "1h": 0.50,
+    "1d": 0.50,
 }
+
+# Minimum distance enforced between sequential TP levels when repairing ladders.
+TP_MIN_GAP = 0.005
+
+# Cache to avoid repeating TP cap warnings per timeframe/high/low tuple.
+_TP_CAP_WARNING_CACHE: set[tuple[str, float, int, int]] = set()
 
 # Telemetry capture for exit simulation. Disable to skip per-bar traces while
 # keeping aggregated summaries; CSV output remains gated by the explicit flag.
 EXIT_TELEMETRY = {
     "enabled": True,
     "collect_traces": False,
-    "write_reason_breakdown_csv": False,
+    "write_reason_breakdown_csv": True,
 }
 
 # When True, preflight computes all indicators to surface latent errors.
@@ -351,6 +360,50 @@ def _apply_tp_caps(timeframe: str) -> None:
 
     cap = get_tp_cap_for_timeframe(timeframe)
     trade_mgmt = STRATEGY_RULES.get("exit_rules", {}).get("trade_management", {})
+    min_gap = TP_MIN_GAP
+    levels_spec = trade_mgmt.get("num_tp_levels")
+    if isinstance(levels_spec, dict):
+        try:
+            high = int(levels_spec.get("high", 1))
+        except (TypeError, ValueError):
+            high = 1
+        try:
+            low = int(levels_spec.get("low", 1))
+        except (TypeError, ValueError):
+            low = 1
+        max_feasible = int(math.floor((cap + 1e-12) / min_gap))
+        warn_key = (str(timeframe), float(cap), int(high), int(low))
+        if max_feasible < 1:
+            if warn_key not in _TP_CAP_WARNING_CACHE:
+                warnings.warn(
+                    (
+                        "TP cap %.3f for timeframe '%s' is below the minimum %.3f "
+                        "required for even one level"
+                    )
+                    % (cap, timeframe, min_gap),
+                    UserWarning,
+                    stacklevel=2,
+                )
+                _TP_CAP_WARNING_CACHE.add(warn_key)
+            levels_spec["high"] = 1
+            levels_spec["low"] = 1
+        else:
+            allowed_levels = max(1, min(high, max_feasible))
+            if allowed_levels < high:
+                levels_spec["high"] = allowed_levels
+                if low > allowed_levels:
+                    levels_spec["low"] = allowed_levels
+                if warn_key not in _TP_CAP_WARNING_CACHE:
+                    warnings.warn(
+                        (
+                            "TP cap %.3f for timeframe '%s' supports at most %d TP levels "
+                            "(requested high=%d); reducing bounds"
+                        )
+                        % (cap, timeframe, allowed_levels, high),
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    _TP_CAP_WARNING_CACHE.add(warn_key)
     for idx in range(1, 1 + 4):
         spec = trade_mgmt.get(f"tp_pct_{idx}")
         if isinstance(spec, dict):
@@ -380,6 +433,14 @@ def initialize_config(force: bool = False) -> None:
 
     now = datetime.now()
     today = now
+
+    if USE_DYNAMIC_EXIT_SIMULATOR:
+        mode = str(DYNAMIC_EXIT_SIZE_MODE)
+        if mode not in VALID_DYNAMIC_EXIT_SIZE_MODES:
+            raise ConfigurationError(
+                "DYNAMIC_EXIT_SIZE_MODE must be one of %s"
+                % ", ".join(sorted(VALID_DYNAMIC_EXIT_SIZE_MODES))
+            )
 
     tf = str(TIMEFRAME)
     tf_lower = tf.lower()
