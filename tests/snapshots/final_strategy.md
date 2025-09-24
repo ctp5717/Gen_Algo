@@ -2,7 +2,7 @@
 ## Overview
 Confidence: Medium (71)
 Fold selection: Elite/Viable
-Recency weighting: disabled
+Recency weighting: enabled
 Weighting scheme: risk_adjusted — weights ∝ (performance / volatility) × consistency (cap 0.35, floor 0.02)
 ## Recommended Parameters
 | Gene | Value | Stability | Distribution |
@@ -40,7 +40,7 @@ Weight cap further relaxed to 0.500 for feasibility.
 ```json
 {
   "ASSET_WEIGHTS_OVERRIDE": {},
-  "FOLD_DECAY_RATE": 0.0,
+  "FOLD_DECAY_RATE": 0.135,
   "INCLUDE_CLASSES": [
     "Stars",
     "Stalwarts"
@@ -67,7 +67,7 @@ Weight cap further relaxed to 0.500 for feasibility.
   "SHOW_PARAM_DISTS": true,
   "SHOW_RECENCY_HALFLIFE": true,
   "SHRINK_TO_EQUAL": 0.0,
-  "USE_RECENCY_WEIGHTING": false,
+  "USE_RECENCY_WEIGHTING": true,
   "WEIGHTING_SCHEME": "risk_adjusted",
   "WEIGHT_SENSITIVITY_RATIO_THRESHOLD": 0.25,
   "WEIGHT_SENSITIVITY_THRESHOLD": 0.05
