@@ -12,7 +12,11 @@ sys.path.insert(0, str(ROOT))
 sys.modules.setdefault("pandas_ta", types.ModuleType("pandas_ta"))
 sys.modules.setdefault("vectorbt", types.ModuleType("vectorbt"))
 
-from gene_parser import parse_genes_from_config  # noqa: E402
+from gene_parser import (  # noqa: E402
+    decode_solution,
+    parse_genes_from_config,
+    prepare_ga_inputs,
+)
 from strategy_rules import STRATEGY_RULES  # noqa: E402
 
 
@@ -99,9 +103,33 @@ def test_parse_top_level_combination_genes():
     names = [info["name"] for info in gene_map.values()]
     assert "logic" in names
     assert "vt" in names
-    assert {"options": ["AND", "OR"]} in gene_space
-    assert any(gs.get("low") == 1 and gs.get("high") == 1 for gs in gene_space)
+    assert ["AND", "OR"] in gene_space
+    assert any(
+        isinstance(gs, dict) and gs.get("low") == 1 and gs.get("high") == 1
+        for gs in gene_space
+    )
     assert str in gene_types and int in gene_types
+
+
+def test_option_genes_emit_sequence_space():
+    space, _, _ = parse_genes_from_config(STRATEGY_RULES)
+    assert all(not (isinstance(spec, dict) and "options" in spec) for spec in space)
+
+
+def test_prepare_ga_inputs_encodes_string_options():
+    gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+    ga_space, ga_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
+
+    idx = next(
+        i for i, info in gene_map.items() if info["name"] == "sl_break_even_mode"
+    )
+
+    assert ga_space[idx] == [0, 1, 2]
+    assert ga_types[idx] is int
+
+    decoded = decode_solution([0] * len(gene_map), gene_map)
+    assert decoded[idx] == "none"
+    assert gene_map[idx]["option_decode_map"][1] == "breakeven"
 
 
 def test_vote_threshold_gene_present():
@@ -152,6 +180,39 @@ def test_vote_threshold_gene_only_for_vote_or_option_logic():
     }
     _, gm_and, _ = parse_genes_from_config(and_rules)
     assert all(info["name"] != "vt" for info in gm_and.values())
+
+
+def test_trade_management_genes_present():
+    _, gene_map, _ = parse_genes_from_config(STRATEGY_RULES)
+    names = {info["name"] for info in gene_map.values()}
+    expected = {
+        "stop_loss_pct",
+        "num_tp_levels",
+        "tp_pct_1",
+        "tp_pct_2",
+        "tp_pct_3",
+        "tp_pct_4",
+        "tp_trailing_pct",
+        "sl_break_even_mode",
+        "sl_timeout_bars",
+        "sl_trailing_pct",
+    }
+    assert expected.issubset(names)
+
+
+def test_trade_management_dependent_genes_skip_when_inactive():
+    import copy
+
+    rules = copy.deepcopy(STRATEGY_RULES)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    trade_mgmt["tp_trailing_pct"]["is_active"] = False
+    trade_mgmt["sl_timeout_bars"]["is_active"] = False
+    trade_mgmt["sl_trailing_pct"]["is_active"] = False
+    _, gene_map, _ = parse_genes_from_config(rules)
+    names = {info["name"] for info in gene_map.values()}
+    assert "tp_trailing_pct" not in names
+    assert "sl_timeout_bars" not in names
+    assert "sl_trailing_pct" not in names
 
 
 def test_vote_threshold_gene_bounds_update():

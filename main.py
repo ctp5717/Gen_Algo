@@ -26,7 +26,11 @@ import config
 import data_loader
 import strategy_engine
 from deps import ensure_real_vectorbt
-from gene_parser import parse_genes_from_config  # now defined in its own module
+from exits_nb import coerce_exit_params
+from gene_parser import (
+    parse_genes_from_config,
+    prepare_ga_inputs,
+)
 from params_resolver import resolve_effective_rules
 from strategy_rules import STRATEGY_RULES
 
@@ -423,6 +427,7 @@ def main(argv: list[str] | None = None):
 
     print("Parsing strategy rules to identify genes for optimization...")
     gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+    ga_gene_space, ga_gene_types = prepare_ga_inputs(gene_space, gene_map, gene_types)
     if not gene_space:
         print("No genes found. Exiting.")
         return
@@ -468,9 +473,9 @@ def main(argv: list[str] | None = None):
         num_generations=config.GA_NUM_GENERATIONS,
         num_parents_mating=num_parents_mating,
         sol_per_pop=sol_per_pop,
-        num_genes=len(gene_space),
-        gene_space=gene_space,
-        gene_type=list(gene_types),
+        num_genes=len(ga_gene_space),
+        gene_space=ga_gene_space,
+        gene_type=list(ga_gene_types),
         mutation_num_genes=mutation_num_genes,
         fitness_func=fitness_function,
         parallel_processing=["process", num_cores],
@@ -490,6 +495,16 @@ def main(argv: list[str] | None = None):
     )
     print("Optimal Parameters Found:")
     resolved = resolve_effective_rules(STRATEGY_RULES, gene_map, best_solution)
+    exit_params_banner = None
+    try:
+        exit_rules = resolved.get("exit_rules", {})
+        exit_params_banner = coerce_exit_params(
+            exit_rules,
+            config.MAX_HOLD_PERIOD,
+            getattr(config, "TIMEFRAME", None),
+        )
+    except Exception:
+        exit_params_banner = None
     for i, gene_value in enumerate(best_solution):
         info = gene_map[i]
         gene_name = info["name"]
@@ -500,6 +515,13 @@ def main(argv: list[str] | None = None):
             for key in path:
                 node = node[key]
             value = node
+        if exit_params_banner and gene_name.startswith("tp_pct_"):
+            try:
+                idx = int(gene_name.rsplit("_", 1)[-1]) - 1
+            except ValueError:
+                idx = -1
+            if 0 <= idx < len(exit_params_banner.tp_pcts):
+                value = exit_params_banner.tp_pcts[idx]
         value = _roundish(value)
         print(f"  - {gene_name}: {value}")
     print("\nDisplaying GA fitness evolution plot...")

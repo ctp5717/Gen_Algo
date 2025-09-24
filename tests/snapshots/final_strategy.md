@@ -2,7 +2,7 @@
 ## Overview
 Confidence: Medium (71)
 Fold selection: Elite/Viable
-Recency weighting: disabled
+Recency weighting: enabled
 Weighting scheme: risk_adjusted — weights ∝ (performance / volatility) × consistency (cap 0.35, floor 0.02)
 ## Recommended Parameters
 | Gene | Value | Stability | Distribution |
@@ -25,6 +25,12 @@ Note: displayed weights are rounded for readability; the internal sum remains ex
 ## Excluded Assets
 - CCC: class=Gambles not in INCLUDE_CLASSES
 
+## Exit Behaviour
+TP hit rate: 60.0%
+Average TP level reached: 2.00
+Timeout share: 10.0%
+Trailing TP usage: 5.0%
+
 ## Confidence & SRE Summary
 Inherited confidence: Medium (71).
 FSS stability classifications use relative coefficient of variation (RCV; IQR/median) while SRE reports coefficient of variation (CoV), so labels may diverge.
@@ -34,7 +40,7 @@ Weight cap further relaxed to 0.500 for feasibility.
 ```json
 {
   "ASSET_WEIGHTS_OVERRIDE": {},
-  "FOLD_DECAY_RATE": 0.0,
+  "FOLD_DECAY_RATE": 0.135,
   "INCLUDE_CLASSES": [
     "Stars",
     "Stalwarts"
@@ -50,12 +56,18 @@ Weight cap further relaxed to 0.500 for feasibility.
   "PARAM_RCV_WATCHLIST": 0.35,
   "PARAM_SENSITIVITY_THRESHOLD": 0.15,
   "PARAM_VALUE_DECIMALS": {
-    "default": 3
+    "default": 3,
+    "sl_trailing_pct": 3,
+    "tp_pct_1": 3,
+    "tp_pct_2": 3,
+    "tp_pct_3": 3,
+    "tp_pct_4": 3,
+    "tp_trailing_pct": 3
   },
   "SHOW_PARAM_DISTS": true,
   "SHOW_RECENCY_HALFLIFE": true,
   "SHRINK_TO_EQUAL": 0.0,
-  "USE_RECENCY_WEIGHTING": false,
+  "USE_RECENCY_WEIGHTING": true,
   "WEIGHTING_SCHEME": "risk_adjusted",
   "WEIGHT_SENSITIVITY_RATIO_THRESHOLD": 0.25,
   "WEIGHT_SENSITIVITY_THRESHOLD": 0.05

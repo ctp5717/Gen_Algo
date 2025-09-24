@@ -1,8 +1,9 @@
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pytest
 from dateutil.relativedelta import relativedelta
 
@@ -122,7 +123,7 @@ def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
-            pass
+            self.last_exit_params = {}
 
         def __call__(self, *a, **k):
             return 1.0
@@ -205,7 +206,7 @@ def test_walk_forward_returns_summary(monkeypatch, tmp_path):
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
-            pass
+            self.last_exit_params = {}
 
         def __call__(self, *a, **k):
             return 1.0
@@ -273,6 +274,17 @@ def test_round_floats_helper():
     assert rounded == {"a": 0.055, "b": [0.333], "c": {"d": 1.235}}
 
 
+def test_file_sha256_handles_present_and_missing(tmp_path):
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"walk-forward")
+
+    digest = walk_forward._file_sha256(path)
+    assert digest == walk_forward._file_sha256(path), "hash should be deterministic"
+
+    missing = walk_forward._file_sha256(tmp_path / "missing.bin")
+    assert missing is None
+
+
 def test_update_champion_pool_logic(monkeypatch, capsys):
     settings = {
         "survival_threshold": 0.5,
@@ -304,6 +316,116 @@ def test_update_champion_pool_logic(monkeypatch, capsys):
     assert len(pool) == 1 + 1 + settings["num_clones"] and status == "Elite"
     out = capsys.readouterr().out.lower()
     assert "cloning" in out
+
+
+def test_update_champion_pool_mutation_preserves_types():
+    settings = {
+        "survival_threshold": 0.0,
+        "cloning_threshold": 1.0,
+        "num_clones": 4,
+        "clone_mutation_rate": 1.0,
+    }
+    gene_space = [
+        {"low": 0, "high": 10, "step": 1},
+        [False, True],
+        ["hold", "breakeven", "follow_tp"],
+    ]
+    best = [2, False, "hold"]
+
+    np.random.seed(0)
+    pool, status = walk_forward._update_champion_pool(
+        [], best, 2.5, gene_space, settings
+    )
+
+    assert status == "Elite"
+    assert len(pool) == 1 + settings["num_clones"]
+    # First entry is the original champion
+    assert pool[0] == best
+
+    clones = pool[1:]
+    # Mutation should keep integer genes as ints and boolean genes as bools
+    assert {type(clone[0]) for clone in clones} == {int}
+    assert {type(clone[1]) for clone in clones} == {bool}
+    assert all(isinstance(clone[2], str) for clone in clones)
+    # At least one clone should differ on discrete option genes
+    assert any(clone[1] is not best[1] for clone in clones)
+    assert any(clone[2] != best[2] for clone in clones)
+
+
+def test_update_champion_pool_mutation_handles_float_like():
+    settings = {
+        "survival_threshold": 0.0,
+        "cloning_threshold": 0.5,
+        "num_clones": 3,
+        "clone_mutation_rate": 1.0,
+    }
+    gene_space = [{"low": 0.5, "high": 2.5}]
+    best = [np.float64(1.5)]
+
+    np.random.seed(1)
+    pool, status = walk_forward._update_champion_pool(
+        [], best, 0.75, gene_space, settings
+    )
+
+    assert status == "Elite"
+    clones = pool[1:]
+    assert clones, "expected clones to be generated"
+    assert all(isinstance(clone[0], np.floating) for clone in clones)
+    assert any(not np.isclose(clone[0], best[0]) for clone in clones)
+
+
+def test_normalize_trade_floor_penalty_shapes():
+    mapping_penalty = {"reason": "soft_penalty", "scale": 0.8}
+    assert (
+        walk_forward._normalize_trade_floor_penalty(mapping_penalty) == mapping_penalty
+    )
+
+    assert walk_forward._normalize_trade_floor_penalty("lack_of_trades") == {
+        "reason": "lack_of_trades"
+    }
+    assert walk_forward._normalize_trade_floor_penalty(None) == {}
+
+
+def test_write_run_metadata_collects_artifacts(tmp_path, monkeypatch):
+    run_dir = tmp_path
+    inside = run_dir / "chart.png"
+    inside.write_text("artifact")
+    outside = tmp_path.parent / "global.txt"
+    outside.write_text("external")
+
+    captured = {}
+
+    monkeypatch.setattr(
+        walk_forward,
+        "_get_cache_hashes",
+        lambda start, end: {"cache.parquet": "abc123"},
+    )
+
+    def fake_merge(path, data):
+        captured["path"] = path
+        captured["data"] = data
+
+    monkeypatch.setattr(walk_forward, "merge_run_metadata", fake_merge)
+
+    fake_vbt = types.SimpleNamespace(
+        __version__="1.2.3", __file__=str(run_dir / "vbt.py")
+    )
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    walk_forward._write_run_metadata(
+        run_dir,
+        start,
+        "2025-01-01",
+        "2025-02-01",
+        [inside, outside, run_dir / "missing.csv"],
+        fake_vbt,
+    )
+
+    assert captured["path"].name == "run_metadata.json"
+    metadata = captured["data"]
+    assert metadata["artifacts"][0] == inside.name
+    assert any(outside.resolve().as_posix() in item for item in metadata["artifacts"])
+    assert metadata["library_versions"]["vectorbt"]["version"] == "1.2.3"
+    assert metadata["cache_files"] == {"cache.parquet": "abc123"}
 
 
 def _run_walk_forward_with_penalty(monkeypatch, penalty, mode=None, run_dir=None):
