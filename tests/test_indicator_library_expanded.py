@@ -186,6 +186,46 @@ BAD_PARAMS = [
 ]
 
 
+def _cci_reference(df: pd.DataFrame, period: int) -> pd.Series:
+    typical = (df["High"] + df["Low"] + df["Close"]) / 3.0
+    mean = typical.rolling(window=period, min_periods=period).mean()
+
+    def _mad(window: np.ndarray) -> float:
+        return np.abs(window - window.mean()).mean()
+
+    mad = typical.rolling(window=period, min_periods=period).apply(_mad, raw=True)
+    denom = 0.015 * mad.replace(0.0, np.nan)
+    return (typical - mean) / denom
+
+
+def test_calculate_cci_matches_reference():
+    df = pd.DataFrame(
+        {
+            "Open": np.linspace(1, 9, 9),
+            "High": np.linspace(2, 10, 9),
+            "Low": np.linspace(0.5, 8.5, 9),
+            "Close": np.linspace(1.5, 9.5, 9),
+        },
+        index=pd.date_range("2020-01-01", periods=9, freq="D"),
+    )
+    period = 3
+    expected = _cci_reference(df, period)
+    result = indicator_library.calculate_cci(df, period)
+    pd.testing.assert_series_equal(result, expected, check_names=False)
+
+
+def test_calculate_cci_does_not_use_pandas_ta():
+    df = _base_df()
+
+    class Sentinel:
+        def __getattr__(self, name):
+            raise AssertionError("pandas_ta should not be queried for CCI")
+
+    df.ta = Sentinel()
+    out = indicator_library.calculate_cci(df, period=2)
+    assert isinstance(out, pd.Series)
+
+
 @pytest.mark.parametrize("func, params", BAD_PARAMS)
 def test_indicator_invalid_params_raise(func, params):
     df = _base_df()
