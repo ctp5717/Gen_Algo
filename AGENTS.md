@@ -30,6 +30,7 @@
 - `docs/configuration.md` – detailed reference for `config.py` toggles and environment flags.
 - `docs/strategy_authoring.md` – schema, defaults, and tips for editing `STRATEGY_RULES`.
 - `docs/architecture.md` – module responsibilities and metadata contract.
+- `docs/operations_runbook.md` – operational runbook for scheduled jobs and triage.
 
 Keep these documents in sync with behaviour changes—tests and reviews assume they describe the current pipeline.
 
