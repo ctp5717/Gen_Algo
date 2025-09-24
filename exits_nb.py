@@ -837,7 +837,9 @@ def coerce_exit_params(
         tp_defaults[0] = float(tm_cfg.get("tp_pct_1", 0.02))
 
     repaired_tp: list[float] = []
-    min_gap_abs = 0.005
+    min_gap_abs = float(getattr(config, "TP_MIN_GAP", 0.005))
+    if not math.isfinite(min_gap_abs) or min_gap_abs <= 0.0:
+        min_gap_abs = 0.005
     tf_source = (
         timeframe if timeframe is not None else getattr(config, "TIMEFRAME", None)
     )
@@ -845,7 +847,7 @@ def coerce_exit_params(
     if callable(cap_resolver):
         cap_default = float(cap_resolver(tf_source))
     else:
-        cap_default = float(getattr(config, "MAX_TP_PCT", 0.8))
+        cap_default = float(getattr(config, "MAX_TP_PCT", 0.5))
     try:
         max_tp_cap = tm_cfg.get("tp_pct_cap")
     except AttributeError:  # pragma: no cover - defensive
@@ -862,61 +864,74 @@ def coerce_exit_params(
             max_tp_cap = cap_for_timeframe
         else:
             max_tp_cap = min(max_tp_cap, cap_for_timeframe)
+    min_required_cap = min_gap_abs * num_tp_levels
+    if min_required_cap > max_tp_cap + 1e-12:
+        raise ValueError(
+            "Cannot allocate TP ladder: cap=%.3f, levels=%d, min_gap=%.3f"
+            % (max_tp_cap, num_tp_levels, min_gap_abs)
+        )
+
     for idx, base in enumerate(tp_defaults):
         if idx == 0:
             val = float(base)
             if val <= 0:
                 val = min_gap_abs
+            val = max(val, min_gap_abs)
         else:
             prev = repaired_tp[-1]
             if idx < num_tp_levels:
-                rel_gap = 0.1 * prev if prev > 0 else 0.0
-                required_gap = max(min_gap_abs, rel_gap)
-            else:
-                required_gap = 0.0
-            if idx < num_tp_levels:
-                desired = max(float(base), prev + required_gap)
+                headroom = max_tp_cap - prev
+                if headroom <= min_gap_abs - 1e-12:
+                    raise ValueError(
+                        "Insufficient TP cap headroom: prev=%.3f, remaining=%.3f, min_gap=%.3f"
+                        % (prev, headroom, min_gap_abs)
+                    )
+                desired = max(float(base), prev + min_gap_abs)
+                val = min(desired, max_tp_cap)
+                if val <= prev:
+                    val = min(max_tp_cap, prev + min_gap_abs)
             else:
                 desired = max(float(base), prev)
-            headroom = max_tp_cap - prev
-            if idx < num_tp_levels and headroom > 0:
-                max_allowed = prev + headroom
-                val = min(desired, max_allowed)
-                if val - prev < required_gap - 1e-12:
-                    val = prev + min(headroom, required_gap)
-            else:
                 val = min(desired, max_tp_cap)
-            if idx < num_tp_levels and val <= prev:
-                val = min(max_tp_cap, prev + required_gap)
-            if val <= prev:
-                val = prev
-        if idx == 0 and val > max_tp_cap:
-            val = max_tp_cap
-        if val < min_gap_abs and idx == 0:
-            val = min_gap_abs
         if val > max_tp_cap:
             val = max_tp_cap
         repaired_tp.append(val)
 
     tp_vals = tuple(repaired_tp)
 
-    tp_trailing_enabled = bool(tm_cfg.get("tp_trailing_enabled", False))
-    if num_tp_levels <= 1:
-        tp_trailing_enabled = False
-    tp_trailing_pct = float(tm_cfg.get("tp_trailing_pct", 0.01))
+    tp_trailing_flag = tm_cfg.get("tp_trailing_enabled")
+    tp_trailing_pct = float(tm_cfg.get("tp_trailing_pct", 0.0))
     if tp_trailing_pct < 0.0:
         tp_trailing_pct = 0.0
-    if not tp_trailing_enabled:
+    if tp_trailing_flag is None:
+        tp_trailing_enabled = tp_trailing_pct > 0.0
+    else:
+        tp_trailing_enabled = bool(tp_trailing_flag)
+    if num_tp_levels <= 1:
+        tp_trailing_enabled = False
+    if tp_trailing_enabled:
+        if tp_trailing_pct <= 0.0:
+            tp_trailing_pct = 0.001
+    else:
         tp_trailing_pct = 0.0
 
-    sl_timeout_enabled = bool(tm_cfg.get("sl_timeout_enabled", False))
-    sl_timeout_bars = int(tm_cfg.get("sl_timeout_bars", 3))
-    if not sl_timeout_enabled:
+    sl_timeout_flag = tm_cfg.get("sl_timeout_enabled")
+    sl_timeout_bars_raw = tm_cfg.get("sl_timeout_bars", 0)
+    try:
+        sl_timeout_bars = int(sl_timeout_bars_raw)
+    except (TypeError, ValueError):
         sl_timeout_bars = 0
-    elif sl_timeout_bars <= 0:
-        sl_timeout_bars = 1
+    if sl_timeout_flag is None:
+        sl_timeout_enabled = sl_timeout_bars > 0
     else:
-        sl_timeout_bars = max(1, min(12, sl_timeout_bars))
+        sl_timeout_enabled = bool(sl_timeout_flag)
+    if sl_timeout_enabled:
+        if sl_timeout_bars <= 0:
+            sl_timeout_bars = 1
+        else:
+            sl_timeout_bars = max(1, min(12, sl_timeout_bars))
+    else:
+        sl_timeout_bars = 0
 
     be_mode_raw = tm_cfg.get("sl_break_even_mode", "none")
     if isinstance(be_mode_raw, BreakEvenMode):
@@ -933,11 +948,18 @@ def coerce_exit_params(
             be_mode_key = str(be_mode_raw).lower().split(".")[-1]
             be_mode = _BREAK_EVEN_NAME_TO_MODE.get(be_mode_key, BreakEvenMode.NONE)
 
-    sl_trailing_enabled = bool(tm_cfg.get("sl_trailing_enabled", False))
-    sl_trailing_pct = float(tm_cfg.get("sl_trailing_pct", 0.02))
+    sl_trailing_flag = tm_cfg.get("sl_trailing_enabled")
+    sl_trailing_pct = float(tm_cfg.get("sl_trailing_pct", 0.0))
     if sl_trailing_pct < 0.0:
         sl_trailing_pct = 0.0
-    if not sl_trailing_enabled:
+    if sl_trailing_flag is None:
+        sl_trailing_enabled = sl_trailing_pct > 0.0
+    else:
+        sl_trailing_enabled = bool(sl_trailing_flag)
+    if sl_trailing_enabled:
+        if sl_trailing_pct <= 0.0:
+            sl_trailing_pct = 0.001
+    else:
         sl_trailing_pct = 0.0
 
     timeframe_serialised = str(tf_source) if tf_source is not None else None

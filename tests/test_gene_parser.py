@@ -192,15 +192,27 @@ def test_trade_management_genes_present():
         "tp_pct_2",
         "tp_pct_3",
         "tp_pct_4",
-        "tp_trailing_enabled",
         "tp_trailing_pct",
         "sl_break_even_mode",
-        "sl_timeout_enabled",
         "sl_timeout_bars",
-        "sl_trailing_enabled",
         "sl_trailing_pct",
     }
     assert expected.issubset(names)
+
+
+def test_trade_management_dependent_genes_skip_when_inactive():
+    import copy
+
+    rules = copy.deepcopy(STRATEGY_RULES)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    trade_mgmt["tp_trailing_pct"]["is_active"] = False
+    trade_mgmt["sl_timeout_bars"]["is_active"] = False
+    trade_mgmt["sl_trailing_pct"]["is_active"] = False
+    _, gene_map, _ = parse_genes_from_config(rules)
+    names = {info["name"] for info in gene_map.values()}
+    assert "tp_trailing_pct" not in names
+    assert "sl_timeout_bars" not in names
+    assert "sl_trailing_pct" not in names
 
 
 def test_vote_threshold_gene_bounds_update():

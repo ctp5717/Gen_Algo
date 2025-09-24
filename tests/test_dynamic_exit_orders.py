@@ -75,6 +75,45 @@ def test_dynamic_exit_partial_accounting(monkeypatch):
     assert size_series2[exits_clean2].sum() == pytest.approx(base_size)
 
 
+def test_dynamic_exit_alternative_size_modes():
+    index = pd.RangeIndex(4)
+    entries = pd.Series([True, False, False, False], index=index, dtype=bool)
+    exits = pd.Series([False, True, True, False], index=index, dtype=bool)
+
+    base_size = 8.0
+    frac_sizes = pd.Series([0.0, 0.5, 0.5, 0.0], index=index, dtype=float)
+    entries_fc, exits_fc, sizes_fc = fitness.build_dynamic_exit_orders(
+        entries=entries,
+        exits_series=exits,
+        exit_size_series=frac_sizes,
+        base_entry_size=base_size,
+        mode="fraction_current",
+        asset_label="fraction-current",
+    )
+    assert entries_fc.tolist() == [True, False, False, False]
+    # First exit removes half the base size, second removes half of the remaining qty.
+    assert sizes_fc.iloc[1] == pytest.approx(base_size * 0.5)
+    assert sizes_fc.iloc[2] == pytest.approx(base_size * 0.25)
+    # Forced close clears the residual position on the last bar.
+    assert bool(exits_fc.iloc[-1])
+    assert sizes_fc.iloc[-1] == pytest.approx(base_size * 0.25)
+
+    abs_sizes = pd.Series([0.0, 3.0, 2.0, 0.0], index=index, dtype=float)
+    entries_abs, exits_abs, sizes_abs = fitness.build_dynamic_exit_orders(
+        entries=entries,
+        exits_series=exits,
+        exit_size_series=abs_sizes,
+        base_entry_size=7.0,
+        mode="absolute",
+        asset_label="absolute",
+    )
+    assert entries_abs.tolist() == [True, False, False, False]
+    assert sizes_abs.iloc[1] == pytest.approx(3.0)
+    assert sizes_abs.iloc[2] == pytest.approx(2.0)
+    assert bool(exits_abs.iloc[-1])
+    assert sizes_abs.iloc[-1] == pytest.approx(2.0)
+
+
 def _simulate_positions_and_pnl(
     close: pd.Series,
     entries: pd.Series,
@@ -106,15 +145,11 @@ def _simulate_positions_and_pnl(
     return positions, pnl
 
 
-@pytest.mark.parametrize("accumulate_flag", [False, True])
-def test_partial_tp_position_path(monkeypatch, accumulate_flag):
-    configured_accumulate = getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False)
-    if accumulate_flag != configured_accumulate:
-        pytest.skip(
-            f"accumulate={accumulate_flag} is inactive (configured={configured_accumulate})"
-        )
-
+@pytest.mark.parametrize("base_entry_size", [1.0, 5.0])
+def test_partial_tp_position_path(monkeypatch, base_entry_size):
+    monkeypatch.setattr(config, "DYNAMIC_EXIT_ACCUMULATE", True, raising=False)
     monkeypatch.setattr(config, "TIMEFRAME", "4h", raising=False)
+    monkeypatch.setattr(config, "BASE_ENTRY_SIZE", base_entry_size, raising=False)
 
     index = pd.RangeIndex(3)
     entries = pd.Series([True, False, False], index=index, dtype=bool)
@@ -140,27 +175,26 @@ def test_partial_tp_position_path(monkeypatch, accumulate_flag):
     exits_series = pd.Series(exit_result.exits, index=index)
     exit_size_series = pd.Series(exit_result.exit_size, index=index, dtype=float)
 
-    base_entry_size = 1.0
+    base_entry = float(base_entry_size)
     mode = getattr(config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base")
     entries_active, exits_clean, size_series = fitness.build_dynamic_exit_orders(
         entries=entries,
         exits_series=exits_series,
         exit_size_series=exit_size_series,
-        base_entry_size=base_entry_size,
+        base_entry_size=base_entry,
         mode=mode,
         asset_label="partial-path",
     )
 
     assert entries_active.tolist() == [True, False, False]
-    assert size_series[entries_active].iloc[0] == pytest.approx(base_entry_size)
-    assert size_series[exits_clean].tolist() == pytest.approx(
-        [base_entry_size * 0.5, base_entry_size * 0.5]
-    )
+    assert size_series[entries_active].iloc[0] == pytest.approx(base_entry)
+    sold_sizes = size_series[exits_clean].tolist()
+    assert sold_sizes == pytest.approx([base_entry * 0.5, base_entry * 0.5])
 
     positions, pnl = _simulate_positions_and_pnl(
-        close, entries_active, exits_clean, size_series, accumulate_flag
+        close, entries_active, exits_clean, size_series, True
     )
-    assert positions == pytest.approx([1.0, 0.5, 0.0])
+    assert positions == pytest.approx([base_entry, base_entry * 0.5, 0.0])
 
     entry_idx = entries_active[entries_active].index[0]
     entry_price = float(close.loc[entry_idx])
@@ -170,13 +204,12 @@ def test_partial_tp_position_path(monkeypatch, accumulate_flag):
         qty = float(size_series.loc[idx])
         expected_pnl += qty * (exit_price - entry_price)
     assert pnl == pytest.approx(expected_pnl)
+    unit_profit = ((105.0 - entry_price) * 0.5) + ((110.0 - entry_price) * 0.5)
+    assert expected_pnl == pytest.approx(base_entry * unit_profit)
 
 
-@pytest.mark.parametrize("accumulate_flag", [False, True])
-def test_dynamic_exit_round_trip_consistency(monkeypatch, accumulate_flag):
-    monkeypatch.setattr(
-        config, "DYNAMIC_EXIT_ACCUMULATE", accumulate_flag, raising=False
-    )
+def test_dynamic_exit_round_trip_consistency(monkeypatch):
+    monkeypatch.setattr(config, "DYNAMIC_EXIT_ACCUMULATE", True, raising=False)
     monkeypatch.setattr(
         config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base", raising=False
     )
@@ -219,17 +252,18 @@ def test_dynamic_exit_round_trip_consistency(monkeypatch, accumulate_flag):
     exits_series = pd.Series(exit_result.exits, index=index)
     exit_size_series = pd.Series(exit_result.exit_size, index=index, dtype=float)
 
+    base_entry_size = 1.0
     entries_active, exits_clean, size_series = fitness.build_dynamic_exit_orders(
         entries=entries,
         exits_series=exits_series,
         exit_size_series=exit_size_series,
-        base_entry_size=1.0,
+        base_entry_size=base_entry_size,
         mode=config.DYNAMIC_EXIT_SIZE_MODE,
         asset_label="round-trip",
     )
 
     expected_positions, expected_pnl = _simulate_positions_and_pnl(
-        close, entries_active, exits_clean, size_series, accumulate_flag
+        close, entries_active, exits_clean, size_series, True
     )
 
     class _TrackingTrades:
@@ -249,8 +283,11 @@ def test_dynamic_exit_round_trip_consistency(monkeypatch, accumulate_flag):
         def stats(self):
             return self._stats
 
-    def fake_from_signals(cls, close, entries, exits, size, accumulate, **kwargs):
-        assert bool(accumulate) is accumulate_flag
+    def fake_from_signals(
+        cls, close, entries, exits, size, accumulate, size_type=None, **kwargs
+    ):
+        assert bool(accumulate) is True
+        assert size_type in {None, "amount"}
         close_series = (
             close if isinstance(close, pd.Series) else pd.Series(close, index=index)
         )
@@ -274,7 +311,7 @@ def test_dynamic_exit_round_trip_consistency(monkeypatch, accumulate_flag):
             entries_series,
             exits_series_local,
             size_series_local,
-            accumulate_flag,
+            True,
         )
         trade_count = int(exits_series_local.astype(bool).sum())
         return _TrackingPortfolio(positions, pnl, trade_count)
@@ -291,7 +328,8 @@ def test_dynamic_exit_round_trip_consistency(monkeypatch, accumulate_flag):
         entries=entries_active,
         exits=exits_clean,
         size=size_series,
-        accumulate=accumulate_flag,
+        accumulate=True,
+        size_type="amount",
         fees=config.FEES,
         freq=config.to_pandas_freq(config.TIMEFRAME),
     )

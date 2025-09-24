@@ -31,7 +31,7 @@ def _make_params(**overrides):
         "sl_trailing_enabled": False,
         "sl_trailing_pct": 0.0,
         "max_hold_bars": 0,
-        "tp_cap": float(getattr(config, "MAX_TP_PCT", 0.8)),
+        "tp_cap": float(getattr(config, "MAX_TP_PCT", 0.5)),
         "timeframe": getattr(config, "TIMEFRAME", None),
     }
     base.update(overrides)
@@ -95,7 +95,7 @@ def test_follow_tp_ratchets_stop():
     assert metrics["trailing_tp_hit_rate"] == pytest.approx(0.0)
 
 
-def test_trailing_stop_never_looses_ground():
+def test_trailing_stop_never_loses_ground():
     entries = np.array([True, False, False])
     price = _price_map(
         [100, 110, 115],
@@ -106,7 +106,7 @@ def test_trailing_stop_never_looses_ground():
         sl_trailing_enabled=True,
         sl_trailing_pct=0.05,
         num_tp_levels=1,
-        tp_pcts=(0.5, 0.6, 0.7, 0.8),
+        tp_pcts=(0.45, 0.47, 0.49, 0.50),
     )
     result = generate_dynamic_exit_signals_nb(entries, price, params)
     assert result.current_stop[1] == pytest.approx(104.5)
@@ -212,6 +212,53 @@ def test_same_bar_tp_precedes_stop():
     assert summary[ExitReason.SL.name]["count"] == pytest.approx(1.0)
 
 
+def test_trailing_controls_disable_at_zero():
+    base_rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 2,
+            "tp_trailing_pct": 0.0,
+            "sl_timeout_bars": 0,
+            "sl_trailing_pct": 0.0,
+        },
+    }
+    params = coerce_exit_params(base_rules, max_hold_bars=20, timeframe="1h")
+    assert params.tp_trailing_enabled is False
+    assert params.tp_trailing_pct == pytest.approx(0.0)
+    assert params.sl_timeout_enabled is False
+    assert params.sl_timeout_bars == 0
+    assert params.sl_trailing_enabled is False
+    assert params.sl_trailing_pct == pytest.approx(0.0)
+
+    enabled_rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 2,
+            "tp_trailing_pct": 0.02,
+            "sl_timeout_bars": 3,
+            "sl_trailing_pct": 0.05,
+        },
+    }
+    params_enabled = coerce_exit_params(enabled_rules, max_hold_bars=20, timeframe="1h")
+    assert params_enabled.tp_trailing_enabled is True
+    assert params_enabled.sl_timeout_enabled is True
+    assert params_enabled.sl_trailing_enabled is True
+
+    reset_rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 2,
+            "tp_trailing_pct": 0.0,
+            "sl_timeout_bars": 0,
+            "sl_trailing_pct": 0.0,
+        },
+    }
+    params_reset = coerce_exit_params(reset_rules, max_hold_bars=20, timeframe="1h")
+    assert params_reset.tp_trailing_enabled is False
+    assert params_reset.sl_timeout_enabled is False
+    assert params_reset.sl_trailing_enabled is False
+
+
 def test_max_hold_timeout_exits_on_configured_bar():
     entries = np.array([True, False, False, False, False])
     price = _price_map([100, 100, 100, 100, 100])
@@ -229,13 +276,10 @@ def test_coerce_exit_params_enforces_hierarchy():
         "trade_management": {
             "num_tp_levels": 1,
             "tp_pct_1": 0.02,
-            "tp_trailing_enabled": 1,
             "tp_trailing_pct": 0.02,
             "sl_break_even_mode": "follow_tp",
-            "sl_timeout_enabled": 0,
-            "sl_timeout_bars": 6,
-            "sl_trailing_enabled": 0,
-            "sl_trailing_pct": 0.1,
+            "sl_timeout_bars": 0,
+            "sl_trailing_pct": 0.0,
         },
     }
     params_single = coerce_exit_params(base_rules, max_hold_bars=4)
@@ -250,9 +294,8 @@ def test_coerce_exit_params_enforces_hierarchy():
     tm_multi.update(
         {
             "num_tp_levels": 2,
-            "tp_trailing_enabled": 1,
-            "sl_timeout_enabled": 1,
-            "sl_timeout_bars": 0,
+            "sl_timeout_bars": 3,
+            "sl_trailing_pct": 0.05,
         }
     )
     params_multi = coerce_exit_params(
@@ -261,7 +304,8 @@ def test_coerce_exit_params_enforces_hierarchy():
     )
     assert params_multi.tp_trailing_enabled is True
     assert params_multi.tp_trailing_pct == pytest.approx(0.02)
-    assert params_multi.sl_timeout_bars == 1
+    assert params_multi.sl_timeout_bars == 3
+    assert params_multi.sl_trailing_pct == pytest.approx(0.05)
     assert params_multi.tp_pcts[0] < params_multi.tp_pcts[1]
     assert params_multi.tp_pcts[1] <= params_multi.tp_pcts[2]
     assert params_multi.tp_pcts[2] <= params_multi.tp_pcts[3]
@@ -280,19 +324,18 @@ def test_coerce_exit_params_respects_spacing_and_cap():
         },
     }
     params = coerce_exit_params(rules, max_hold_bars=10)
-    assert params.tp_pcts[0] >= 0.005 - 1e-9
+    assert params.tp_pcts[0] >= config.TP_MIN_GAP - 1e-9
     assert params.tp_cap == pytest.approx(0.08)
     levels = params.tp_pcts[: params.num_tp_levels]
     for idx in range(1, params.num_tp_levels):
         prev = levels[idx - 1]
         current = levels[idx]
         gap = current - prev
-        min_required = max(0.005, 0.1 * prev)
         if math.isclose(current, 0.08, rel_tol=1e-6, abs_tol=1e-6):
             assert current <= pytest.approx(0.08)
             assert gap >= 0.0
         else:
-            assert gap + 1e-9 >= min_required
+            assert gap + 1e-9 >= config.TP_MIN_GAP
 
 
 def test_coerce_exit_params_applies_timeframe_cap():
@@ -300,14 +343,14 @@ def test_coerce_exit_params_applies_timeframe_cap():
         "stop_loss": {"params": {"value": 0.05}},
         "trade_management": {
             "num_tp_levels": 2,
-            "tp_pct_1": 0.7,
-            "tp_pct_2": 0.9,
+            "tp_pct_1": 0.45,
+            "tp_pct_2": 0.55,
         },
     }
     params = coerce_exit_params(rules, max_hold_bars=5, timeframe="4h")
     levels = params.tp_pcts[: params.num_tp_levels]
     cap = config.TP_CAP_BY_TIMEFRAME["4h"]
-    assert levels[0] == pytest.approx(cap)
+    assert levels[0] == pytest.approx(0.45)
     assert levels[1] == pytest.approx(cap)
     assert params.tp_cap == pytest.approx(cap)
     assert params.timeframe == "4h"
@@ -315,7 +358,7 @@ def test_coerce_exit_params_applies_timeframe_cap():
 
 def test_coerce_exit_params_randomised_spacing(monkeypatch):
     rng = np.random.default_rng(123)
-    base_cap = float(getattr(config, "MAX_TP_PCT", 0.8))
+    base_cap = float(getattr(config, "MAX_TP_PCT", 0.5))
     timeframes = [None, "4h", "1h", "1d", "2h"]
     for tf in timeframes:
         tf_source = tf if tf is not None else getattr(config, "TIMEFRAME", None)
@@ -332,7 +375,10 @@ def test_coerce_exit_params_randomised_spacing(monkeypatch):
                 "stop_loss": {"params": {"value": float(rng.uniform(0.01, 0.1))}},
                 "trade_management": tm_cfg,
             }
-            params = coerce_exit_params(exit_rules, max_hold_bars=25, timeframe=tf)
+            try:
+                params = coerce_exit_params(exit_rules, max_hold_bars=25, timeframe=tf)
+            except ValueError:
+                continue
             override_cap = tm_cfg.get("tp_pct_cap")
             if override_cap is not None:
                 try:
@@ -349,15 +395,14 @@ def test_coerce_exit_params_randomised_spacing(monkeypatch):
             assert all(levels[i] >= levels[i - 1] for i in range(1, len(levels)))
             assert all(level <= expected_cap + 1e-9 for level in levels)
             if levels:
-                assert levels[0] >= 0.005 - 1e-9
+                assert levels[0] >= config.TP_MIN_GAP - 1e-9
             for idx in range(1, len(levels)):
                 prev = levels[idx - 1]
                 current = levels[idx]
-                min_gap = max(0.005, 0.1 * prev)
                 if current >= expected_cap - 1e-9:
                     assert current <= expected_cap + 1e-9
                 else:
-                    assert current - prev + 1e-9 >= min_gap
+                    assert current - prev + 1e-9 >= config.TP_MIN_GAP
 
 
 def test_tp_gene_bounds_respect_caps(monkeypatch):
@@ -396,6 +441,52 @@ def test_tp_gene_bounds_respect_caps(monkeypatch):
         config.initialize_config(force=True)
 
 
+def test_tp_trailing_gene_disabled_when_levels_forced_to_one(monkeypatch):
+    rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    monkeypatch.setattr(strategy_rules, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "1h", raising=False)
+    small_cap = config.TP_MIN_GAP * 0.5
+    monkeypatch.setattr(config, "TP_CAP_BY_TIMEFRAME", {"1h": small_cap}, raising=False)
+    monkeypatch.setattr(config, "_INITIALIZED", False, raising=False)
+    config.initialize_config(force=True)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    assert trade_mgmt["num_tp_levels"]["high"] == 1
+    assert trade_mgmt["tp_trailing_pct"]["is_active"] is False
+
+
+def test_exit_feature_toggles_disable_genes(monkeypatch):
+    rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    trade_mgmt["tp_trailing_enabled"] = False
+    trade_mgmt["sl_timeout_enabled"] = False
+    trade_mgmt["sl_trailing_enabled"] = False
+    monkeypatch.setattr(strategy_rules, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "4h", raising=False)
+    monkeypatch.setattr(config, "_INITIALIZED", False, raising=False)
+    config.initialize_config(force=True)
+    updated = rules["exit_rules"]["trade_management"]
+    assert updated["tp_trailing_pct"]["is_active"] is False
+    assert updated["sl_timeout_bars"]["is_active"] is False
+    assert updated["sl_trailing_pct"]["is_active"] is False
+
+
+def test_apply_tp_caps_handles_literal_level_spec(monkeypatch):
+    rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    trade_mgmt["num_tp_levels"] = 3
+    trade_mgmt["tp_trailing_enabled"] = True
+    monkeypatch.setattr(strategy_rules, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "4h", raising=False)
+    monkeypatch.setattr(config, "_INITIALIZED", False, raising=False)
+    config.initialize_config(force=True)
+    updated = rules["exit_rules"]["trade_management"]
+    assert updated["num_tp_levels"] == 3
+    assert updated["tp_trailing_pct"]["is_active"] is True
+
+
 def test_deterministic_output():
     entries = np.array([True, False, False])
     price = _price_map([100, 103, 103], high=[100, 103, 103], low=[100, 100, 103])
@@ -405,6 +496,20 @@ def test_deterministic_output():
     assert np.array_equal(first.exits, second.exits)
     assert np.array_equal(first.exit_size, second.exit_size)
     assert np.array_equal(first.exit_reason, second.exit_reason)
+
+
+def test_coerce_exit_params_rejects_impossible_ladder():
+    rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 3,
+            "tp_pct_1": 0.50,
+            "tp_pct_2": 0.50,
+            "tp_pct_3": 0.50,
+        },
+    }
+    with pytest.raises(ValueError):
+        coerce_exit_params(rules, max_hold_bars=5, timeframe="4h")
 
 
 def test_dynamic_exit_simulator_performance_smoke():
@@ -433,6 +538,19 @@ def test_dynamic_exit_simulator_performance_smoke():
         )
     avg_runtime = (time.perf_counter() - start) / iterations
     assert avg_runtime < 0.1
+
+    rules = {
+        "stop_loss": {"params": {"value": 0.05}},
+        "trade_management": {
+            "num_tp_levels": 3,
+            "tp_trailing_pct": params.tp_trailing_pct,
+            "sl_timeout_bars": params.sl_timeout_bars,
+            "sl_trailing_pct": params.sl_trailing_pct,
+        },
+    }
+    resolved = coerce_exit_params(rules, max_hold_bars=rows, timeframe="1h")
+    assert resolved.tp_trailing_enabled is True
+    assert resolved.tp_trailing_pct == pytest.approx(params.tp_trailing_pct)
 
 
 def test_summary_available_without_traces():

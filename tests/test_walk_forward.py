@@ -123,7 +123,7 @@ def test_walk_forward_uses_all_cores(monkeypatch, tmp_path):
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
-            pass
+            self.last_exit_params = {}
 
         def __call__(self, *a, **k):
             return 1.0
@@ -206,7 +206,7 @@ def test_walk_forward_returns_summary(monkeypatch, tmp_path):
 
     class DummyEvaluator:
         def __init__(self, *a, **k):
-            pass
+            self.last_exit_params = {}
 
         def __call__(self, *a, **k):
             return 1.0

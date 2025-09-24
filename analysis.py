@@ -42,6 +42,9 @@ from strategy_rules import STRATEGY_RULES
 RUN_DIR = Path(".")
 
 
+ConfigError = getattr(config, "ConfigurationError", RuntimeError)
+
+
 def set_run_dir(path: Path) -> None:
     """Set the directory where analysis artifacts and metadata are stored."""
     global RUN_DIR
@@ -55,14 +58,13 @@ def _write_exit_reason_breakdown_csv(
     """Persist aggregated exit fractions per reason for later inspection."""
 
     settings = getattr(config, "EXIT_TELEMETRY", {})
-    collect_traces = settings.get("collect_traces", settings.get("enabled", True))
-    if not settings or not collect_traces:
+    if not settings:
         return
     if not settings.get("write_reason_breakdown_csv", True):
         return
     rows: list[dict[str, object]] = []
     for asset, reasons in summary.items():
-        for reason_code, stats in reasons.items():
+        for reason_name_key, stats in reasons.items():
             try:
                 code_int = int(stats.get("code", 0))
             except (TypeError, ValueError):
@@ -71,7 +73,7 @@ def _write_exit_reason_breakdown_csv(
                 reason_enum = ExitReason(code_int)
                 reason_name = reason_enum.name
             except ValueError:
-                reason_name = str(reason_code)
+                reason_name = str(reason_name_key)
             rows.append(
                 {
                     "asset": asset,
@@ -332,31 +334,39 @@ def run_champion_analysis(
         exit_metrics_summary: dict[str, dict[str, float]] = {}
         exit_kpi_values: dict[str, float] = {}
         if config.USE_DYNAMIC_EXIT_SIMULATOR:
-            exit_params = coerce_exit_params(
-                exit_rules,
-                config.MAX_HOLD_PERIOD,
-                getattr(config, "TIMEFRAME", None),
-            )
-            price_map = {
-                "close": validation_data["Close"].to_numpy(dtype=float),
-                "high": validation_data.get("High", validation_data["Close"]).to_numpy(
-                    dtype=float
-                ),
-                "low": validation_data.get("Low", validation_data["Close"]).to_numpy(
-                    dtype=float
-                ),
-            }
-            telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
-            collect_traces = telemetry_cfg.get(
-                "collect_traces", telemetry_cfg.get("enabled", True)
-            )
-            exit_result = generate_dynamic_exit_signals_nb(
-                entries.to_numpy(dtype=bool),
-                price_map,
-                exit_params,
-                seed=getattr(config, "SEED", None),
-                collect_traces=collect_traces,
-            )
+            base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
+            size_mode = getattr(config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base")
+            try:
+                exit_params = coerce_exit_params(
+                    exit_rules,
+                    config.MAX_HOLD_PERIOD,
+                    getattr(config, "TIMEFRAME", None),
+                )
+                price_map = {
+                    "close": validation_data["Close"].to_numpy(dtype=float),
+                    "high": validation_data.get(
+                        "High", validation_data["Close"]
+                    ).to_numpy(dtype=float),
+                    "low": validation_data.get(
+                        "Low", validation_data["Close"]
+                    ).to_numpy(dtype=float),
+                }
+                telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+                collect_traces = telemetry_cfg.get(
+                    "collect_traces", telemetry_cfg.get("enabled", True)
+                )
+                exit_result = generate_dynamic_exit_signals_nb(
+                    entries.to_numpy(dtype=bool),
+                    price_map,
+                    exit_params,
+                    seed=getattr(config, "SEED", None),
+                    collect_traces=collect_traces,
+                )
+            except ValueError as exc:
+                print(f"Invalid exit configuration for analysis: {exc}")
+                error_note = {"exit": {"error": str(exc)}}
+                _write_run_metadata(start_time, artifacts, error_note)
+                return
             exits_series = pd.Series(exit_result.exits, index=entries.index)
             exit_size_series = pd.Series(
                 exit_result.exit_size, index=entries.index, dtype=float
@@ -374,8 +384,6 @@ def run_champion_analysis(
                     "tp_cap",
                     config.get_tp_cap_for_timeframe(timeframe_snapshot),
                 )
-            base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
-            size_mode = getattr(config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base")
             entries_active, exits_series, size_series = (
                 fitness.build_dynamic_exit_orders(
                     entries=entries,
@@ -386,12 +394,19 @@ def run_champion_analysis(
                     asset_label=str(config.TICKER or "asset"),
                 )
             )
+            accumulate_flag = bool(getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False))
+            if not accumulate_flag:
+                raise ConfigError(
+                    "Dynamic exit simulator requires"
+                    " config.DYNAMIC_EXIT_ACCUMULATE=True for staged exits"
+                )
             portfolio = vbt.Portfolio.from_signals(
                 close=validation_data["Close"],
                 entries=entries_active,
                 exits=exits_series,
                 size=size_series,
-                accumulate=getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False),
+                accumulate=accumulate_flag,
+                size_type="amount",
                 fees=config.FEES,
                 freq=config.to_pandas_freq(config.TIMEFRAME),
             )

@@ -17,6 +17,7 @@ import config  # noqa: E402
 import data_loader  # noqa: E402
 import fitness  # noqa: E402
 from exits_nb import ExitReason  # noqa: E402
+from schemas import load_wf_summary  # noqa: E402
 
 config.initialize_config()
 
@@ -301,8 +302,8 @@ def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
     kpi = exit_meta.get("kpi_strip", {})
     assert "breakeven_touch_pct" in kpi
     csv_path = tmp_path / "exit_reason_breakdown.csv"
-    assert not csv_path.exists()
-    assert all(str(csv_path.name) not in art for art in metadata.get("artifacts", []))
+    assert csv_path.exists()
+    assert any(str(csv_path.name) in art for art in metadata.get("artifacts", []))
     kpi_path = tmp_path / "exit_kpi_strip.csv"
     assert kpi_path.exists()
     assert any(kpi_path.name in art for art in metadata.get("artifacts", []))
@@ -310,3 +311,33 @@ def test_run_champion_analysis_records_exit_metadata(tmp_path, monkeypatch):
     assert last_from_signals.get("accumulate") is getattr(
         config, "DYNAMIC_EXIT_ACCUMULATE", False
     )
+    assert last_from_signals.get("size_type") == "amount"
+
+
+def test_load_wf_summary_preserves_resolved_params(tmp_path):
+    wf_dir = tmp_path / "walk_forward"
+    wf_dir.mkdir()
+    payload = {
+        "metadata": {
+            "schema_version": "1.0",
+            "num_folds": 1,
+            "asset_universe": ["TEST"],
+        },
+        "folds": [
+            {
+                "Window": 1,
+                "Fitness": 1.23,
+                "Params": "{'tp_pct_1': 0.05}",
+                "Resolved Params": "{'tp_pct_1': 0.05, 'tp_cap': 0.5}",
+            }
+        ],
+    }
+    summary_path = wf_dir / "walk_forward_summary.json"
+    summary_path.write_text(json.dumps(payload))
+
+    summary = load_wf_summary(summary_path)
+    assert summary.folds[0].params == {"tp_pct_1": 0.05}
+    assert summary.folds[0].resolved_params == {
+        "tp_pct_1": 0.05,
+        "tp_cap": 0.5,
+    }

@@ -53,7 +53,11 @@ def parse_genes_from_config(
         if isinstance(sub_config, dict):
             for key, value in sub_config.items():
                 current_path = path + [key]
-                if isinstance(value, dict) and "gene" in value:
+                if (
+                    isinstance(value, dict)
+                    and value.get("is_active", True) is not False
+                    and "gene" in value
+                ):
                     gene_info = value
                     gene_name = gene_info["gene"]
 
