@@ -179,7 +179,9 @@ USE_DYNAMIC_EXIT_SIMULATOR = True
 # ``BASE_ENTRY_SIZE`` sets the literal quantity for each entry.
 DYNAMIC_EXIT_SIZE_MODE = "fraction_base"
 DYNAMIC_EXIT_ACCUMULATE = True
-VALID_DYNAMIC_EXIT_SIZE_MODES = frozenset({"fraction_base", "fraction_current", "absolute"})
+VALID_DYNAMIC_EXIT_SIZE_MODES = frozenset(
+    {"fraction_base", "fraction_current", "absolute"}
+)
 
 # Take-profit ladder guardrails. ``MAX_TP_PCT`` acts as the universal fallback
 # cap while ``TP_CAP_BY_TIMEFRAME`` can narrow the ceiling for specific
@@ -362,6 +364,7 @@ def _apply_tp_caps(timeframe: str) -> None:
     trade_mgmt = STRATEGY_RULES.get("exit_rules", {}).get("trade_management", {})
     min_gap = TP_MIN_GAP
     levels_spec = trade_mgmt.get("num_tp_levels")
+    literal_levels = 1
     if isinstance(levels_spec, dict):
         try:
             high = int(levels_spec.get("high", 1))
@@ -404,22 +407,51 @@ def _apply_tp_caps(timeframe: str) -> None:
                         stacklevel=2,
                     )
                     _TP_CAP_WARNING_CACHE.add(warn_key)
+        tp_trailing_enabled = bool(trade_mgmt.get("tp_trailing_enabled", False))
+    else:
+        tp_trailing_enabled = bool(trade_mgmt.get("tp_trailing_enabled", False))
+        try:
+            literal_levels = max(1, int(levels_spec))
+        except (TypeError, ValueError):
+            literal_levels = 1
+        high = literal_levels
+    timeout_enabled = bool(trade_mgmt.get("sl_timeout_enabled", False))
+    trailing_enabled = bool(trade_mgmt.get("sl_trailing_enabled", False))
     for idx in range(1, 1 + 4):
         spec = trade_mgmt.get(f"tp_pct_{idx}")
         if isinstance(spec, dict):
-            low = float(spec.get("low", 0.0))
-            if low > cap:
-                spec["low"] = cap
-                low = cap
+            tp_low = float(spec.get("low", 0.0))
+            if tp_low > cap:
+                tp_low = float(cap)
+                spec["low"] = tp_low  # type: ignore[assignment]
             high_val = spec.get("high")
             if high_val is None:
-                spec["high"] = cap
+                spec["high"] = float(cap)  # type: ignore[assignment]
             else:
                 try:
-                    high = float(high_val)
+                    tp_high = float(high_val)
                 except (TypeError, ValueError):
-                    high = cap
-                spec["high"] = max(low, min(high, cap))
+                    tp_high = cap
+                spec["high"] = float(
+                    max(tp_low, min(tp_high, cap))
+                )  # type: ignore[assignment]
+    trailing_spec = trade_mgmt.get("tp_trailing_pct")
+    if isinstance(trailing_spec, dict):
+        max_levels = 1
+        if isinstance(levels_spec, dict):
+            try:
+                max_levels = int(levels_spec.get("high", 1))
+            except (TypeError, ValueError):
+                max_levels = 1
+        else:
+            max_levels = literal_levels
+        trailing_spec["is_active"] = bool(tp_trailing_enabled and max_levels > 1)
+    timeout_spec = trade_mgmt.get("sl_timeout_bars")
+    if isinstance(timeout_spec, dict):
+        timeout_spec["is_active"] = timeout_enabled
+    sl_trailing_spec = trade_mgmt.get("sl_trailing_pct")
+    if isinstance(sl_trailing_spec, dict):
+        sl_trailing_spec["is_active"] = trailing_enabled
 
 
 def initialize_config(force: bool = False) -> None:

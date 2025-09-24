@@ -31,7 +31,7 @@ def _make_params(**overrides):
         "sl_trailing_enabled": False,
         "sl_trailing_pct": 0.0,
         "max_hold_bars": 0,
-        "tp_cap": float(getattr(config, "MAX_TP_PCT", 0.8)),
+        "tp_cap": float(getattr(config, "MAX_TP_PCT", 0.5)),
         "timeframe": getattr(config, "TIMEFRAME", None),
     }
     base.update(overrides)
@@ -358,7 +358,7 @@ def test_coerce_exit_params_applies_timeframe_cap():
 
 def test_coerce_exit_params_randomised_spacing(monkeypatch):
     rng = np.random.default_rng(123)
-    base_cap = float(getattr(config, "MAX_TP_PCT", 0.8))
+    base_cap = float(getattr(config, "MAX_TP_PCT", 0.5))
     timeframes = [None, "4h", "1h", "1d", "2h"]
     for tf in timeframes:
         tf_source = tf if tf is not None else getattr(config, "TIMEFRAME", None)
@@ -439,6 +439,52 @@ def test_tp_gene_bounds_respect_caps(monkeypatch):
         config.STRATEGY_RULES = original_rules
         strategy_rules.STRATEGY_RULES = original_rules
         config.initialize_config(force=True)
+
+
+def test_tp_trailing_gene_disabled_when_levels_forced_to_one(monkeypatch):
+    rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    monkeypatch.setattr(strategy_rules, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "1h", raising=False)
+    small_cap = config.TP_MIN_GAP * 0.5
+    monkeypatch.setattr(config, "TP_CAP_BY_TIMEFRAME", {"1h": small_cap}, raising=False)
+    monkeypatch.setattr(config, "_INITIALIZED", False, raising=False)
+    config.initialize_config(force=True)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    assert trade_mgmt["num_tp_levels"]["high"] == 1
+    assert trade_mgmt["tp_trailing_pct"]["is_active"] is False
+
+
+def test_exit_feature_toggles_disable_genes(monkeypatch):
+    rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    trade_mgmt["tp_trailing_enabled"] = False
+    trade_mgmt["sl_timeout_enabled"] = False
+    trade_mgmt["sl_trailing_enabled"] = False
+    monkeypatch.setattr(strategy_rules, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "4h", raising=False)
+    monkeypatch.setattr(config, "_INITIALIZED", False, raising=False)
+    config.initialize_config(force=True)
+    updated = rules["exit_rules"]["trade_management"]
+    assert updated["tp_trailing_pct"]["is_active"] is False
+    assert updated["sl_timeout_bars"]["is_active"] is False
+    assert updated["sl_trailing_pct"]["is_active"] is False
+
+
+def test_apply_tp_caps_handles_literal_level_spec(monkeypatch):
+    rules = copy.deepcopy(strategy_rules.STRATEGY_RULES)
+    trade_mgmt = rules["exit_rules"]["trade_management"]
+    trade_mgmt["num_tp_levels"] = 3
+    trade_mgmt["tp_trailing_enabled"] = True
+    monkeypatch.setattr(strategy_rules, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "STRATEGY_RULES", rules, raising=False)
+    monkeypatch.setattr(config, "TIMEFRAME", "4h", raising=False)
+    monkeypatch.setattr(config, "_INITIALIZED", False, raising=False)
+    config.initialize_config(force=True)
+    updated = rules["exit_rules"]["trade_management"]
+    assert updated["num_tp_levels"] == 3
+    assert updated["tp_trailing_pct"]["is_active"] is True
 
 
 def test_deterministic_output():

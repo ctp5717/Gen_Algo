@@ -1,5 +1,15 @@
 """Strategy rules for the GA trading framework."""
 
+# Trade-management feature toggles. Set any of these to ``False`` to remove the
+# associated genes from the GA search space while keeping downstream simulator
+# defaults intact. ``TP_TRAILING`` requires at least two TP levels to have an
+# effect, so its dependent percentage gene is disabled automatically when the
+# configured ladder never exceeds a single level.
+TP_TRAILING_FEATURE_ENABLED = True
+SL_TIMEOUT_FEATURE_ENABLED = True
+SL_TRAILING_FEATURE_ENABLED = True
+_NUM_TP_LEVELS_MAX = 4
+
 STRATEGY_RULES = {
     "entry_rules": {
         # Optional keys:
@@ -628,7 +638,7 @@ STRATEGY_RULES = {
             "num_tp_levels": {
                 "gene": "num_tp_levels",
                 "low": 1,
-                "high": 4,
+                "high": _NUM_TP_LEVELS_MAX,
                 "step": 1,
             },
             "tp_pct_1": {
@@ -655,24 +665,30 @@ STRATEGY_RULES = {
                 "high": 0.50,
                 "step": 0.005,
             },
+            "tp_trailing_enabled": TP_TRAILING_FEATURE_ENABLED,
             "tp_trailing_pct": {
                 "gene": "tp_trailing_pct",
+                "is_active": TP_TRAILING_FEATURE_ENABLED and _NUM_TP_LEVELS_MAX > 1,
                 "low": 0.0,
                 "high": 0.10,
                 "step": 0.001,
-            },
-            "sl_timeout_bars": {
-                "gene": "sl_timeout_bars",
-                "low": 0,
-                "high": 12,
-                "step": 1,
             },
             "sl_break_even_mode": {
                 "gene": "sl_break_even_mode",
                 "options": ["none", "breakeven", "follow_tp"],
             },
+            "sl_timeout_enabled": SL_TIMEOUT_FEATURE_ENABLED,
+            "sl_timeout_bars": {
+                "gene": "sl_timeout_bars",
+                "is_active": SL_TIMEOUT_FEATURE_ENABLED,
+                "low": 0,
+                "high": 12,
+                "step": 1,
+            },
+            "sl_trailing_enabled": SL_TRAILING_FEATURE_ENABLED,
             "sl_trailing_pct": {
                 "gene": "sl_trailing_pct",
+                "is_active": SL_TRAILING_FEATURE_ENABLED,
                 "low": 0.0,
                 "high": 0.20,
                 "step": 0.001,

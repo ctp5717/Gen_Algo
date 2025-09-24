@@ -344,12 +344,12 @@ def run_champion_analysis(
                 )
                 price_map = {
                     "close": validation_data["Close"].to_numpy(dtype=float),
-                    "high": validation_data.get("High", validation_data["Close"]).to_numpy(
-                        dtype=float
-                    ),
-                    "low": validation_data.get("Low", validation_data["Close"]).to_numpy(
-                        dtype=float
-                    ),
+                    "high": validation_data.get(
+                        "High", validation_data["Close"]
+                    ).to_numpy(dtype=float),
+                    "low": validation_data.get(
+                        "Low", validation_data["Close"]
+                    ).to_numpy(dtype=float),
                 }
                 telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
                 collect_traces = telemetry_cfg.get(
@@ -394,9 +394,7 @@ def run_champion_analysis(
                     asset_label=str(config.TICKER or "asset"),
                 )
             )
-            accumulate_flag = bool(
-                getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False)
-            )
+            accumulate_flag = bool(getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False))
             if not accumulate_flag:
                 raise ConfigError(
                     "Dynamic exit simulator requires"

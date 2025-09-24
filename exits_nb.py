@@ -847,7 +847,7 @@ def coerce_exit_params(
     if callable(cap_resolver):
         cap_default = float(cap_resolver(tf_source))
     else:
-        cap_default = float(getattr(config, "MAX_TP_PCT", 0.8))
+        cap_default = float(getattr(config, "MAX_TP_PCT", 0.5))
     try:
         max_tp_cap = tm_cfg.get("tp_pct_cap")
     except AttributeError:  # pragma: no cover - defensive

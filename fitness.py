@@ -386,9 +386,9 @@ class FitnessEvaluator:
                         "high": self.ohlc_data.get(
                             "High", self.ohlc_data["Close"]
                         ).to_numpy(dtype=float),
-                        "low": self.ohlc_data.get("Low", self.ohlc_data["Close"]).to_numpy(
-                            dtype=float
-                        ),
+                        "low": self.ohlc_data.get(
+                            "Low", self.ohlc_data["Close"]
+                        ).to_numpy(dtype=float),
                     }
                     entry_array = entries.to_numpy(dtype=bool)
                     telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
@@ -403,7 +403,9 @@ class FitnessEvaluator:
                         collect_traces=collect_traces,
                     )
                 except ValueError as exc:
-                    logger.debug("Invalid exit configuration for %s: %s", asset_label, exc)
+                    logger.debug(
+                        "Invalid exit configuration for %s: %s", asset_label, exc
+                    )
                     self.last_exit_summary = None
                     self.last_exit_metrics = None
                     self.last_exit_params = None
@@ -812,9 +814,7 @@ class MultiAssetFitnessEvaluator:
                     getattr(config, "TIMEFRAME", None),
                 )
             except ValueError as exc:
-                logger.debug(
-                    "Invalid exit configuration for %s: %s", asset_label, exc
-                )
+                logger.debug("Invalid exit configuration for %s: %s", asset_label, exc)
                 return self._build_evaluation_record(
                     reason="invalid_exit_config", detail=str(exc)
                 )
@@ -861,9 +861,7 @@ class MultiAssetFitnessEvaluator:
             exit_summary = summary_map.get(asset_label, {})
             exit_metrics = metrics_map.get(asset_label, {})
             exit_params_dict = exit_params.as_dict()
-            accumulate_flag = bool(
-                getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False)
-            )
+            accumulate_flag = bool(getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False))
             if not accumulate_flag:
                 raise ConfigError(
                     "Dynamic exit simulator requires"

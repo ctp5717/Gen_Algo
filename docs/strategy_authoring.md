@@ -78,10 +78,31 @@ Numba-accelerated simulator in `exits_nb.generate_dynamic_exit_signals_nb` when
         "tp_pct_2": {"gene": "tp_pct_2", "low": 0.010, "high": 0.50, "step": 0.005},
         "tp_pct_3": {"gene": "tp_pct_3", "low": 0.015, "high": 0.50, "step": 0.005},
         "tp_pct_4": {"gene": "tp_pct_4", "low": 0.020, "high": 0.50, "step": 0.005},
-        "tp_trailing_pct": {"gene": "tp_trailing_pct", "low": 0.0, "high": 0.10, "step": 0.001},
+        "tp_trailing_enabled": True,
+        "tp_trailing_pct": {
+            "gene": "tp_trailing_pct",
+            "low": 0.0,
+            "high": 0.10,
+            "step": 0.001,
+            "is_active": True,
+        },
         "sl_break_even_mode": {"gene": "sl_break_even_mode", "options": ["none", "breakeven", "follow_tp"]},
-        "sl_timeout_bars": {"gene": "sl_timeout_bars", "low": 0, "high": 12, "step": 1},
-        "sl_trailing_pct": {"gene": "sl_trailing_pct", "low": 0.0, "high": 0.20, "step": 0.001},
+        "sl_timeout_enabled": True,
+        "sl_timeout_bars": {
+            "gene": "sl_timeout_bars",
+            "low": 0,
+            "high": 12,
+            "step": 1,
+            "is_active": True,
+        },
+        "sl_trailing_enabled": True,
+        "sl_trailing_pct": {
+            "gene": "sl_trailing_pct",
+            "low": 0.0,
+            "high": 0.20,
+            "step": 0.001,
+            "is_active": True,
+        },
     },
 }
 ```
@@ -130,11 +151,13 @@ Key behaviours:
 
 Hierarchy rules applied during decode:
 
-- `tp_trailing_pct` is treated as disabled whenever it resolves to `0.0` or
-  when `num_tp_levels == 1`.
-- `sl_timeout_bars` uses `0` to disable the timeout feature; positive integers
-  (clamped to 12) activate the delay.
-- `sl_trailing_pct` disables trailing stops when it resolves to `0.0`.
+- `tp_trailing_pct` is treated as disabled whenever it resolves to `0.0`, when
+  `num_tp_levels == 1`, or when `tp_trailing_enabled` is set to `False`
+  (removing the gene from the GA search space).
+- `sl_timeout_bars` uses `0` to disable the timeout feature; setting
+  `sl_timeout_enabled` to `False` removes the gene entirely.
+- `sl_trailing_pct` disables trailing stops when it resolves to `0.0`; toggling
+  `sl_trailing_enabled` to `False` drops the gene from the search space.
 
 Per-bar precedence is deterministic:
 

@@ -16,8 +16,8 @@ import analysis  # noqa: E402
 import config  # noqa: E402
 import data_loader  # noqa: E402
 import fitness  # noqa: E402
-from schemas import load_wf_summary  # noqa: E402
 from exits_nb import ExitReason  # noqa: E402
+from schemas import load_wf_summary  # noqa: E402
 
 config.initialize_config()
 
