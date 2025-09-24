@@ -290,7 +290,7 @@ SELECTED_ASSET_NAME = "Bitcoin"
 
 # Set your desired timeframe here. This now controls everything.
 # Allow overrides by checking for an existing global.
-TIMEFRAME = globals().get("TIMEFRAME", "4h")
+TIMEFRAME = globals().get("TIMEFRAME", "1h")
 TICKER = CRYPTO_UNIVERSE.get(SELECTED_ASSET_NAME, "BTC-USD")
 
 # --- 2. DYNAMIC DATE & RISK CALCULATION ---
@@ -672,7 +672,7 @@ MULTI_ASSET = {
     # Substitute value for NaN metrics
     "nan_fallback": 0.0,
     # Group trade floor configuration
-    "min_total_trades": 0,
+    "min_total_trades": 10,
     "trade_floor_policy": "soft_penalty",  # hard_floor | soft_penalty
     "soft_penalty_strength": 0.75,
     "soft_penalty_mode": "multiplicative",  # multiplicative | additive
@@ -680,9 +680,9 @@ MULTI_ASSET = {
     "zero_trade_policy": "ignore",  # penalize | ignore
     "zero_trade_penalty": -1.0,
     # Penalty applied when ignoring assets
-    "coverage_penalty": 0.25,
+    "coverage_penalty": 0.1,
     # Minimal trades to consider an asset as traded
-    "per_asset_min_trades": 5,
+    "per_asset_min_trades": 3,
     # Minimal number of assets that must be included
     "min_included_assets": 3,
     # Annualisation base for trade floor scaling
@@ -754,8 +754,8 @@ RECOMMENDATION = {
 
 FINAL_STRATEGY = {
     # --- Fold weighting ---
-    "USE_RECENCY_WEIGHTING": False,
-    "FOLD_DECAY_RATE": 0.0,
+    "USE_RECENCY_WEIGHTING": True,
+    "FOLD_DECAY_RATE": 0.135,
     # --- Safety gates ---
     "MIN_CONFIDENCE_FOR_FINAL": 60,
     # --- Asset selection & weighting ---
