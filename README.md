@@ -10,6 +10,7 @@ This repository packages a multi-stage research workflow: it loads price data, e
 - [Configuration Reference](docs/configuration.md) – detailed guide to `config.py` toggles, data windows, and fitness knobs.
 - [Strategy Authoring Guide](docs/strategy_authoring.md) – how to extend `STRATEGY_RULES` with new entry/exit logic and GA genes.
 - [Architecture Overview](docs/architecture.md) – module relationships for contributors.
+- [Operations Runbook](docs/operations_runbook.md) – production playbook for scheduled runs and troubleshooting.
 - [Agents Guide](AGENTS.md) – automation guardrails for coding agents.
 
 ## Key capabilities

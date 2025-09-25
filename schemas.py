@@ -6,7 +6,7 @@ import ast
 import csv
 import json
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, TypeAdapter, field_validator
 
@@ -24,8 +24,9 @@ class SchemaCsvError(ValueError):
 class Fold(BaseModel):
     fold_id: int
     validation_fitness: float
-    params: Dict[str, float]
+    params: Dict[str, float | int | str | bool | None]
     champion_status: Optional[Literal["Elite", "Viable", "Discarded"]] = None
+    resolved_params: Optional[Dict[str, Any]] = None
 
     @field_validator("champion_status", mode="before")
     @classmethod
@@ -56,6 +57,7 @@ class PerAssetRow(BaseModel):
     score: Optional[float]
     trades: int
     included: bool
+    reason: Optional[str] = None
 
 
 class WalkForwardPerAssetV1(BaseModel):
@@ -99,12 +101,21 @@ def load_wf_summary(path: str | Path) -> WalkForwardSummaryV1:
                     params = {}
             else:
                 params = p or {}
+        resolved = f.get("resolved_params")
+        if resolved is None:
+            resolved = f.get("Resolved Params")
+        if isinstance(resolved, str):
+            try:
+                resolved = ast.literal_eval(resolved)
+            except Exception:
+                resolved = {}
         mapped.append(
             {
                 "fold_id": fold_id,
                 "validation_fitness": validation_fitness,
                 "params": params,
                 "champion_status": f.get("champion_status"),
+                "resolved_params": resolved,
             }
         )
     raw["folds"] = mapped
@@ -126,6 +137,7 @@ def load_wf_per_asset(path: str | Path) -> tuple[WalkForwardPerAssetV1, List[str
         "Score": "score",
         "Trades": "trades",
         "Included": "included",
+        "Reason": "reason",
     }
     mapping_lowers = {k.lower() for k in mapping.keys()}
     rows: List[Dict[str, object]] = []
@@ -162,6 +174,7 @@ def load_wf_per_asset(path: str | Path) -> tuple[WalkForwardPerAssetV1, List[str
                     "score": score,
                     "trades": trades,
                     "included": str(norm["included"]).lower() in {"true", "1", "yes"},
+                    "reason": (str(norm.get("reason", "")).strip() or None),
                 }
             )
     if not rows:

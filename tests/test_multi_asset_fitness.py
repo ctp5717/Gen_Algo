@@ -50,7 +50,7 @@ def _make_evaluator(settings=None, stats_list=None):
     if stats_list is not None:
         stats_iter = iter(stats_list)
 
-        def fake_eval(self, ohlc, rules):
+        def fake_eval(self, ohlc, rules, ticker=None):
             return next(stats_iter)
 
         evaluator._evaluate_single_asset = types.MethodType(fake_eval, evaluator)
@@ -192,6 +192,9 @@ def test_multi_asset_composite_matches_single(monkeypatch):
             mod.metrics_contract, "_provider_signature", lambda *a, **k: "dummy"
         )
         monkeypatch.setattr(mod.metrics_contract, "evaluate_metrics", _fake_metrics)
+        monkeypatch.setattr(
+            mod.config, "USE_DYNAMIC_EXIT_SIMULATOR", False, raising=False
+        )
 
     single_eval = evaluator_cls(ohlc, {}, {})
     single_score = single_eval(None, [], 0)
@@ -723,7 +726,7 @@ def test_ga_and_tuner_consistency(monkeypatch):
         "equity_curve": pd.Series([1, 1.1, 1.2]),
     }
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats
 
     group_data = {
@@ -808,7 +811,7 @@ def test_handles_asset_error_gracefully():
 
     ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         if ohlc.empty:
             raise IndexError("single positional indexer is out-of-bounds")
         return {"total_return": 1.0, "trades": 5}
@@ -846,7 +849,7 @@ def test_parallel_evaluation_basic():
         id(group_data["C"]): {"total_return": 5.0, "trades": 2},
     }
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return stats_map[id(ohlc)]
 
     ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
@@ -873,7 +876,7 @@ def test_parallel_evaluation_handles_exception():
     }
     ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         if id(ohlc) == id(group_data["B"]):
             raise ValueError("boom")
         return {"total_return": 2.0, "trades": 2}
@@ -929,7 +932,7 @@ def test_sequential_evaluation_does_not_create_executor(monkeypatch):
     }
     ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         return {"total_return": 1.5, "trades": 2}
 
     ev._evaluate_single_asset = types.MethodType(fake_eval, ev)
@@ -979,7 +982,7 @@ def test_parallel_executor_reused_across_calls(monkeypatch):
 
     call_count = 0
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         nonlocal call_count
         call_count += 1
         return {"total_return": 2.0, "trades": 3}
@@ -1030,7 +1033,7 @@ def test_parallel_executor_reuse_handles_exceptions(monkeypatch):
     id_map = {id(df): ticker for ticker, df in group_data.items()}
     should_raise = {"value": True}
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         ticker = id_map[id(ohlc)]
         if should_raise["value"] and ticker == "B":
             raise RuntimeError("boom")
@@ -1069,7 +1072,7 @@ def test_evaluate_assets_collects_errors():
     }
     ev = fitness.MultiAssetFitnessEvaluator(group_data, {}, {}, settings)
 
-    def fake_eval(self, ohlc, rules):
+    def fake_eval(self, ohlc, rules, ticker=None):
         if ohlc["Close"].iloc[0] == 9:
             err = RuntimeError("boom")
             err.indicator = "bad_indicator"

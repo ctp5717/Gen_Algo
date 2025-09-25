@@ -13,6 +13,7 @@ import warnings
 import weakref
 from collections import Counter
 from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -42,6 +43,12 @@ import config
 import metrics_contract
 import strategy_engine as engine
 import trade_floor
+from exits_nb import (
+    coerce_exit_params,
+    compute_exit_metrics,
+    generate_dynamic_exit_signals_nb,
+    summarise_exit_reasons,
+)
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from utils.math import weighted_mean_std
@@ -49,6 +56,206 @@ from utils.math import weighted_mean_std
 PenaltyDetail = str | dict[str, float | str] | None
 
 logger = logging.getLogger(__name__)
+
+DynamicExitSizeMode = Literal["fraction_base", "fraction_current", "absolute"]
+
+
+ConfigError = getattr(config, "ConfigurationError", RuntimeError)
+
+
+def build_dynamic_exit_orders(
+    *,
+    entries: pd.Series,
+    exits_series: pd.Series,
+    exit_size_series: pd.Series,
+    base_entry_size: float,
+    mode: DynamicExitSizeMode,
+    asset_label: str,
+    tol: float = 1e-8,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Convert raw entry/exit signals into mutually exclusive orders.
+
+    ``generate_dynamic_exit_signals_nb`` initialises its internal ``open_qty`` to
+    ``1.0`` and emits ``exit_size`` as the fraction of that baseline.  The
+    ``mode`` parameter allows alternative semantics:
+
+    - ``"fraction_base"`` (default): treat ``exit_size`` as a fraction of the
+      configured ``base_entry_size``.
+    - ``"fraction_current"``: treat ``exit_size`` as a fraction of the
+      *current* ``open_qty`` (the simulator's behaviour if it re-computes on the
+      live position).
+    - ``"absolute"``: use ``exit_size`` directly as an absolute quantity.
+
+    The helper enforces that entries and exits never overlap except for an
+    intentional forced close on the last bar, clamps overshoots with capped exit
+    sizes, and drops zero-quantity exits to avoid submitting no-op orders.
+    """
+
+    if base_entry_size <= 0:
+        raise ValueError("BASE_ENTRY_SIZE must be positive")
+
+    valid_modes: set[str] = {"fraction_base", "fraction_current", "absolute"}
+    if mode not in valid_modes:
+        raise ValueError(f"Unsupported dynamic exit sizing mode: {mode!r}")
+
+    entries_index = entries.index
+    exits_series = exits_series.reindex(entries_index, fill_value=False)
+    exit_size_series = exit_size_series.reindex(entries_index, fill_value=0.0)
+
+    entries_bool = entries.astype(bool)
+    exits_bool = exits_series.astype(bool)
+    exit_size_clean = exit_size_series.astype(float).fillna(0.0)
+
+    if mode in ("fraction_base", "fraction_current"):
+        above_one = exit_size_clean > 1.0 + tol
+        below_zero = exit_size_clean < -tol
+        if above_one.any() or below_zero.any():
+            logger.warning(
+                "Exit fractions for %s fell outside [0, 1]; clipping", asset_label
+            )
+        exit_size_clean = exit_size_clean.clip(lower=0.0, upper=1.0)
+    else:
+        if (exit_size_clean < -tol).any():
+            logger.warning(
+                "Negative absolute exit sizes for %s detected; clipping", asset_label
+            )
+        exit_size_clean = exit_size_clean.clip(lower=0.0)
+
+    entries_array = entries_bool.to_numpy(dtype=bool, copy=False)
+    exits_array = exits_bool.to_numpy(dtype=bool, copy=False)
+    exit_size_array = exit_size_clean.to_numpy(dtype=float, copy=False)
+
+    entries_active_array = np.zeros_like(entries_array, dtype=bool)
+    exits_clean_array = exits_array.copy()
+    size_array = np.zeros_like(exit_size_array, dtype=float)
+
+    open_qty = 0.0
+    max_open_qty = 0.0
+    warning_counts: dict[str, int] = {}
+    warning_limit = 5
+
+    def _warn(key: str, message: str, *args) -> None:
+        count = warning_counts.get(key, 0) + 1
+        warning_counts[key] = count
+        if count <= warning_limit:
+            logger.warning(message, *args)
+
+    entry_logs: list[str] = []
+    exit_logs: list[str] = []
+
+    for idx in range(entries_array.size):
+        if entries_array[idx] and open_qty <= tol:
+            entries_active_array[idx] = True
+            size_array[idx] = base_entry_size
+            open_qty += base_entry_size
+            max_open_qty = max(max_open_qty, open_qty)
+            if len(entry_logs) < 5:
+                entry_logs.append(f"{entries_index[idx]}:{base_entry_size:.6f}")
+            continue
+
+        if exits_array[idx]:
+            if mode == "fraction_base":
+                requested_exit = exit_size_array[idx] * base_entry_size
+            elif mode == "fraction_current":
+                requested_exit = exit_size_array[idx] * open_qty
+            else:
+                requested_exit = exit_size_array[idx]
+
+            if requested_exit < -tol:
+                _warn(
+                    "negative_exit",
+                    "Negative exit size requested for %s at %s; clamping to zero",
+                    asset_label,
+                    entries_index[idx],
+                )
+                requested_exit = 0.0
+
+            if requested_exit > open_qty + tol:
+                _warn(
+                    "overshoot_exit",
+                    "Exit qty > open qty at %s for %s (capping): exit=%.6f, open=%.6f",
+                    entries_index[idx],
+                    asset_label,
+                    requested_exit,
+                    open_qty,
+                )
+
+            exit_qty = min(requested_exit, open_qty)
+            exit_qty = max(0.0, exit_qty)
+            if exit_qty <= tol:
+                exits_clean_array[idx] = False
+                size_array[idx] = 0.0
+            else:
+                size_array[idx] = exit_qty
+                open_qty = max(0.0, open_qty - exit_qty)
+
+                if len(exit_logs) < 5:
+                    exit_logs.append(f"{entries_index[idx]}:{exit_qty:.6f}")
+
+        max_open_qty = max(max_open_qty, open_qty)
+
+    if max_open_qty > base_entry_size * (1.0 + 1e-8):
+        raise AssertionError("Dynamic exit state machine opened more than one position")
+
+    forced_close = False
+    if open_qty > tol:
+        forced_close = True
+        forced_index = entries_array.size - 1
+        exits_clean_array[forced_index] = True
+        size_array[forced_index] = size_array[forced_index] + open_qty
+        if len(exit_logs) < 5 and size_array[forced_index] > tol:
+            exit_logs.append(
+                f"{entries_index[forced_index]}:{size_array[forced_index]:.6f}"
+            )
+        open_qty = 0.0
+    else:
+        forced_index = -1
+
+    exits_clean_array[entries_active_array] = False
+    if forced_close and forced_index >= 0 and entries_active_array[forced_index]:
+        # Intentional EOF overlap: forced close flattens any residual on the last bar.
+        exits_clean_array[forced_index] = True
+
+    entries_active = pd.Series(entries_active_array, index=entries_index, dtype=bool)
+    exits_clean = pd.Series(exits_clean_array, index=entries_index, dtype=bool)
+    size_series = pd.Series(size_array, index=entries_index, dtype=float)
+
+    if (entries_active & (size_series <= 0)).any():
+        raise AssertionError("Entries must have strictly positive order size")
+
+    logger.debug(
+        "Dynamic exit orders for %s entries: %s",
+        asset_label,
+        ", ".join(entry_logs) if entry_logs else "none",
+    )
+    logger.debug(
+        "Dynamic exit orders for %s exits: %s",
+        asset_label,
+        ", ".join(exit_logs) if exit_logs else "none",
+    )
+    if forced_close:
+        logger.debug(
+            "Dynamic exit orders for %s inserted forced close at %s",
+            asset_label,
+            entries_index[forced_index],
+        )
+
+    summary_labels = {
+        "overshoot_exit": "exit overshoot",
+        "negative_exit": "negative exit size",
+    }
+    for key, count in warning_counts.items():
+        if count > warning_limit:
+            label = summary_labels.get(key, key)
+            logger.warning(
+                "%s warnings for %s exceeded %d occurrences (total=%d); further messages suppressed",
+                label,
+                asset_label,
+                warning_limit,
+                count,
+            )
+
+    return entries_active, exits_clean, size_series
 
 
 def _sanitize_metric(value: float | int | None, fallback: float) -> float:
@@ -75,16 +282,57 @@ def _composite_score(
     pf_cap: float,
     nan_fallback: float,
     max_drawdown_fallback: float,
+    exit_usage: Mapping[str, float] | None = None,
+    exit_weights: Mapping[str, float] | None = None,
 ) -> float:
     sortino_val = _sanitize_metric(sortino, nan_fallback)
     pf_val = _sanitize_profit_factor(profit_factor, cap=pf_cap, fallback=nan_fallback)
     drawdown_val = _sanitize_metric(max_drawdown, max_drawdown_fallback)
     drawdown_score = 1 - (drawdown_val / 100.0)
-    return (
+    base_score = (
         sortino_val * weights["sortino_ratio"]
         + pf_val * weights["profit_factor"]
         + drawdown_score * weights["max_drawdown"]
     )
+    if exit_usage and exit_weights:
+        trades = float(exit_usage.get("trades_evaluated", 0.0) or 0.0)
+        tp_events = float(exit_usage.get("tp_trades_evaluated", 0.0) or 0.0)
+        tp_rate = tp_events / trades if trades > 0 else 0.0
+        timeout_rate = float(exit_usage.get("sl_timeout_usage_rate", 0.0) or 0.0)
+        avg_tp_level = float(exit_usage.get("avg_tp_level_reached", 0.0) or 0.0)
+        trailing_rate = float(exit_usage.get("trailing_tp_hit_rate", 0.0) or 0.0)
+
+        timeout_penalty = max(
+            0.0,
+            timeout_rate - float(exit_weights.get("timeout_target", 1.0) or 0.0),
+        )
+        timeout_penalty *= float(exit_weights.get("timeout_weight", 0.0) or 0.0)
+
+        tp_shortfall = max(
+            0.0,
+            float(exit_weights.get("tp_hit_target", 0.0) or 0.0) - tp_rate,
+        )
+        tp_penalty = tp_shortfall * float(exit_weights.get("tp_hit_weight", 0.0) or 0.0)
+
+        level_shortfall = max(
+            0.0,
+            float(exit_weights.get("avg_tp_level_target", 0.0) or 0.0) - avg_tp_level,
+        )
+        level_penalty = level_shortfall * float(
+            exit_weights.get("avg_tp_level_weight", 0.0) or 0.0
+        )
+
+        trailing_shortfall = max(
+            0.0,
+            float(exit_weights.get("trailing_tp_target", 0.0) or 0.0) - trailing_rate,
+        )
+        trailing_penalty = trailing_shortfall * float(
+            exit_weights.get("trailing_tp_weight", 0.0) or 0.0
+        )
+
+        base_score -= timeout_penalty + tp_penalty + level_penalty + trailing_penalty
+
+    return base_score
 
 
 def print_floor_failures(counter: Counter):
@@ -102,6 +350,9 @@ class FitnessEvaluator:
         self.gene_map = gene_map
         self._metrics_preflight_done = False
         self._metric_mapping_logged = False
+        self.last_exit_params: dict | None = None
+        self.last_exit_summary: dict | None = None
+        self.last_exit_metrics: dict | None = None
 
     def __call__(self, ga_instance, solution, sol_idx):
         config.initialize_config()
@@ -112,22 +363,111 @@ class FitnessEvaluator:
             if entries.sum() < config.FITNESS_WEIGHTS["min_trades"]:
                 return -1.0
 
-            # Extract parameters for exits and stop rules
             exit_rules = rules.get("exit_rules", {})
-            time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
-                entries, exit_rules, config.MAX_HOLD_PERIOD
-            )
-
-            portfolio = vbt.Portfolio.from_signals(
-                close=self.ohlc_data["Close"],
-                entries=entries,
-                exits=time_based_exit,
-                sl_stop=sl_stop,
-                tp_stop=tp_stop,
-                sl_trail=sl_trail,  # Pass the trailing stop value to the backtester
-                fees=config.FEES,
-                freq=config.to_pandas_freq(config.TIMEFRAME),
-            )
+            self.last_exit_params = None
+            self.last_exit_summary = None
+            self.last_exit_metrics = None
+            exit_usage_metrics: Mapping[str, float] | None = None
+            if config.USE_DYNAMIC_EXIT_SIMULATOR:
+                base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
+                size_mode: DynamicExitSizeMode = getattr(
+                    config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base"
+                )
+                raw_label = getattr(config, "TICKER", "asset")
+                asset_label = str(raw_label or "asset")
+                try:
+                    exit_params = coerce_exit_params(
+                        exit_rules,
+                        config.MAX_HOLD_PERIOD,
+                        getattr(config, "TIMEFRAME", None),
+                    )
+                    price_map = {
+                        "close": self.ohlc_data["Close"].to_numpy(dtype=float),
+                        "high": self.ohlc_data.get(
+                            "High", self.ohlc_data["Close"]
+                        ).to_numpy(dtype=float),
+                        "low": self.ohlc_data.get(
+                            "Low", self.ohlc_data["Close"]
+                        ).to_numpy(dtype=float),
+                    }
+                    entry_array = entries.to_numpy(dtype=bool)
+                    telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+                    collect_traces = telemetry_cfg.get(
+                        "collect_traces", telemetry_cfg.get("enabled", True)
+                    )
+                    exit_result = generate_dynamic_exit_signals_nb(
+                        entry_array,
+                        price_map,
+                        exit_params,
+                        seed=getattr(config, "SEED", None),
+                        collect_traces=collect_traces,
+                    )
+                except ValueError as exc:
+                    logger.debug(
+                        "Invalid exit configuration for %s: %s", asset_label, exc
+                    )
+                    self.last_exit_summary = None
+                    self.last_exit_metrics = None
+                    self.last_exit_params = None
+                    return -999.0
+                exits_mask = np.asarray(exit_result.exits, dtype=bool)
+                residual_size = exit_result.exit_size[~exits_mask]
+                if residual_size.size and not np.allclose(
+                    residual_size, 0.0, atol=1e-12
+                ):
+                    raise AssertionError(
+                        "exit_size must be zero on bars without exit signals"
+                    )
+                exits_series = pd.Series(exit_result.exits, index=entries.index)
+                exit_size_series = pd.Series(
+                    exit_result.exit_size, index=entries.index, dtype=float
+                )
+                entries_active, exits_series, size_series = build_dynamic_exit_orders(
+                    entries=entries,
+                    exits_series=exits_series,
+                    exit_size_series=exit_size_series,
+                    base_entry_size=base_entry_size,
+                    mode=size_mode,
+                    asset_label=asset_label,
+                )
+                summary = summarise_exit_reasons(exit_result, [asset_label])
+                exit_metrics_map = compute_exit_metrics(exit_result, [asset_label])
+                self.last_exit_summary = summary
+                self.last_exit_metrics = exit_metrics_map
+                self.last_exit_params = exit_params.as_dict()
+                exit_usage_metrics = exit_metrics_map.get(asset_label)
+                accumulate_flag = bool(
+                    getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False)
+                )
+                if not accumulate_flag:
+                    raise ConfigError(
+                        "Dynamic exit simulator requires"
+                        " config.DYNAMIC_EXIT_ACCUMULATE=True for staged exits"
+                    )
+                portfolio = vbt.Portfolio.from_signals(
+                    close=self.ohlc_data["Close"],
+                    entries=entries_active,
+                    exits=exits_series,
+                    size=size_series,
+                    accumulate=accumulate_flag,
+                    size_type="amount",
+                    fees=config.FEES,
+                    freq=config.to_pandas_freq(config.TIMEFRAME),
+                )
+            else:
+                time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
+                    entries, exit_rules, config.MAX_HOLD_PERIOD
+                )
+                portfolio = vbt.Portfolio.from_signals(
+                    close=self.ohlc_data["Close"],
+                    entries=entries,
+                    exits=time_based_exit,
+                    sl_stop=sl_stop,
+                    tp_stop=tp_stop,
+                    sl_trail=sl_trail,
+                    fees=config.FEES,
+                    freq=config.to_pandas_freq(config.TIMEFRAME),
+                )
 
             signature = metrics_contract._provider_signature(portfolio)
 
@@ -163,6 +503,7 @@ class FitnessEvaluator:
 
             weights = config.FITNESS_WEIGHTS
             cap = getattr(config, "MULTI_ASSET", {}).get("winsorize_pf_cap", 5.0)
+            exit_weights = getattr(config, "FITNESS_EXIT_USAGE", None)
             score = _composite_score(
                 metrics.get("sortino"),
                 metrics.get("profit_factor"),
@@ -171,6 +512,8 @@ class FitnessEvaluator:
                 pf_cap=cap,
                 nan_fallback=0.0,
                 max_drawdown_fallback=100.0,
+                exit_usage=exit_usage_metrics,
+                exit_weights=exit_weights,
             )
 
             return score if np.isfinite(score) else -1.0
@@ -393,6 +736,30 @@ class MultiAssetFitnessEvaluator:
         self._metric_mapping_logged = True
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _collect_exit_overview(
+        per_asset_details: Mapping[str, Mapping[str, object]],
+    ) -> tuple[dict[str, dict], dict[str, dict], dict[str, dict]]:
+        """Extract exit summaries, metrics, and parameter snapshots for metadata."""
+
+        summary: dict[str, dict] = {}
+        params: dict[str, dict] = {}
+        metrics: dict[str, dict] = {}
+        for ticker, detail in per_asset_details.items():
+            if not isinstance(detail, Mapping):
+                continue
+            exit_summary = detail.get("exit_summary")
+            if isinstance(exit_summary, Mapping) and exit_summary:
+                summary[ticker] = dict(exit_summary)
+            exit_params = detail.get("exit_params")
+            if isinstance(exit_params, Mapping) and exit_params:
+                params[ticker] = dict(exit_params)
+            exit_metrics = detail.get("exit_metrics")
+            if isinstance(exit_metrics, Mapping) and exit_metrics:
+                metrics[ticker] = dict(exit_metrics)
+        return summary, params, metrics
+
+    # ------------------------------------------------------------------
     def _prepare_metrics_record(
         self, stats: dict
     ) -> tuple[dict, str | None, str | None]:
@@ -417,7 +784,9 @@ class MultiAssetFitnessEvaluator:
         return record, reason, detail
 
     # ------------------------------------------------------------------
-    def _evaluate_single_asset(self, ohlc: pd.DataFrame, rules: dict) -> dict:
+    def _evaluate_single_asset(
+        self, ohlc: pd.DataFrame, rules: dict, ticker: str | None = None
+    ) -> dict:
         """Run the strategy on a single asset and return raw statistics."""
         # Empty or very short dataframes can cause downstream libraries to
         # raise ``IndexError`` when statistics are requested.  In walk forward
@@ -431,22 +800,98 @@ class MultiAssetFitnessEvaluator:
             ohlc, rules, collect_counts=True
         )
 
-        # Record the actual executed trades using vectorbt.
+        raw_label = ticker if ticker is not None else getattr(ohlc, "name", "asset")
+        asset_label = str(raw_label or "asset")
         exit_rules = rules.get("exit_rules", {})
-        time_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
-            entries, exit_rules, config.MAX_HOLD_PERIOD
-        )
+        exit_summary: dict[str, dict[str, float]] = {}
+        exit_metrics: dict[str, float] = {}
+        exit_params_dict: dict | None = None
+        if config.USE_DYNAMIC_EXIT_SIMULATOR:
+            try:
+                exit_params = coerce_exit_params(
+                    exit_rules,
+                    config.MAX_HOLD_PERIOD,
+                    getattr(config, "TIMEFRAME", None),
+                )
+            except ValueError as exc:
+                logger.debug("Invalid exit configuration for %s: %s", asset_label, exc)
+                return self._build_evaluation_record(
+                    reason="invalid_exit_config", detail=str(exc)
+                )
+            price_map = {
+                "close": ohlc["Close"].to_numpy(dtype=float),
+                "high": ohlc.get("High", ohlc["Close"]).to_numpy(dtype=float),
+                "low": ohlc.get("Low", ohlc["Close"]).to_numpy(dtype=float),
+            }
+            telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+            collect_traces = telemetry_cfg.get(
+                "collect_traces", telemetry_cfg.get("enabled", True)
+            )
+            exit_result = generate_dynamic_exit_signals_nb(
+                entries.to_numpy(dtype=bool),
+                price_map,
+                exit_params,
+                seed=getattr(config, "SEED", None),
+                collect_traces=collect_traces,
+            )
+            exits_mask = np.asarray(exit_result.exits, dtype=bool)
+            residual_size = exit_result.exit_size[~exits_mask]
+            if residual_size.size and not np.allclose(residual_size, 0.0, atol=1e-12):
+                raise AssertionError(
+                    "exit_size must be zero on bars without exit signals"
+                )
+            exits_series = pd.Series(exit_result.exits, index=entries.index)
+            exit_size_series = pd.Series(
+                exit_result.exit_size, index=entries.index, dtype=float
+            )
+            base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
+            size_mode: DynamicExitSizeMode = getattr(
+                config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base"
+            )
+            entries_active, exits_series, size_series = build_dynamic_exit_orders(
+                entries=entries,
+                exits_series=exits_series,
+                exit_size_series=exit_size_series,
+                base_entry_size=base_entry_size,
+                mode=size_mode,
+                asset_label=asset_label,
+            )
+            summary_map = summarise_exit_reasons(exit_result, [asset_label])
+            metrics_map = compute_exit_metrics(exit_result, [asset_label])
+            exit_summary = summary_map.get(asset_label, {})
+            exit_metrics = metrics_map.get(asset_label, {})
+            exit_params_dict = exit_params.as_dict()
+            accumulate_flag = bool(getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False))
+            if not accumulate_flag:
+                raise ConfigError(
+                    "Dynamic exit simulator requires"
+                    " config.DYNAMIC_EXIT_ACCUMULATE=True for staged exits"
+                )
+            portfolio = vbt.Portfolio.from_signals(
+                close=ohlc["Close"],
+                entries=entries_active,
+                exits=exits_series,
+                size=size_series,
+                accumulate=accumulate_flag,
+                size_type="amount",
+                fees=config.FEES,
+                freq=config.to_pandas_freq(config.TIMEFRAME),
+            )
+        else:
+            time_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
+                entries, exit_rules, config.MAX_HOLD_PERIOD
+            )
 
-        portfolio = vbt.Portfolio.from_signals(
-            close=ohlc["Close"],
-            entries=entries,
-            exits=time_exit,
-            sl_stop=sl_stop,
-            tp_stop=tp_stop,
-            sl_trail=sl_trail,
-            fees=config.FEES,
-            freq=config.to_pandas_freq(config.TIMEFRAME),
-        )
+            portfolio = vbt.Portfolio.from_signals(
+                close=ohlc["Close"],
+                entries=entries,
+                exits=time_exit,
+                sl_stop=sl_stop,
+                tp_stop=tp_stop,
+                sl_trail=sl_trail,
+                fees=config.FEES,
+                freq=config.to_pandas_freq(config.TIMEFRAME),
+            )
 
         signature = metrics_contract._provider_signature(portfolio)
 
@@ -501,6 +946,9 @@ class MultiAssetFitnessEvaluator:
             "metric_sources": sources,
             "missing_metrics": list(missing),
             "metric_provider": signature,
+            "exit_summary": exit_summary,
+            "exit_metrics": exit_metrics,
+            "exit_params": exit_params_dict,
         }
 
     # ------------------------------------------------------------------
@@ -522,7 +970,7 @@ class MultiAssetFitnessEvaluator:
                     )
                     continue
                 future_map[
-                    executor.submit(self._evaluate_single_asset, ohlc, rules)
+                    executor.submit(self._evaluate_single_asset, ohlc, rules, ticker)
                 ] = ticker
             for fut in cf.as_completed(future_map):
                 ticker = future_map[fut]
@@ -556,7 +1004,7 @@ class MultiAssetFitnessEvaluator:
                     )
                     continue
                 try:
-                    raw_stats = self._evaluate_single_asset(ohlc, rules)
+                    raw_stats = self._evaluate_single_asset(ohlc, rules, ticker)
                     stats, reason, detail = self._prepare_metrics_record(raw_stats)
                     results[ticker] = self._build_evaluation_record(
                         stats, reason=reason, detail=detail
@@ -597,6 +1045,7 @@ class MultiAssetFitnessEvaluator:
         cap = self.settings.get("winsorize_pf_cap", 5.0)
         sources_recorded = False
         run_metric_sources: dict[str, str] | None = None
+        exit_weights = getattr(config, "FITNESS_EXIT_USAGE", None)
 
         for ticker in self._sorted_tickers:
             stats_raw = evaluation_results.get(ticker, self._empty_stats())
@@ -611,6 +1060,9 @@ class MultiAssetFitnessEvaluator:
             weight = asset_weights_cfg.get(ticker, 1.0)
             pf_raw = stats.get("profit_factor")
             pf_capped = _sanitize_profit_factor(pf_raw, cap=cap, fallback=nan_fallback)
+            exit_usage = stats.get("exit_metrics")
+            if not isinstance(exit_usage, Mapping):
+                exit_usage = None
 
             if trades < per_asset_min:
                 if self.settings.get("zero_trade_policy") == "penalize":
@@ -686,6 +1138,8 @@ class MultiAssetFitnessEvaluator:
                     pf_cap=cap,
                     nan_fallback=nan_fallback,
                     max_drawdown_fallback=100.0,
+                    exit_usage=exit_usage,
+                    exit_weights=exit_weights,
                 )
 
             per_asset_metrics.append(val)
@@ -729,6 +1183,11 @@ class MultiAssetFitnessEvaluator:
         total_trades = summary["total_trades"]
         assets_traded = summary["assets_traded"]
         metric_sources = summary.get("metric_sources") or {}
+        (
+            exit_summary_map,
+            exit_params_map,
+            exit_metrics_map,
+        ) = self._collect_exit_overview(per_asset_details)
 
         if not per_asset_metrics:
             poor_score = self.settings.get("poor_score", -999.0)
@@ -753,6 +1212,9 @@ class MultiAssetFitnessEvaluator:
                 "fitness": poor_score,
                 "asset_weights": {},
                 "metric_sources": metric_sources,
+                "exit_reason_breakdown": exit_summary_map,
+                "exit_params": exit_params_map,
+                "exit_metrics": exit_metrics_map,
             }
             return poor_score
 
@@ -844,6 +1306,9 @@ class MultiAssetFitnessEvaluator:
                     "fitness": F,
                     "asset_weights": w_map,
                     "metric_sources": metric_sources,
+                    "exit_reason_breakdown": exit_summary_map,
+                    "exit_params": exit_params_map,
+                    "exit_metrics": exit_metrics_map,
                 }
                 return F
             else:
@@ -876,6 +1341,9 @@ class MultiAssetFitnessEvaluator:
                 "fitness": F,
                 "asset_weights": w_map,
                 "metric_sources": metric_sources,
+                "exit_reason_breakdown": exit_summary_map,
+                "exit_params": exit_params_map,
+                "exit_metrics": exit_metrics_map,
             }
             return F
         elif policy == "soft_penalty" and total_trades < min_trades:
@@ -916,6 +1384,9 @@ class MultiAssetFitnessEvaluator:
             "fitness": F,
             "asset_weights": w_map,
             "metric_sources": metric_sources,
+            "exit_reason_breakdown": exit_summary_map,
+            "exit_params": exit_params_map,
+            "exit_metrics": exit_metrics_map,
         }
 
         return F

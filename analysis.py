@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import traceback
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -26,6 +27,13 @@ import fitness
 import strategy_engine as engine
 import trade_floor
 from deps import ensure_real_vectorbt
+from exits_nb import (
+    ExitReason,
+    coerce_exit_params,
+    compute_exit_metrics,
+    generate_dynamic_exit_signals_nb,
+    summarise_exit_reasons,
+)
 from params_resolver import inject_genes_into_rules
 from portfolio_utils import extract_exit_params
 from run_metadata import merge_run_metadata
@@ -34,10 +42,84 @@ from strategy_rules import STRATEGY_RULES
 RUN_DIR = Path(".")
 
 
+ConfigError = getattr(config, "ConfigurationError", RuntimeError)
+
+
 def set_run_dir(path: Path) -> None:
     """Set the directory where analysis artifacts and metadata are stored."""
     global RUN_DIR
     RUN_DIR = Path(path)
+
+
+def _write_exit_reason_breakdown_csv(
+    summary: Mapping[str, Mapping[str, Mapping[str, float]]],
+    artifacts: list[str],
+) -> None:
+    """Persist aggregated exit fractions per reason for later inspection."""
+
+    settings = getattr(config, "EXIT_TELEMETRY", {})
+    if not settings:
+        return
+    if not settings.get("write_reason_breakdown_csv", True):
+        return
+    rows: list[dict[str, object]] = []
+    for asset, reasons in summary.items():
+        for reason_name_key, stats in reasons.items():
+            try:
+                code_int = int(stats.get("code", 0))
+            except (TypeError, ValueError):
+                continue
+            try:
+                reason_enum = ExitReason(code_int)
+                reason_name = reason_enum.name
+            except ValueError:
+                reason_name = str(reason_name_key)
+            rows.append(
+                {
+                    "asset": asset,
+                    "reason_code": code_int,
+                    "reason_name": reason_name,
+                    "count": float(stats.get("count", 0.0)),
+                    "fraction": float(stats.get("fraction", 0.0)),
+                }
+            )
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
+    df = df.sort_values(["asset", "reason_code"]).reset_index(drop=True)
+    csv_path = RUN_DIR / "exit_reason_breakdown.csv"
+    df.to_csv(csv_path, index=False)
+    artifacts.append(str(csv_path))
+
+
+def _render_exit_kpi_strip(
+    metrics: Mapping[str, float], artifacts: list[str]
+) -> dict[str, float]:
+    """Persist a small exit KPI table and return the values recorded."""
+
+    if not metrics:
+        return {}
+
+    avg_tp_level = float(metrics.get("avg_tp_level_reached", 0.0))
+    be_rate = float(metrics.get("breakeven_touch_rate", 0.0)) * 100.0
+    timeout_rate = float(metrics.get("sl_timeout_usage_rate", 0.0)) * 100.0
+    trailing_rate = float(metrics.get("trailing_tp_hit_rate", 0.0)) * 100.0
+
+    kpi_values = {
+        "avg_tp_level_reached": avg_tp_level,
+        "breakeven_touch_pct": be_rate,
+        "sl_timeout_usage_pct": timeout_rate,
+        "trailing_tp_hit_pct": trailing_rate,
+    }
+
+    df = pd.DataFrame.from_dict(
+        kpi_values, orient="index", columns=["value"]
+    ).rename_axis("metric")
+    print("\nExit KPI strip:\n" + df.to_string(float_format=lambda v: f"{v:.3f}"))
+    kpi_path = RUN_DIR / "exit_kpi_strip.csv"
+    df.to_csv(kpi_path)
+    artifacts.append(str(kpi_path))
+    return kpi_values
 
 
 def _get_commit_hash() -> str:
@@ -222,7 +304,8 @@ def run_champion_analysis(
     ensure_real_vectorbt(Path(__file__).resolve().parent)
     start_time = datetime.now(timezone.utc)
     artifacts = [] if artifacts is None else list(artifacts)
-    if getattr(config, "MULTI_ASSET", {}).get("enabled"):
+    multi_asset_cfg = getattr(config, "MULTI_ASSET", {})
+    if multi_asset_cfg.get("enabled") and isinstance(validation_data, Mapping):
         _run_multi_asset_analysis(best_solution, gene_map, validation_data, artifacts)
         return
 
@@ -246,20 +329,101 @@ def run_champion_analysis(
             return
 
         exit_rules = rules.get("exit_rules", {})
-        time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
-            entries, exit_rules, config.MAX_HOLD_PERIOD
-        )
-
-        portfolio = vbt.Portfolio.from_signals(
-            close=validation_data["Close"],
-            entries=entries,
-            exits=time_based_exit,
-            sl_stop=sl_stop,
-            tp_stop=tp_stop,
-            sl_trail=sl_trail,
-            fees=config.FEES,
-            freq=config.to_pandas_freq(config.TIMEFRAME),
-        )
+        exit_params_snapshot: dict | None = None
+        exit_reason_summary: dict[str, dict[str, dict[str, float]]] = {}
+        exit_metrics_summary: dict[str, dict[str, float]] = {}
+        exit_kpi_values: dict[str, float] = {}
+        if config.USE_DYNAMIC_EXIT_SIMULATOR:
+            base_entry_size = float(getattr(config, "BASE_ENTRY_SIZE", 1.0))
+            size_mode = getattr(config, "DYNAMIC_EXIT_SIZE_MODE", "fraction_base")
+            try:
+                exit_params = coerce_exit_params(
+                    exit_rules,
+                    config.MAX_HOLD_PERIOD,
+                    getattr(config, "TIMEFRAME", None),
+                )
+                price_map = {
+                    "close": validation_data["Close"].to_numpy(dtype=float),
+                    "high": validation_data.get(
+                        "High", validation_data["Close"]
+                    ).to_numpy(dtype=float),
+                    "low": validation_data.get(
+                        "Low", validation_data["Close"]
+                    ).to_numpy(dtype=float),
+                }
+                telemetry_cfg = getattr(config, "EXIT_TELEMETRY", {})
+                collect_traces = telemetry_cfg.get(
+                    "collect_traces", telemetry_cfg.get("enabled", True)
+                )
+                exit_result = generate_dynamic_exit_signals_nb(
+                    entries.to_numpy(dtype=bool),
+                    price_map,
+                    exit_params,
+                    seed=getattr(config, "SEED", None),
+                    collect_traces=collect_traces,
+                )
+            except ValueError as exc:
+                print(f"Invalid exit configuration for analysis: {exc}")
+                error_note = {"exit": {"error": str(exc)}}
+                _write_run_metadata(start_time, artifacts, error_note)
+                return
+            exits_series = pd.Series(exit_result.exits, index=entries.index)
+            exit_size_series = pd.Series(
+                exit_result.exit_size, index=entries.index, dtype=float
+            )
+            exit_reason_summary = summarise_exit_reasons(exit_result, [config.TICKER])
+            exit_metrics_summary = compute_exit_metrics(exit_result, [config.TICKER])
+            _write_exit_reason_breakdown_csv(exit_reason_summary, artifacts)
+            ticker_metrics = exit_metrics_summary.get(config.TICKER, {})
+            exit_kpi_values = _render_exit_kpi_strip(ticker_metrics, artifacts)
+            exit_params_snapshot = exit_params.as_dict()
+            timeframe_snapshot = getattr(config, "TIMEFRAME", None)
+            exit_params_snapshot.setdefault("timeframe", timeframe_snapshot)
+            if hasattr(config, "get_tp_cap_for_timeframe"):
+                exit_params_snapshot.setdefault(
+                    "tp_cap",
+                    config.get_tp_cap_for_timeframe(timeframe_snapshot),
+                )
+            entries_active, exits_series, size_series = (
+                fitness.build_dynamic_exit_orders(
+                    entries=entries,
+                    exits_series=exits_series,
+                    exit_size_series=exit_size_series,
+                    base_entry_size=base_entry_size,
+                    mode=size_mode,
+                    asset_label=str(config.TICKER or "asset"),
+                )
+            )
+            accumulate_flag = bool(getattr(config, "DYNAMIC_EXIT_ACCUMULATE", False))
+            if not accumulate_flag:
+                raise ConfigError(
+                    "Dynamic exit simulator requires"
+                    " config.DYNAMIC_EXIT_ACCUMULATE=True for staged exits"
+                )
+            portfolio = vbt.Portfolio.from_signals(
+                close=validation_data["Close"],
+                entries=entries_active,
+                exits=exits_series,
+                size=size_series,
+                accumulate=accumulate_flag,
+                size_type="amount",
+                fees=config.FEES,
+                freq=config.to_pandas_freq(config.TIMEFRAME),
+            )
+        else:
+            time_based_exit, sl_stop, sl_trail, tp_stop = extract_exit_params(
+                entries, exit_rules, config.MAX_HOLD_PERIOD
+            )
+            portfolio = vbt.Portfolio.from_signals(
+                close=validation_data["Close"],
+                entries=entries,
+                exits=time_based_exit,
+                sl_stop=sl_stop,
+                tp_stop=tp_stop,
+                sl_trail=sl_trail,
+                fees=config.FEES,
+                freq=config.to_pandas_freq(config.TIMEFRAME),
+            )
 
     except Exception as e:
         print(f"An error occurred during analysis backtest: {e}")
@@ -303,6 +467,14 @@ def run_champion_analysis(
         "vote_threshold": vt,
         "per_asset_signal_counts": {config.TICKER: signal_counts},
     }
+    if exit_params_snapshot:
+        extra["exit"] = {
+            "params": exit_params_snapshot,
+            "reason_breakdown": exit_reason_summary.get(config.TICKER, {}),
+            "metrics": exit_metrics_summary.get(config.TICKER, {}),
+        }
+        if exit_kpi_values:
+            extra["exit"]["kpi_strip"] = exit_kpi_values
     _write_run_metadata(start_time, artifacts, extra)
 
 
@@ -494,6 +666,15 @@ def _run_multi_asset_analysis(
         if save_csv:
             counts_df.to_csv(counts_fname, index=False)
             print(f"Saved per-asset counts: {counts_fname}")
+        exit_params_meta = (
+            details.get("exit_params") if isinstance(details, dict) else None
+        )
+        exit_breakdown_meta = (
+            details.get("exit_reason_breakdown") if isinstance(details, dict) else None
+        )
+        if isinstance(exit_breakdown_meta, Mapping):
+            _write_exit_reason_breakdown_csv(exit_breakdown_meta, artifacts)
+
         summary = {
             "F": F,
             "mu": mu,
@@ -518,6 +699,10 @@ def _run_multi_asset_analysis(
             "per_asset_signal_counts": per_asset_signal_counts,
             "metric_sources": details.get("metric_sources"),
         }
+        if exit_params_meta:
+            summary["exit_params"] = exit_params_meta
+        if exit_breakdown_meta:
+            summary["exit_reason_breakdown"] = exit_breakdown_meta
         jf = RUN_DIR / f"multi_asset_summary_{config.TIMEFRAME}_{end_str}.json"
         summary["run_metadata_file"] = "run_metadata.json"
         with open(jf, "w") as fh:
@@ -554,6 +739,11 @@ def _run_multi_asset_analysis(
         "vote_threshold": vt,
         "per_asset_signal_counts": per_asset_signal_counts,
     }
+    if exit_params_meta or exit_breakdown_meta:
+        extra["exit"] = {
+            "params": exit_params_meta or {},
+            "reason_breakdown": exit_breakdown_meta or {},
+        }
     _write_run_metadata(start_time, artifacts, extra)
 
 

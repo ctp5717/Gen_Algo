@@ -33,12 +33,45 @@ def test_exception_logging(capsys, monkeypatch):
     assert score == -999.0
 
 
+def test_invalid_exit_config_penalised(monkeypatch):
+    ohlc = pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+    entries = pd.Series([True, False, False], index=ohlc.index)
+
+    monkeypatch.setattr(
+        fitness.engine, "process_strategy_rules", lambda *a, **k: entries
+    )
+    monkeypatch.setitem(fitness.config.FITNESS_WEIGHTS, "min_trades", 0)
+    monkeypatch.setattr(
+        fitness.config, "USE_DYNAMIC_EXIT_SIMULATOR", True, raising=False
+    )
+    monkeypatch.setattr(fitness.config, "MAX_HOLD_PERIOD", 10, raising=False)
+    monkeypatch.setattr(fitness.config, "TIMEFRAME", "1h", raising=False)
+
+    invalid_rules = {
+        "exit_rules": {
+            "stop_loss": {"params": {"value": 0.05}},
+            "trade_management": {
+                "num_tp_levels": 4,
+                "tp_pct_cap": 0.01,
+            },
+        }
+    }
+
+    evaluator = fitness.FitnessEvaluator(ohlc, invalid_rules, {})
+    score = evaluator(None, [], 0)
+
+    assert score == -999.0
+
+
 def test_composite_score_matches_helper(monkeypatch):
     ohlc = pd.DataFrame({"Close": [1.0, 1.1, 1.2]})
     entries = pd.Series([True, False, False], index=ohlc.index)
 
     monkeypatch.setattr(
         fitness.engine, "process_strategy_rules", lambda *a, **k: entries
+    )
+    monkeypatch.setattr(
+        fitness.config, "USE_DYNAMIC_EXIT_SIMULATOR", False, raising=False
     )
     empty = pd.Series(False, index=ohlc.index)
     monkeypatch.setattr(
@@ -88,6 +121,90 @@ def test_composite_score_matches_helper(monkeypatch):
         pf_cap=cap,
         nan_fallback=0.0,
         max_drawdown_fallback=100.0,
+        exit_usage=None,
+        exit_weights=getattr(fitness.config, "FITNESS_EXIT_USAGE", None),
     )
 
     assert score == pytest.approx(expected)
+
+
+def test_composite_score_penalizes_high_timeout():
+    weights = {"sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2}
+    exit_weights = {
+        "timeout_weight": 1.0,
+        "timeout_target": 0.2,
+        "tp_hit_weight": 0.0,
+        "tp_hit_target": 0.0,
+        "avg_tp_level_weight": 0.0,
+        "avg_tp_level_target": 0.0,
+        "trailing_tp_weight": 0.0,
+        "trailing_tp_target": 0.0,
+    }
+    base = fitness._composite_score(
+        1.0,
+        2.0,
+        10.0,
+        weights=weights,
+        pf_cap=5.0,
+        nan_fallback=0.0,
+        max_drawdown_fallback=100.0,
+        exit_usage=None,
+        exit_weights=exit_weights,
+    )
+    penalised = fitness._composite_score(
+        1.0,
+        2.0,
+        10.0,
+        weights=weights,
+        pf_cap=5.0,
+        nan_fallback=0.0,
+        max_drawdown_fallback=100.0,
+        exit_usage={"sl_timeout_usage_rate": 0.8, "trades_evaluated": 10.0},
+        exit_weights=exit_weights,
+    )
+    assert penalised < base
+
+
+def test_composite_score_penalizes_missing_tp_hits():
+    weights = {"sortino_ratio": 0.5, "profit_factor": 0.3, "max_drawdown": 0.2}
+    exit_weights = {
+        "timeout_weight": 0.0,
+        "timeout_target": 1.0,
+        "tp_hit_weight": 0.8,
+        "tp_hit_target": 0.5,
+        "avg_tp_level_weight": 0.2,
+        "avg_tp_level_target": 1.5,
+        "trailing_tp_weight": 0.0,
+        "trailing_tp_target": 0.0,
+    }
+    healthy = fitness._composite_score(
+        0.8,
+        2.0,
+        12.0,
+        weights=weights,
+        pf_cap=5.0,
+        nan_fallback=0.0,
+        max_drawdown_fallback=100.0,
+        exit_usage={
+            "trades_evaluated": 10.0,
+            "tp_trades_evaluated": 6.0,
+            "avg_tp_level_reached": 2.0,
+        },
+        exit_weights=exit_weights,
+    )
+    poor = fitness._composite_score(
+        0.8,
+        2.0,
+        12.0,
+        weights=weights,
+        pf_cap=5.0,
+        nan_fallback=0.0,
+        max_drawdown_fallback=100.0,
+        exit_usage={
+            "trades_evaluated": 10.0,
+            "tp_trades_evaluated": 0.0,
+            "avg_tp_level_reached": 0.5,
+        },
+        exit_weights=exit_weights,
+    )
+    assert poor < healthy
