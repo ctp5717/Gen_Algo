@@ -6,7 +6,7 @@ numpy>=2.0
 pyarrow>=16.0
 yfinance>=0.2.65
 python-binance>=1.0.29
-pandas-ta==0.4.67b0
+pandas-ta==0.4.71b0
 setuptools>=80
 python-dateutil>=2.9.0.post0
 matplotlib>=3.10
