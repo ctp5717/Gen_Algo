@@ -2,7 +2,7 @@
 pygad>=3.5.0
 vectorbt>=0.28.1
 pandas>=2.3
-numpy>=2.0
+numpy>=2.4.4
 pyarrow>=16.0
 yfinance>=0.2.65
 python-binance>=1.0.29
