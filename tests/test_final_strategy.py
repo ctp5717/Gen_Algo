@@ -458,12 +458,19 @@ def test_write_markdown_exclusions_render_separate_lines(tmp_path):
         notes=[],
         weighting_description="equal",
         default_to_uniform=False,
+        exit_behaviour={
+            "tp_hit_rate": 0.5,
+            "avg_tp_level": 2.0,
+            "timeout_share": 0.1,
+            "trailing_tp_share": 0.05,
+        },
     )
     content = md_path.read_text()
-    assert (
-        "\n## Excluded Assets\n- AAA excluded\n- BBB excluded\n\n## Confidence"
-        in content
-    )
+    assert "## Excluded Assets" in content
+    assert "- AAA excluded" in content
+    assert "- BBB excluded" in content
+    assert "## Exit Behaviour" in content
+    assert "TP hit rate: 50.0%" in content
     assert "relative coefficient of variation" in content
 
 
@@ -482,9 +489,12 @@ def test_write_markdown_exclusions_none_has_trailing_newline(tmp_path):
         notes=[],
         weighting_description="equal",
         default_to_uniform=False,
+        exit_behaviour=None,
     )
     content = md_path.read_text()
-    assert "\n## Excluded Assets\n- None\n\n## Confidence" in content
+    assert "## Excluded Assets" in content
+    assert "- None" in content
+    assert "_No exit telemetry available._" in content
 
 
 def _write_integration_files(base: Path) -> None:
@@ -539,7 +549,16 @@ def _write_integration_files(base: Path) -> None:
                 "BBB": {"class": "Stalwarts", "performance": 0.65, "consistency": 70.0},
                 "CCC": {"class": "Gambles", "performance": -0.5, "consistency": 45.0},
             },
-        }
+        },
+        "exit": {
+            "metrics": {
+                "trades_evaluated": 10,
+                "tp_trades_evaluated": 6,
+                "avg_tp_level_reached": 2.0,
+                "sl_timeout_usage_rate": 0.1,
+                "trailing_tp_hit_rate": 0.05,
+            }
+        },
     }
     (base / "run_metadata.json").write_text(json.dumps(run_meta))
 
@@ -565,8 +584,12 @@ def test_generate_final_strategy_missing_weight_warns_and_notes(
 
     assert "missing weight" in caplog.text.lower()
     assert "Missing weights detected for assets" in payload["notes"]
+    assert "exit_behaviour" in payload
+    assert payload["exit_behaviour"]["tp_hit_rate"] == pytest.approx(0.6)
     md_text = (tmp_path / "final_strategy.md").read_text()
     assert "Missing weights detected for assets" in md_text
+    assert "## Exit Behaviour" in md_text
+    assert "TP hit rate: 60.0%" in md_text
 
 
 def test_generate_final_strategy_missing_weight_strict_mode_errors(

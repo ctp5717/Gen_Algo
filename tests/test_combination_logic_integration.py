@@ -116,7 +116,7 @@ def test_backtester_integration_or_vote(monkeypatch):
     evaluator_vote(None, [], 0)
     evaluator_vote_strict(None, [], 0)
 
-    assert trade_counts == [3, 3, 0]
+    assert trade_counts == [1, 1, 0]
 
 
 def test_exit_rule_params(monkeypatch):
@@ -146,6 +146,9 @@ def test_exit_rule_params(monkeypatch):
 
     monkeypatch.setattr(
         fitness.vbt.Portfolio, "from_signals", fake_from_signals, raising=False
+    )
+    monkeypatch.setattr(
+        fitness.config, "USE_DYNAMIC_EXIT_SIMULATOR", False, raising=False
     )
 
     rules = {

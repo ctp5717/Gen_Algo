@@ -294,14 +294,41 @@ def calculate_stoch(
 
 
 def calculate_cci(ohlc_data: pd.DataFrame, period: int) -> pd.Series:
-    """Calculate the Commodity Channel Index (CCI)."""
+    """Calculate the Commodity Channel Index (CCI) without pandas-ta overhead."""
+
     if not isinstance(period, int):
         raise TypeError("CCI 'period' must be int")
     if period < 1:
         raise ValueError("CCI 'period' must be ≥1")
-    cci = ohlc_data.ta.cci(length=period)
-    if cci is None:
-        raise ConnectionError("Failed to calculate CCI")
+
+    required = {"High", "Low", "Close"}
+    missing = required.difference(ohlc_data.columns)
+    if missing:
+        raise KeyError(f"CCI calculation requires columns: {sorted(missing)}")
+
+    typical_price = (
+        ohlc_data["High"].to_numpy(dtype=float, copy=False)
+        + ohlc_data["Low"].to_numpy(dtype=float, copy=False)
+        + ohlc_data["Close"].to_numpy(dtype=float, copy=False)
+    ) / 3.0
+
+    tp_series = pd.Series(typical_price, index=ohlc_data.index)
+    rolling_mean = tp_series.rolling(window=period, min_periods=period).mean()
+
+    if len(typical_price) < period:
+        mad_values = np.full_like(typical_price, np.nan, dtype=float)
+    else:
+        window_view = np.lib.stride_tricks.sliding_window_view(typical_price, period)
+        means = window_view.mean(axis=-1, keepdims=True)
+        mad_core = np.abs(window_view - means).mean(axis=-1)
+        mad_values = np.concatenate(
+            (np.full(period - 1, np.nan, dtype=float), mad_core.astype(float))
+        )
+
+    mean_dev = pd.Series(mad_values, index=ohlc_data.index)
+    denominator = 0.015 * mean_dev.replace(0.0, np.nan)
+    cci = (tp_series - rolling_mean) / denominator
+    cci.name = f"CCI_{period}"
     return cci
 
 

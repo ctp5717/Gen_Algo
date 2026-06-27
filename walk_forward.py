@@ -18,7 +18,7 @@ import config
 import data_loader
 import trade_floor
 from deps import ensure_real_vectorbt
-from gene_parser import parse_genes_from_config
+from gene_parser import decode_solution, parse_genes_from_config, prepare_ga_inputs
 from params_resolver import inject_genes_into_rules
 from run_metadata import merge_run_metadata
 from strategy_rules import STRATEGY_RULES
@@ -156,7 +156,9 @@ def _normalize_trade_floor_penalty(pen: Optional[Any]) -> Dict[str, Any]:
     return {"reason": pen} if pen is not None else {}
 
 
-def _update_champion_pool(pool, best_solution, validation_score, gene_space, settings):
+def _update_champion_pool(
+    pool, best_solution, validation_score, ga_gene_space, settings
+):
     """Update champion pool based on validation fitness.
 
     Returns
@@ -169,6 +171,17 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
     num_clones = settings.get("num_clones", 0)
     mutation_rate = settings.get("clone_mutation_rate", 0.0)
 
+    def _coerce_like(reference, value):
+        if reference is None:
+            return value
+        if isinstance(reference, (np.bool_, bool)):
+            return bool(value)
+        if isinstance(reference, (np.integer, int)) and not isinstance(reference, bool):
+            return type(reference)(round(value))
+        if isinstance(reference, (np.floating, float)):
+            return type(reference)(value)
+        return value
+
     if validation_score < survival:
         print("Champion discarded due to poor performance.")
         return pool, "Discarded"
@@ -180,15 +193,29 @@ def _update_champion_pool(pool, best_solution, validation_score, gene_space, set
             clone = list(best_solution)
             for idx in range(len(clone)):
                 if np.random.rand() < mutation_rate:
-                    gs = gene_space[idx]
-                    low, high = gs["low"], gs["high"]
-                    step = gs.get("step")
-                    if step is not None:
-                        steps = int(round((high - low) / step))
-                        val = low + step * np.random.randint(0, steps + 1)
+                    gs = ga_gene_space[idx]
+                    original = clone[idx]
+                    candidate = None
+                    if isinstance(gs, dict):
+                        low = gs.get("low")
+                        high = gs.get("high")
+                        if low is None or high is None:
+                            continue
+                        step = gs.get("step")
+                        if step is not None:
+                            steps = int(round((high - low) / step))
+                            candidate = low + step * np.random.randint(0, steps + 1)
+                        else:
+                            candidate = np.random.uniform(low, high)
+                    elif isinstance(gs, (list, tuple, np.ndarray)):
+                        options = list(gs)
+                        if not options:
+                            continue
+                        idx_choice = np.random.randint(0, len(options))
+                        candidate = options[idx_choice]
                     else:
-                        val = np.random.uniform(low, high)
-                    clone[idx] = type(clone[idx])(val)
+                        continue
+                    clone[idx] = _coerce_like(original, candidate)
             pool.append(clone)
         status = "Elite"
     else:
@@ -327,6 +354,9 @@ def run_walk_forward_validation(
         # fmt: on
 
         gene_space, gene_map, gene_types = parse_genes_from_config(STRATEGY_RULES)
+        ga_gene_space, ga_gene_types = prepare_ga_inputs(
+            gene_space, gene_map, gene_types
+        )
         if multi:
             settings_train = dict(config.MULTI_ASSET)
             per_asset_base = settings_train.get("per_asset_min_trades")
@@ -386,9 +416,9 @@ def run_walk_forward_validation(
             num_generations=config.GA_NUM_GENERATIONS,
             num_parents_mating=config.GA_PARENTS_MATING,
             sol_per_pop=config.GA_POPULATION_SIZE,
-            num_genes=len(gene_space),
-            gene_space=gene_space,
-            gene_type=gene_types,
+            num_genes=len(ga_gene_space),
+            gene_space=ga_gene_space,
+            gene_type=ga_gene_types,
             mutation_num_genes=config.GA_MUTATION_NUM_GENES,
             fitness_func=evaluator.__call__,
             parallel_processing=["process", num_cores],
@@ -428,10 +458,13 @@ def run_walk_forward_validation(
                 msg += f" | reason={reason}"
             print(msg)
 
+        decoded_solution = decode_solution(best_solution, gene_map)
         winning_params = {
-            gene_map[i]["name"]: best_solution[i] for i in range(len(best_solution))
+            gene_map[i]["name"]: decoded_solution[i]
+            for i in range(len(decoded_solution))
         }
         winning_params = _round_floats(winning_params)
+        resolved_params: dict | None = None
 
         rules = inject_genes_into_rules(STRATEGY_RULES, gene_map, best_solution)
         if multi:
@@ -488,6 +521,8 @@ def run_walk_forward_validation(
             )
             validation_score = test_eval(None, best_solution, 0)
             details = test_eval.last_details
+            if isinstance(details, dict):
+                resolved_params = details.get("exit_params")
             if policy_val == "soft_penalty":
                 pen = _normalize_trade_floor_penalty(
                     details.get("penalties", {}).get("trade_floor")
@@ -567,9 +602,26 @@ def run_walk_forward_validation(
                 champion_pool,
                 best_solution,
                 validation_score,
-                gene_space,
+                ga_gene_space,
                 champion_settings,
             )
+            resolved_snapshot = (
+                _round_floats(resolved_params) if resolved_params else None
+            )
+            if resolved_snapshot:
+                print("Resolved Exit Params:")
+                if isinstance(resolved_snapshot, dict):
+                    for asset in sorted(resolved_snapshot):
+                        payload = resolved_snapshot[asset]
+                        print(f"  [{asset}]")
+                        if isinstance(payload, dict):
+                            for key in sorted(payload):
+                                value = payload[key]
+                                print(f"    {key}: {value}")
+                        else:
+                            print(f"    {payload}")
+                else:
+                    print(f"  {resolved_snapshot}")
             results.append(
                 {
                     "Window": idx,
@@ -584,6 +636,7 @@ def run_walk_forward_validation(
                     "Assets Traded": details.get("assets_traded"),
                     "Coverage Penalty": cov_pen,
                     "Params": winning_params,
+                    "Resolved Params": resolved_snapshot,
                     "champion_status": champ_status,
                 }
             )
@@ -683,14 +736,25 @@ def run_walk_forward_validation(
         # Evaluate champion on validation data using composite fitness
         val_evaluator = fitness.FitnessEvaluator(test_data, STRATEGY_RULES, gene_map)
         validation_score = val_evaluator(None, best_solution, 0)
+        resolved_params = val_evaluator.last_exit_params
         champion_settings = getattr(config, "CHAMPION_SELECTION_SETTINGS", {})
         champion_pool, champ_status = _update_champion_pool(
             champion_pool,
             best_solution,
             validation_score,
-            gene_space,
+            ga_gene_space,
             champion_settings,
         )
+
+        resolved_snapshot = _round_floats(resolved_params) if resolved_params else None
+        if resolved_snapshot:
+            print("Resolved Exit Params:")
+            if isinstance(resolved_snapshot, dict):
+                for key in sorted(resolved_snapshot):
+                    value = resolved_snapshot[key]
+                    print(f"  {key}: {value}")
+            else:
+                print(f"  {resolved_snapshot}")
 
         per_asset_records.append(
             {
@@ -713,6 +777,7 @@ def run_walk_forward_validation(
                 "Win Rate [%]": win_rate,
                 "Fitness": validation_score,
                 "Params": winning_params,
+                "Resolved Params": resolved_snapshot,
                 "champion_status": champ_status,
             }
         )
@@ -745,6 +810,7 @@ def run_walk_forward_validation(
                 "Assets Traded",
                 "Coverage Penalty",
                 "Params",
+                "Resolved Params",
             ]
         else:
             cols = [
@@ -755,6 +821,7 @@ def run_walk_forward_validation(
                 "Sortino Ratio",
                 "Win Rate [%]",
                 "Params",
+                "Resolved Params",
             ]
         print(results_df[cols].to_string(index=False))
 
@@ -785,6 +852,7 @@ def run_walk_forward_validation(
                 "fold_id": r.get("Window"),
                 "validation_fitness": r.get("Fitness"),
                 "params": r.get("Params"),
+                "resolved_params": r.get("Resolved Params"),
                 "champion_status": r.get("champion_status"),
             }
             for r in raw_folds
@@ -837,6 +905,7 @@ def run_walk_forward_validation(
             "fold_id": r.get("Window"),
             "validation_fitness": r.get("Fitness"),
             "params": r.get("Params"),
+            "resolved_params": r.get("Resolved Params"),
             "champion_status": r.get("champion_status"),
         }
         for r in raw_folds

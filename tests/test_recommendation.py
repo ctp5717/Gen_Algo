@@ -87,6 +87,26 @@ def test_load_wf_summary_missing_key(tmp_path):
         load_wf_summary(wf / "walk_forward_summary.json")
 
 
+def test_load_wf_summary_with_string_param(tmp_path):
+    wf = tmp_path / "walk_forward"
+    wf.mkdir()
+    summary = {
+        "metadata": {"schema_version": "1.0", "num_folds": 1, "asset_universe": []},
+        "folds": [
+            {
+                "fold_id": 0,
+                "validation_fitness": 1.0,
+                "params": {"sl_break_even_mode": "none", "tp_trailing_pct": 0.02},
+                "resolved_params": {"tp_trailing_pct": 0.02},
+            }
+        ],
+    }
+    (wf / "walk_forward_summary.json").write_text(json.dumps(summary))
+    result = load_wf_summary(wf / "walk_forward_summary.json")
+    assert result.folds[0].params["sl_break_even_mode"] == "none"
+    assert result.folds[0].resolved_params == {"tp_trailing_pct": 0.02}
+
+
 def test_load_wf_summary_bad_champion_status(tmp_path):
     wf = tmp_path / "walk_forward"
     wf.mkdir()
@@ -473,6 +493,72 @@ def test_load_wf_per_asset_header_case_and_whitespace(tmp_path):
     obj, unknown = load_wf_per_asset(wf / "walk_forward_per_asset.csv")
     assert obj.rows[0].ticker == "AAA"
     assert unknown == []
+
+
+def test_load_wf_per_asset_accepts_reason_column(tmp_path):
+    wf = tmp_path / "walk_forward"
+    wf.mkdir()
+    csv = (
+        "Fold,Ticker,Score,Trades,Included,Reason\n"
+        "0,AAA,1.0,5,False,timeout dominated\n"
+    )
+    (wf / "walk_forward_per_asset.csv").write_text(csv)
+    obj, unknown = load_wf_per_asset(wf / "walk_forward_per_asset.csv")
+    assert obj.rows[0].reason == "timeout dominated"
+    assert unknown == []
+
+
+def test_load_wf_per_asset_snapshot_with_reasons():
+    csv_path = (
+        Path(__file__).parent / "snapshots" / "walk_forward_per_asset_with_reasons.csv"
+    )
+    obj, unknown = load_wf_per_asset(csv_path)
+    assert unknown == []
+    rows = [
+        {
+            "fold": row.fold,
+            "ticker": row.ticker,
+            "score": row.score,
+            "trades": row.trades,
+            "included": row.included,
+            "reason": row.reason,
+        }
+        for row in obj.rows
+    ]
+    assert rows == [
+        {
+            "fold": 0,
+            "ticker": "BTCUSDT",
+            "score": 1.23,
+            "trades": 6,
+            "included": True,
+            "reason": None,
+        },
+        {
+            "fold": 0,
+            "ticker": "ETHUSDT",
+            "score": 0.87,
+            "trades": 4,
+            "included": False,
+            "reason": "timeout dominated",
+        },
+        {
+            "fold": 1,
+            "ticker": "BTCUSDT",
+            "score": 1.05,
+            "trades": 5,
+            "included": True,
+            "reason": None,
+        },
+        {
+            "fold": 1,
+            "ticker": "ETHUSDT",
+            "score": 0.92,
+            "trades": 5,
+            "included": True,
+            "reason": "breakeven_follow_tp",
+        },
+    ]
 
 
 def test_unknown_columns_logged_on_success(tmp_path, monkeypatch):

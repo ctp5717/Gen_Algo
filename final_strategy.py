@@ -9,7 +9,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, cast
 
 import config
 from run_metadata import merge_run_metadata
@@ -110,6 +110,29 @@ def _compose_notes(notes: Iterable[str]) -> str:
 
     filtered = [note.strip() for note in notes if note]
     return "\n".join(filtered)
+
+
+def _extract_exit_behaviour(meta: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    """Derive exit-behaviour summary metrics from run metadata."""
+
+    exit_info = meta.get("exit")
+    if not isinstance(exit_info, dict):
+        return None
+    metrics = exit_info.get("metrics")
+    if not isinstance(metrics, dict):
+        return None
+    trades = float(metrics.get("trades_evaluated", 0.0) or 0.0)
+    tp_hits = float(metrics.get("tp_trades_evaluated", 0.0) or 0.0)
+    tp_hit_rate = tp_hits / trades if trades > 0 else 0.0
+    avg_tp_level = float(metrics.get("avg_tp_level_reached", 0.0) or 0.0)
+    timeout_share = float(metrics.get("sl_timeout_usage_rate", 0.0) or 0.0)
+    trailing_share = float(metrics.get("trailing_tp_hit_rate", 0.0) or 0.0)
+    return {
+        "tp_hit_rate": tp_hit_rate,
+        "avg_tp_level": avg_tp_level,
+        "timeout_share": timeout_share,
+        "trailing_tp_share": trailing_share,
+    }
 
 
 def _describe_weighting_scheme(cfg: Dict[str, object]) -> str:
@@ -780,6 +803,7 @@ def _write_markdown(
     notes: List[str],
     weighting_description: str,
     default_to_uniform: bool,
+    exit_behaviour: Optional[Dict[str, float]] = None,
 ) -> None:
     overview_lines = [
         f"Confidence: {confidence.get('category', 'Unknown')} ({confidence.get('score', 'N/A')})",
@@ -836,6 +860,23 @@ def _write_markdown(
     else:
         body.append("- None\n")
     body.append("\n")
+    body.append("## Exit Behaviour\n")
+    if exit_behaviour:
+        tp_rate = exit_behaviour.get("tp_hit_rate", 0.0)
+        avg_tp = exit_behaviour.get("avg_tp_level", 0.0)
+        timeout_share = exit_behaviour.get("timeout_share", 0.0)
+        trailing_share = exit_behaviour.get("trailing_tp_share", 0.0)
+        body.append(
+            (
+                f"TP hit rate: {tp_rate:.1%}\n"
+                f"Average TP level reached: {avg_tp:.2f}\n"
+                f"Timeout share: {timeout_share:.1%}\n"
+                f"Trailing TP usage: {trailing_share:.1%}\n"
+            )
+        )
+    else:
+        body.append("_No exit telemetry available._\n")
+    body.append("\n")
     body.append("## Confidence & SRE Summary\n")
     body.append(
         f"Inherited confidence: {confidence.get('category', 'Unknown')} "
@@ -865,6 +906,7 @@ def _persist_strategy_artifacts(
     notes: List[str],
     weighting_description: str,
     default_to_uniform: bool,
+    exit_behaviour: Optional[Dict[str, float]] = None,
 ) -> None:
     if payload.get("notes") is None:
         payload["notes"] = ""
@@ -882,6 +924,7 @@ def _persist_strategy_artifacts(
         notes=notes,
         weighting_description=weighting_description,
         default_to_uniform=default_to_uniform,
+        exit_behaviour=exit_behaviour,
     )
     digest = _compute_file_sha256(md_path)
     merge_run_metadata(
@@ -899,7 +942,7 @@ def _persist_strategy_artifacts(
     )
 
 
-def _load_recommendation(meta_path: Path) -> Dict[str, Any]:
+def _load_recommendation(meta_path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     try:
         payload = json.loads(meta_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -913,7 +956,7 @@ def _load_recommendation(meta_path: Path) -> Dict[str, Any]:
         raise FinalStrategyError("SRE recommendation missing from run_metadata.json")
     schema_version = recommendation.get("schema_version")
     _ensure_schema_version(schema_version, "1.0", "run_metadata.recommendation")
-    return recommendation
+    return recommendation, payload
 
 
 def _jackknife_sensitivity(
@@ -1026,7 +1069,7 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
         summary.metadata.schema_version, "1.0", "walk_forward_summary.json"
     )
     per_asset, _ = load_wf_per_asset(per_asset_path)
-    recommendation = _load_recommendation(run_dir / "run_metadata.json")
+    recommendation, meta_payload = _load_recommendation(run_dir / "run_metadata.json")
     confidence_raw = recommendation.get("confidence", {})
     confidence: Dict[str, Any]
     if isinstance(confidence_raw, dict):
@@ -1037,6 +1080,7 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
     category = str(confidence.get("category", "")).strip()
     min_conf = _coerce_int(cfg.get("MIN_CONFIDENCE_FOR_FINAL", 0))
     gating = score < min_conf or category.lower() == "low"
+    exit_behaviour = _extract_exit_behaviour(meta_payload)
     if gating:
         note = (
             "Confidence gate blocked strategy publication. "
@@ -1054,6 +1098,8 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
             "notes": note_text,
             "schema_version": "1.0",
         }
+        if exit_behaviour:
+            payload["exit_behaviour"] = exit_behaviour
         _persist_strategy_artifacts(
             run_dir,
             payload,
@@ -1068,6 +1114,7 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
             notes=notes,
             weighting_description=weighting_description,
             default_to_uniform=False,
+            exit_behaviour=exit_behaviour,
         )
         return payload
     folds, fallback = _candidate_folds(summary)
@@ -1095,6 +1142,8 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
             "notes": _compose_notes(notes),
             "schema_version": "1.0",
         }
+        if exit_behaviour:
+            payload["exit_behaviour"] = exit_behaviour
         _persist_strategy_artifacts(
             run_dir,
             payload,
@@ -1109,6 +1158,7 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
             notes=notes,
             weighting_description=weighting_description,
             default_to_uniform=default_to_uniform,
+            exit_behaviour=exit_behaviour,
         )
         return payload
     missing_weights = _detect_missing_asset_weights(assets)
@@ -1138,6 +1188,8 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
         "notes": notes_text,
         "schema_version": "1.0",
     }
+    if exit_behaviour:
+        payload["exit_behaviour"] = exit_behaviour
     _persist_strategy_artifacts(
         run_dir,
         payload,
@@ -1152,6 +1204,7 @@ def generate_final_strategy(run_context: Dict[str, Any]) -> Dict[str, Any]:
         notes=notes,
         weighting_description=weighting_description,
         default_to_uniform=default_to_uniform,
+        exit_behaviour=exit_behaviour,
     )
     LOGGER.info(
         "Final strategy: %s (%s). See final_strategy.md for details.",
